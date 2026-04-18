@@ -291,9 +291,20 @@ textarea {
   background: var(--input-bg); color: var(--text);
   max-height: 80px; line-height: 1.4; direction: rtl; outline: none;
   transition: border-color .15s;
+  /* Firefox (non-webkit) — uses scrollbar-width/color instead of ::-webkit. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
 textarea:focus { border-color: var(--accent); }
 textarea::placeholder { color: var(--text2); }
+/* Chromium/WebKit — kill the legacy Windows up/down arrow buttons and
+   thin the track. Matches the .messages scrollbar for visual consistency. */
+textarea::-webkit-scrollbar { width: 4px; }
+textarea::-webkit-scrollbar-track { background: transparent; }
+textarea::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+textarea::-webkit-scrollbar-thumb:hover { background: var(--text2); }
+textarea::-webkit-scrollbar-button { display: none; height: 0; }
+textarea::-webkit-scrollbar-corner { background: transparent; }
 
 .send-btn, .mic-btn {
   width: 36px; height: 36px; border-radius: 50%;
