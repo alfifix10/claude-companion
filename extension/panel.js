@@ -22,6 +22,20 @@ const $scrollBtn = document.getElementById("scrollBtn");
 const $newChatBtn = document.getElementById("newChatBtn");
 const $historyBtn = document.getElementById("historyBtn");
 const $app = document.querySelector(".app");
+const $notice = document.getElementById("notice");
+
+// Transient notice — for errors/info that shouldn't become a chat
+// bubble (voice failure, image cap, etc.). Appears floating above
+// everything, auto-dismisses. Replaces previous notice on new call.
+let noticeTimer = 0;
+function showNotice(text, { variant = "error", ms = 6000 } = {}) {
+  if (!$notice) return;
+  $notice.className = "notice" + (variant === "info" ? " info" : "");
+  $notice.textContent = text;
+  $notice.hidden = false;
+  if (noticeTimer) clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => { $notice.hidden = true; }, ms);
+}
 const $historyOverlay = document.getElementById("historyOverlay");
 const $historyList = document.getElementById("historyList");
 const $closeHistoryBtn = document.getElementById("closeHistoryBtn");
@@ -778,10 +792,10 @@ $input.addEventListener("paste", async (e) => {
     }
   }
   if (rejectedBig) {
-    appendError(`تم تجاهل ${rejectedBig} صورة أكبر من 10MB — جرّب ضغطها أوّلاً.`);
+    showNotice(`تم تجاهل ${rejectedBig} صورة أكبر من 10MB — جرّب ضغطها أوّلاً.`);
   }
   if (rejectedFull) {
-    appendError(`الحد الأقصى ${MAX_IMAGE_COUNT} صور في الرسالة — أرسل الحالية ثم ألصق الباقي.`);
+    showNotice(`الحد الأقصى ${MAX_IMAGE_COUNT} صور في الرسالة — أرسل الحالية ثم ألصق الباقي.`);
   }
 });
 
@@ -1281,21 +1295,25 @@ function initVoice() {
     if (voiceErrorShown) { disableMic($mic.title); return; }
     voiceErrorShown = true;
 
+    // Use the floating notice instead of a chat bubble: voice errors
+    // aren't part of the conversation, AND the chat area is hidden in
+    // fresh-chat mode so appendError would land invisibly there.
     if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-      appendError("إذن الميكروفون مرفوض. فعّله من إعدادات الموقع للإضافة.");
+      showNotice("إذن الميكروفون مرفوض. فعّله من إعدادات الموقع.");
       disableMic("الإذن مرفوض — فعّله من إعدادات المتصفح");
       try { chrome.tabs.create({ url: chrome.runtime.getURL("mic-permission.html") }); } catch {}
     } else if (e.error === "network") {
       // Brave Shields / corporate firewall / offline / geo-blocked —
       // the Google speech endpoint is unreachable. Retrying won't fix
       // it, so we give one informative line and turn the mic off.
-      appendError(
+      showNotice(
         "التعرّف الصوتي لا يعمل — خدمة Google غير متاحة. "
-        + "في Brave: أوقِف Shields لهذه الصفحة. أو افتح الإضافة في Chrome."
+        + "في Brave: أوقِف Shields لهذه الصفحة. أو افتح الإضافة في Chrome.",
+        { ms: 9000 }
       );
       disableMic("التعرّف الصوتي غير متاح (Google service)");
     } else if (e.error === "audio-capture") {
-      appendError("لم يُعثر على ميكروفون. تأكد من توصيله ثم أعد تحميل الإضافة.");
+      showNotice("لم يُعثر على ميكروفون. تأكد من توصيله ثم أعد تحميل الإضافة.");
       disableMic("لا يوجد ميكروفون");
     }
   };
@@ -1318,7 +1336,7 @@ async function ensureMicPermission() {
     return true;
   } catch (err) {
     chrome.tabs.create({ url: chrome.runtime.getURL("mic-permission.html") });
-    appendError("افتح صفحة الإذن وسمح، ثم عد هنا.");
+    showNotice("افتح صفحة الإذن وسمح، ثم عد هنا.");
     return false;
   }
 }

@@ -7,6 +7,11 @@
   <link rel="stylesheet" href="panel.css">
 </head>
 <body data-theme="dark">
+  <!-- Transient notice — pops in over the panel for errors/info that
+       shouldn't live in the chat history (voice errors, image caps,
+       etc.). JS creates/removes the inner element. -->
+  <div id="notice" class="notice" hidden></div>
+
   <div class="app">
     <!-- Header with app title + settings -->
     <header class="hdr">
