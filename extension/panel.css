@@ -523,6 +523,16 @@ body {
 .msg-wrap.assistant { align-self: flex-end; }
 .msg-wrap .msg { max-width: 100%; margin: 0; }
 
+/* Actions column on user bubbles — stacks copy (top) + edit (bottom)
+   vertically instead of laying them horizontally beside the bubble.
+   Assistant bubbles use the copy button directly in the wrap (single
+   button, no column needed). */
+.msg-actions {
+  display: flex; flex-direction: column; gap: 2px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
 /* Copy button — visible on hover, subtle always */
 .copy-ico {
   background: transparent; border: 1px solid transparent;

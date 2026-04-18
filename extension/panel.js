@@ -565,13 +565,16 @@ function appendUserMessage(text, images, msgIdx) {
     d.appendChild(wrap2);
   }
   wrap.appendChild(d);
-  // Copy on top, edit on bottom — DOM order is the read-order inside
-  // the wrap, so copy attaches first. Image-only bubbles get neither
-  // (there's no text to copy or edit, and image-clipboard is browser-
-  // specific anyway).
+  // Copy above edit — stack them vertically in a .msg-actions column
+  // instead of laying them inline beside the bubble. Image-only
+  // bubbles get neither (no text to copy or edit, and image-clipboard
+  // is browser-specific anyway).
   if (text) {
-    attachCopyButton(wrap, () => text);
-    attachEditButton(wrap, idx);
+    const actions = document.createElement("div");
+    actions.className = "msg-actions";
+    attachCopyButton(actions, () => text);
+    attachEditButton(actions, idx);
+    wrap.appendChild(actions);
   }
   $messages.appendChild(wrap);
   scrollToBottom();
