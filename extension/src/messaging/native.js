@@ -120,7 +120,18 @@ export function connectNativeHost() {
   port.onDisconnect.addListener(() => {
     const err = chrome.runtime.lastError;
     const errMsg = err?.message || "";
-    console.error("[native] port disconnected:", errMsg || "(no error)");
+    // Log level by severity:
+    //   • "Native host has exited" / empty  → console.log. Normal
+    //     lifecycle (browser shutdown, extension reload, post-
+    //     shutdown() cleanup). Used to hit console.error and
+    //     surfaced as scary red rows in Chrome's Errors panel.
+    //   • "not found" / "not reachable"     → console.error. Real
+    //     install problem; developers need to see it.
+    if (/not found|not reachable/i.test(errMsg)) {
+      console.error("[native] port disconnected:", errMsg);
+    } else {
+      console.log("[native] port disconnected:", errMsg || "(clean exit)");
+    }
     setNativePort(null);
     hostIsReady = false;
     for (const [, r] of pendingPings) r(false);
