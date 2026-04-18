@@ -740,6 +740,22 @@ async function send() {
   const hasImages = pendingImages.length > 0;
   if (!text && !hasImages) return;
 
+  // Speech recognition cleanup. If the user hits send while the mic is
+  // still listening, three things need to happen before we continue:
+  //   • userWants = false  — so onend doesn't auto-restart the session
+  //   • recog.stop()       — actually close the audio stream
+  //   • reset baseline + committed — otherwise an in-flight onresult
+  //     rebuilds $input.value from the old voice state and re-populates
+  //     the box we're about to clear on line 763.
+  // The listening class and typing indicator clear via onend shortly
+  // after; that's fine because we re-set typing below.
+  if (userWants || recognizing) {
+    userWants = false;
+    baseline = "";
+    committed = "";
+    try { recog?.stop(); } catch {}
+  }
+
   // If a previous task is still running, cancel it first (ChatGPT-style
   // behaviour — new question wins). We don't want to queue or block.
   if (isLoading) {
@@ -1549,6 +1565,11 @@ function initVoice() {
     setTyping(true, "يستمع...");
   };
   recog.onresult = (e) => {
+    // Discard any onresult that arrives after send() (or the user)
+    // already turned userWants off. Web Speech sometimes fires a last
+    // buffered frame between stop() and onend; without this guard that
+    // frame writes the old transcript back into a freshly-cleared input.
+    if (!userWants) return;
     let interim = "";
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const r = e.results[i];
@@ -1618,7 +1639,11 @@ function initVoice() {
       try { recog.start(); return; } catch {}
     }
     $mic.classList.remove("listening");
-    setTyping(false);
+    // Preserve the typing indicator if a task already took over —
+    // happens when the user hits send while the mic is still listening.
+    // Without this, "Claude يفكّر..." gets wiped out as soon as onend
+    // fires (~100 ms after our recog.stop in send()).
+    if (!isLoading) setTyping(false);
     if (maxListenTimer) { clearTimeout(maxListenTimer); maxListenTimer = null; }
     updateSend();
   };
