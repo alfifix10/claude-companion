@@ -989,15 +989,11 @@ async function send() {
 
   currentCancel = { aborted: false };
 
-  // Local shortcuts don't support images — skip to Max when images attached
-  if (!hasImages) {
-    const { tryLocal } = await import("./src/tools/local.js");
-    const hit = tryLocal(text);
-    if (hit) {
-      await runLocal(hit, currentCancel);
-      return;
-    }
-  }
+  // Text-pattern local shortcuts removed by user request. Every typed
+  // prompt now goes to Claude. The quick-action chips in .quick-row
+  // and the user-defined ⚡ tasks in .tasks-row still work — they're
+  // button clicks that call runLocal() directly with a known action,
+  // without guessing intent from text.
 
   setLoading(true);
   setTyping(true, "Claude يفكّر...");
