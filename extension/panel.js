@@ -985,28 +985,63 @@ document.querySelectorAll(".chip").forEach((btn) => {
       return;
     }
     if (action === "copy_chat") {
-      // Format the whole conversation as plain text so the user can
-      // paste it into a doc, an email, or another LLM. Structured
-      // (image) content is flagged inline so round-trips don't lie
-      // about what was actually in the chat.
+      // Copy the conversation in BOTH flavours so the paste target
+      // gets the best available representation:
+      //   • text/html  → Gmail, Docs, Notion, Word → rendered formatting
+      //   • text/plain → terminals, code editors   → raw markdown
+      // Pasting into the extension's own input still shows raw text
+      // because user bubbles aren't rendered as markdown (by design).
       if (!conversation.length) {
         showNotice("لا توجد محادثة للنسخ", { variant: "info", ms: 1500 });
         return;
       }
-      const parts = [];
+      const plainParts = [];
+      const htmlParts = [];
       for (const m of conversation) {
         const role = m.role === "user" ? "المستخدم" : "المساعد";
-        const body = typeof m.content === "string"
+        const raw = typeof m.content === "string"
           ? m.content
           : "[محتوى غير نصّيّ — صور/أدوات]";
-        parts.push(`${role}:\n${body}`);
+        plainParts.push(`${role}:\n${raw}`);
+        // Assistant messages get full markdown rendering; user messages
+        // stay verbatim (just newlines → <br>) so what the user wrote
+        // is preserved literally.
+        const bodyHtml = m.role === "assistant" && typeof m.content === "string"
+          ? renderMarkdown(m.content)
+          : escapeHTML(raw).replace(/\n/g, "<br>");
+        htmlParts.push(
+          `<div style="margin:0 0 6px 0;font-weight:600">${role}:</div>` +
+          `<div style="margin:0 0 14px 0">${bodyHtml}</div>`
+        );
       }
-      const text = parts.join("\n\n──────────────\n\n");
+      const plainText = plainParts.join("\n\n──────────────\n\n");
+      const htmlText =
+        `<div dir="rtl" style="font-family:'Segoe UI',Tahoma,Arial,sans-serif;line-height:1.6">` +
+        htmlParts.join('<hr style="margin:12px 0;border:0;border-top:1px solid #d0d0d0">') +
+        `</div>`;
+
+      const showOK = () => showNotice("تم نسخ المحادثة", { variant: "info", ms: 1500 });
       try {
-        await navigator.clipboard.writeText(text);
-        showNotice("تم نسخ المحادثة", { variant: "info", ms: 1500 });
+        if (navigator.clipboard?.write && window.ClipboardItem) {
+          await navigator.clipboard.write([new ClipboardItem({
+            "text/html":  new Blob([htmlText],  { type: "text/html"  }),
+            "text/plain": new Blob([plainText], { type: "text/plain" }),
+          })]);
+          showOK();
+        } else {
+          // Older browsers: plain text only.
+          await navigator.clipboard.writeText(plainText);
+          showOK();
+        }
       } catch (e) {
-        showNotice("فشل النسخ: " + (e?.message || e), { ms: 2500 });
+        // ClipboardItem can fail in odd contexts (permission, focus).
+        // Fall back to plain text; if that also fails, surface the error.
+        try {
+          await navigator.clipboard.writeText(plainText);
+          showOK();
+        } catch (e2) {
+          showNotice("فشل النسخ: " + (e2?.message || e2), { ms: 2500 });
+        }
       }
       return;
     }
