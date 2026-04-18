@@ -238,20 +238,28 @@ function handleMaxQuery(msg) {
   const args = ["-p", "--output-format", "stream-json", "--verbose"];
   if (msg.model) args.push("--model", msg.model);
 
-  // SECURITY: hard-coded allowlist. Any tool NOT in this list will prompt
-  // for permission — and since we run headless (-p), prompts block forever.
-  // That's the intended behavior: an out-of-policy tool call dies, instead
-  // of silently running on the user's machine.
+  // SECURITY: a layered authorisation model.
+  //   Allow:    every user-configured MCP server (mcp__*), plus safe
+  //             read-only built-ins.
+  //   Disallow: built-ins that touch the filesystem or spawn shells.
   //
-  // We previously paired this with --dangerously-skip-permissions as a
-  // belt-and-suspenders measure. That flag was REMOVED before public
-  // release because it defeats the allowlist if a tool name ever slips
-  // through. Allowlist alone is the correct primitive.
+  // Why `mcp__*` (all MCP tools) instead of only our own:
+  //   The user explicitly ran `claude mcp add <server>` for every MCP
+  //   server on their machine. Those servers are part of their trusted
+  //   computing base already. Restricting to only our server breaks
+  //   legitimate workflows (Gmail, Slack, GitHub MCPs, etc.) — Claude
+  //   either hangs on permission prompts (which cannot be answered in
+  //   `-p` mode) or falls back to fragile UI automation and burns the
+  //   Max quota.
+  //
+  // We still block Bash / Write / Edit / NotebookEdit on the built-in
+  // side — a compromised prompt cannot get code execution or mutate the
+  // user's filesystem through the CLI.
   //
   // msg.allowedTools from the caller is IGNORED by design — a compromised
   // panel.js must not be able to widen the blast radius.
   const HARD_ALLOWLIST = [
-    "mcp__claude-companion__*",
+    "mcp__*",    // every MCP server the user has configured
     "Read", "Grep", "Glob", "WebFetch", "WebSearch",
   ];
   for (const t of HARD_ALLOWLIST) args.push("--allowedTools", t);
