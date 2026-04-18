@@ -24,7 +24,6 @@ const $historyBtn = document.getElementById("historyBtn");
 const $historyOverlay = document.getElementById("historyOverlay");
 const $historyList = document.getElementById("historyList");
 const $closeHistoryBtn = document.getElementById("closeHistoryBtn");
-const $newConvBtn = document.getElementById("newConvBtn");
 
 // Pasted images waiting to be sent with the next message.
 // { mediaType: "image/png", base64: "iVBOR..." }
@@ -1073,8 +1072,9 @@ function closeHistory() { $historyOverlay.hidden = true; }
 
 $historyBtn?.addEventListener("click", openHistory);
 $closeHistoryBtn?.addEventListener("click", closeHistory);
-$newConvBtn?.addEventListener("click", startNewConversation);
-// Header shortcut that matches the button inside the history overlay.
+// The header + button is now the single entry point for a new chat —
+// the duplicate one that used to live inside the history overlay has
+// been removed to keep the overlay focused on "browse past chats".
 $newChatBtn?.addEventListener("click", startNewConversation);
 
 // ─────────────────────────────────────────────────────────────────────
