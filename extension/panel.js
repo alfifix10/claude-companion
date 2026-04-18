@@ -565,12 +565,13 @@ function appendUserMessage(text, images, msgIdx) {
     d.appendChild(wrap2);
   }
   wrap.appendChild(d);
-  // Copy + edit buttons for text portion only. Image-only bubbles
-  // don't get an editor (there's nothing textual to edit) and the
-  // clipboard flow for images is browser-specific anyway.
+  // Copy on top, edit on bottom — DOM order is the read-order inside
+  // the wrap, so copy attaches first. Image-only bubbles get neither
+  // (there's no text to copy or edit, and image-clipboard is browser-
+  // specific anyway).
   if (text) {
-    attachEditButton(wrap, idx);
     attachCopyButton(wrap, () => text);
+    attachEditButton(wrap, idx);
   }
   $messages.appendChild(wrap);
   scrollToBottom();
