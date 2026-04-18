@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/%OWNER%/claude-companion/security/advisories/new
+    about: Please use private security advisories, not public issues. See SECURITY.md.
+  - name: Question or discussion
+    url: https://github.com/%OWNER%/claude-companion/discussions
+    about: Not a bug and not a proposal? Start a discussion instead.
