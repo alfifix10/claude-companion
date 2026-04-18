@@ -599,10 +599,10 @@ body {
   min-width: 72px;
 }
 .edit-save {
-  background: var(--accent); color: #fff;
-  border: 1px solid var(--accent);
+  background: var(--green); color: #fff;
+  border: 1px solid var(--green);
 }
-.edit-save:hover { background: var(--accent-br); border-color: var(--accent-br); }
+.edit-save:hover { background: #16a34a; border-color: #16a34a; }
 .edit-cancel {
   background: transparent; color: var(--text2);
   border: 1px solid var(--border);

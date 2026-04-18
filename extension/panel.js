@@ -424,10 +424,12 @@ function enterEditMode(wrap, msgIdx) {
   const actions = document.createElement("div");
   actions.className = "edit-actions";
   const saveBtn = document.createElement("button");
+  saveBtn.type = "button";   // default is "submit" — harmless standalone but clearer intent
   saveBtn.className = "edit-save";
   saveBtn.textContent = "إرسال";
   saveBtn.title = "Enter";
   const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
   cancelBtn.className = "edit-cancel";
   cancelBtn.textContent = "إلغاء";
   cancelBtn.title = "Escape";
