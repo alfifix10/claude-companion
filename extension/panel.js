@@ -425,7 +425,7 @@ function enterEditMode(wrap, msgIdx) {
   actions.className = "edit-actions";
   const saveBtn = document.createElement("button");
   saveBtn.className = "edit-save";
-  saveBtn.textContent = "حفظ";
+  saveBtn.textContent = "إرسال";
   saveBtn.title = "Enter";
   const cancelBtn = document.createElement("button");
   cancelBtn.className = "edit-cancel";
