@@ -1258,30 +1258,46 @@ function initVoice() {
     $input.value = (prefix + committed + interim).trimStart();
     $input.dispatchEvent(new Event("input"));
   };
-  let lastErrorAt = 0;
-  recog.onerror = (e) => {
-    // ANY hard error stops auto-restart — otherwise we loop forever when
-    // offline and spam the chat with the same "network" message.
-    const hardErrors = new Set(["not-allowed", "service-not-allowed", "network", "audio-capture"]);
-    if (hardErrors.has(e.error)) {
-      userWants = false;
-      if (maxListenTimer) { clearTimeout(maxListenTimer); maxListenTimer = null; }
-    }
+  // Hard-error latch: once a fatal speech error fires in this session,
+  // stop auto-restart AND disable the mic button. The underlying
+  // condition (revoked permission, blocked network endpoint, missing
+  // mic) isn't going to resolve by retrying — re-enabling is a page
+  // reload away.
+  let voiceErrorShown = false;
+  const disableMic = (title) => {
+    userWants = false;
+    $mic.disabled = true;
+    $mic.classList.remove("listening");
+    $mic.title = title;
+    if (maxListenTimer) { clearTimeout(maxListenTimer); maxListenTimer = null; }
+  };
 
-    // Throttle: show the same error at most once every 5s
-    const now = Date.now();
-    if (now - lastErrorAt < 5000) return;
-    lastErrorAt = now;
+  recog.onerror = (e) => {
+    const fatal = ["not-allowed", "service-not-allowed", "network", "audio-capture"];
+    if (!fatal.includes(e.error)) return;  // no-speech, aborted — silent
+
+    // Show the explanation ONCE per session so stacked error bubbles
+    // don't pile up when the API keeps retrying internally.
+    if (voiceErrorShown) { disableMic($mic.title); return; }
+    voiceErrorShown = true;
 
     if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-      appendError("رفض إذن الميكروفون. فعّله من إعدادات المتصفح.");
-      chrome.tabs.create({ url: chrome.runtime.getURL("mic-permission.html") });
+      appendError("إذن الميكروفون مرفوض. فعّله من إعدادات الموقع للإضافة.");
+      disableMic("الإذن مرفوض — فعّله من إعدادات المتصفح");
+      try { chrome.tabs.create({ url: chrome.runtime.getURL("mic-permission.html") }); } catch {}
     } else if (e.error === "network") {
-      appendError("التعرّف الصوتي يحتاج اتصال إنترنت.");
+      // Brave Shields / corporate firewall / offline / geo-blocked —
+      // the Google speech endpoint is unreachable. Retrying won't fix
+      // it, so we give one informative line and turn the mic off.
+      appendError(
+        "التعرّف الصوتي لا يعمل — خدمة Google غير متاحة. "
+        + "في Brave: أوقِف Shields لهذه الصفحة. أو افتح الإضافة في Chrome."
+      );
+      disableMic("التعرّف الصوتي غير متاح (Google service)");
     } else if (e.error === "audio-capture") {
-      appendError("لم يُعثر على ميكروفون. تأكد من توصيله.");
+      appendError("لم يُعثر على ميكروفون. تأكد من توصيله ثم أعد تحميل الإضافة.");
+      disableMic("لا يوجد ميكروفون");
     }
-    // "no-speech" / "aborted" are normal — silent
   };
   recog.onend = () => {
     recognizing = false;
