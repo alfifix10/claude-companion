@@ -166,30 +166,84 @@ export async function executeTool(name, input, tabId) {
     case "scroll": {
       await ensureAttached(tabId);
       const amt = Math.min(input.amount || 3, 10);
-      const deltaY = input.direction === "up" ? -amt * 300 : amt * 300;
-      // window.scrollBy is far more reliable than dispatching a mouseWheel at
-      // a random (400,400) point — that often misses the scrollable area.
-      // Also wake any scrollable parent by scrolling the focused element too.
-      await cdp(tabId, "Runtime.evaluate", {
-        expression: `(() => {
-          // Prefer the deepest scrollable ancestor of the focused element
-          let el = document.activeElement || document.scrollingElement || document.documentElement;
-          while (el && el !== document.body) {
-            const cs = getComputedStyle(el);
-            const ov = cs.overflowY;
-            if ((ov === 'auto' || ov === 'scroll') && el.scrollHeight > el.clientHeight) {
-              el.scrollBy({ top: ${deltaY}, behavior: 'instant' });
-              return true;
-            }
-            el = el.parentElement;
-          }
-          window.scrollBy({ top: ${deltaY}, behavior: 'instant' });
-          return true;
-        })()`,
+      const totalDelta = input.direction === "up" ? -amt * 300 : amt * 300;
+
+      // Hybrid strategy:
+      //   1. Fire real wheel events at the viewport centre, split into a
+      //      5–7 flick sequence with decay. This triggers any `wheel`
+      //      listeners on the page (infinite feeds use these to load
+      //      more content; some sites key animations to them too).
+      //   2. Measure how far window actually scrolled. If the wheel
+      //      didn't land on a window-scrollable container (e.g. the
+      //      focus is inside a fixed sidebar with its own overflow:auto),
+      //      fall back to the previous ancestor-finding scrollBy for the
+      //      remaining delta. This preserves the "reliable even on weird
+      //      layouts" property of the old implementation while adding the
+      //      naturalness wheel events provide.
+      let cx = 400, cy = 400;
+      try {
+        const metrics = await cdp(tabId, "Page.getLayoutMetrics", {});
+        const vw = metrics?.cssLayoutViewport?.clientWidth || metrics?.layoutViewport?.clientWidth;
+        const vh = metrics?.cssLayoutViewport?.clientHeight || metrics?.layoutViewport?.clientHeight;
+        if (vw && vh) { cx = Math.round(vw / 2); cy = Math.round(vh / 2); }
+      } catch {}
+
+      const beforeRes = await cdp(tabId, "Runtime.evaluate", {
+        expression: "window.scrollY",
         returnByValue: true,
       });
-      await sleep(200);
-      return `Scrolled ${input.direction} by ${Math.abs(deltaY)}px`;
+      const before = beforeRes?.result?.value || 0;
+
+      // Split into 5–7 flicks with ±20% jitter per flick.
+      const flicks = 5 + Math.floor(Math.random() * 3);
+      const per = totalDelta / flicks;
+      for (let i = 0; i < flicks; i++) {
+        const delta = Math.round(per * (0.8 + Math.random() * 0.4));
+        try {
+          await cdp(tabId, "Input.dispatchMouseEvent", {
+            type: "mouseWheel",
+            x: cx, y: cy,
+            deltaX: 0, deltaY: delta,
+          });
+        } catch {}
+        await sleep(50 + Math.random() * 60);
+      }
+
+      // Let momentum / smooth-scroll complete before measuring.
+      await sleep(120);
+
+      const afterRes = await cdp(tabId, "Runtime.evaluate", {
+        expression: "window.scrollY",
+        returnByValue: true,
+      });
+      const after = afterRes?.result?.value || 0;
+      const moved = after - before;
+      const remaining = totalDelta - moved;
+
+      // Anything left? The focused element probably has its own overflow.
+      // Fall back to the programmatic scrollBy on the nearest scrollable
+      // ancestor for the rest.
+      if (Math.abs(remaining) > 30) {
+        await cdp(tabId, "Runtime.evaluate", {
+          expression: `(() => {
+            let el = document.activeElement || document.scrollingElement || document.documentElement;
+            while (el && el !== document.body) {
+              const cs = getComputedStyle(el);
+              const ov = cs.overflowY;
+              if ((ov === 'auto' || ov === 'scroll') && el.scrollHeight > el.clientHeight) {
+                el.scrollBy({ top: ${remaining}, behavior: 'instant' });
+                return true;
+              }
+              el = el.parentElement;
+            }
+            window.scrollBy({ top: ${remaining}, behavior: 'instant' });
+            return true;
+          })()`,
+          returnByValue: true,
+        });
+        await sleep(150);
+      }
+      return `Scrolled ${input.direction} by ${Math.abs(totalDelta)}px`;
     }
     case "run_javascript": {
       await ensureAttached(tabId);
