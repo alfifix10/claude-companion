@@ -171,10 +171,17 @@ async function init() {
 // Starter cards inside the welcome block — each drops a ready-made
 // prompt into the input and sends, exactly as if the user had typed
 // it and hit Enter. send() handles the fresh→active transition.
+// Each starter maps to the full prompt that lands in $input then fires
+// send(). Keep the chip label short but make the prompt itself explicit
+// so Claude has enough to act — the model doesn't see the chip text.
 const STARTER_PROMPTS = {
-  summarize: "لخّص هذه الصفحة",
-  youtube:   "افتح يوتيوب",
-  compare:   "اعرض التبويبات المفتوحة ولخّص محتوى كلّ واحد بسطرَين",
+  summarize:       "لخّص محتوى هذه الصفحة في ٥-٨ نقاط واضحة",
+  translate:       "ترجم محتوى هذه الصفحة كاملاً إلى العربيّة الفصحى، مع الحفاظ على الأسماء والمصطلحات التقنيّة",
+  youtube_summary: "اقرأ transcript هذا الفيديو ولخّصه في نقاط رئيسيّة مع ذكر أي أرقام أو اقتباسات مهمّة",
+  simplify:        "اشرح محتوى هذه الصفحة بلغة بسيطة جدّاً كأنّك تخاطب شخصاً غير متخصّص، مع أمثلة لتوضيح المفاهيم الصعبة",
+  extract_table:   "استخرج البيانات المنظَّمة من هذه الصفحة (منتجات / نتائج / قوائم / إحصاءات) واعرضها في جدول Markdown منظَّم",
+  draft_reply:     "اقرأ المحتوى المُحدَّد أو البريد/التعليق المفتوح، واكتب ردّاً احترافيّاً ومهذّباً بالعربيّة. اعرض الردّ فقط دون شرح",
+  fact_check:      "تحقّق من صحّة الادعاءات والأرقام الرئيسيّة في هذه الصفحة. اذكر لكلّ ادعاء: (١) ما قالته الصفحة (٢) هل هو صحيح/مشكوك/خاطئ (٣) السبب باختصار",
 };
 document.querySelectorAll(".starter-chip").forEach((btn) => {
   btn.addEventListener("click", () => {
