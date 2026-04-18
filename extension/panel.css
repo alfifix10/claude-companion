@@ -328,7 +328,7 @@ body {
   border: 1px solid var(--input-br); border-radius: 10px;
   background: var(--input-bg); color: var(--text);
   font-family: inherit; font-size: 12.5px; line-height: 1.7;
-  direction: rtl; outline: none; resize: vertical;
+  direction: rtl; outline: none; resize: none;
   min-height: 80px;
   transition: border-color .15s;
   scrollbar-width: thin;
