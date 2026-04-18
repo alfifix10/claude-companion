@@ -49,27 +49,6 @@
     <!-- User-defined repeated tasks -->
     <div class="tasks-row" id="tasksRow"></div>
 
-    <!-- Proactive page briefing: appears when the user opens a readable page
-         and is hidden otherwise. Runs Readability locally (zero Claude cost);
-         Claude is only invoked if the user clicks an action chip. -->
-    <div class="briefing" id="briefing" hidden>
-      <div class="briefing-head">
-        <span class="briefing-title" id="briefingTitle">—</span>
-        <button class="briefing-close" id="briefingClose" title="إخفاء" aria-label="إخفاء">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-            <path d="M6 6l12 12M6 18L18 6"/>
-          </svg>
-        </button>
-      </div>
-      <p class="briefing-preview" id="briefingPreview"></p>
-      <div class="briefing-actions">
-        <button class="chip" data-brief="summarize">📝 لخّص</button>
-        <button class="chip" data-brief="explain">🧠 اشرح</button>
-        <button class="chip" data-brief="translate">🌐 ترجم</button>
-        <button class="chip" data-brief="key_points">🎯 أهم النقاط</button>
-      </div>
-    </div>
-
     <!-- Messages -->
     <div class="messages-wrap">
       <div class="messages" id="messages">
