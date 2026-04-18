@@ -38,11 +38,11 @@
 .copy-ico:focus-visible,
 .conv-item:focus-visible,
 .conv-delete:focus-visible,
-.settings-save-btn:focus-visible,
-textarea:focus-visible {
+.settings-save-btn:focus-visible {
   outline: 2px solid var(--accent-br);
   outline-offset: 2px;
 }
+/* textarea already shows focus via border-color change — no outline needed */
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
