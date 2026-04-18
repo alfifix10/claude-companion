@@ -1245,12 +1245,31 @@ let recog = null, recognizing = false, userWants = false;
 let committed = "", baseline = "", maxListenTimer = null;
 const MAX_LISTEN_MS = 60_000;
 
+// Brave's build of Chromium exposes SpeechRecognition but ships it
+// without the Google API key Chrome uses to authenticate. Every request
+// to speech.googleapis.com fails with "network" regardless of what
+// Shields settings the user toggles. It's not a block we can dodge —
+// it's a feature Brave intentionally disabled. Hide the mic entirely
+// in Brave instead of leaving the user to discover this via a dead
+// button and a permission page that keeps promising "use Chrome".
+async function detectBrave() {
+  try { return !!(navigator.brave && await navigator.brave.isBrave()); }
+  catch { return false; }
+}
+
 function initVoice() {
   if (!SpeechRec) {
+    // Keep the button visually but make it clear it's a no-op.
     $mic.disabled = true;
     $mic.title = "المتصفح لا يدعم التعرّف الصوتي";
     return;
   }
+  // Async Brave check: if Brave, remove the mic button from the flow.
+  detectBrave().then((isBrave) => {
+    if (isBrave) {
+      $mic.style.display = "none";
+    }
+  });
   recog = new SpeechRec();
   recog.lang = "ar-SA";
   recog.continuous = true;

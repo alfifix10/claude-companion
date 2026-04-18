@@ -76,16 +76,18 @@ $ask.addEventListener("click", async () => {
     render("ok", "✓ الميكروفون جاهز. أغلق هذه الصفحة واستخدم 🎤 في الشريط الجانبي.");
     $ask.style.display = "none";
   } else if (result === "network") {
-    // Known Brave/firewall case — be specific + actionable.
-    const braveTip = brave
-      ? `<b>Brave يحجب الخدمة افتراضياً.</b><br>
-         الحل: <a style="color:#c2632f" href="brave://settings/shields" target="_blank">brave://settings/shields</a>
-         → عطّل "Block cross-site trackers" — أو استخدم Chrome/Edge للإدخال الصوتي.`
-      : `خدمة التعرّف الصوتي (Google) محجوبة على هذه الشبكة أو من المتصفح.
-         جرّب شبكة مختلفة أو Chrome/Edge.`;
-    render("err",
-      `⚠️ الإذن مُنح، لكن <b>التعرّف الصوتي لا يعمل</b>.<br><br>${braveTip}<br><br>
-       الكتابة اليدوية تعمل بشكل طبيعيّ.`);
+    // In Brave this is permanent — the browser ships without the
+    // Google API key, not a blocker we can bypass. Be direct.
+    const msg = brave
+      ? `<b>Brave لا يدعم التعرّف الصوتي.</b><br>
+         Web Speech API يتطلّب خدمة Google التي أزالها Brave لأسباب خصوصيّة.
+         تعطيل Shields لن يُصلح الأمر.<br><br>
+         <b>الحلّ الوحيد:</b> افتح الإضافة في Chrome / Edge / Opera.<br>
+         الكتابة اليدويّة تعمل بشكل طبيعيّ في Brave.`
+      : `خدمة التعرّف الصوتي (Google) محجوبة على هذه الشبكة أو من المتصفّح.<br>
+         جرّب شبكة مختلفة أو Chrome/Edge.<br><br>
+         الكتابة اليدويّة تعمل بشكل طبيعيّ.`;
+    render("err", `⚠️ الإذن مُنح، لكن <b>التعرّف الصوتي لا يعمل</b>.<br><br>${msg}`);
     $ask.style.display = "none";
   } else if (result === "unsupported") {
     render("err", "متصفّحك لا يدعم التعرّف الصوتي (Web Speech API).");
