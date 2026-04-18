@@ -264,10 +264,17 @@ export async function handleMaxChat(messages) {
   // Three safety nets so a misbehaving task can't run forever:
   //   1. No-first-event (20s):  the host never emitted a single event.
   //   2. Stuck detector (90s):  events stopped arriving mid-task.
-  //   3. Hard ceiling (6 min):  absolute max regardless of activity.
+  //   3. Hard ceiling (20 min): absolute max regardless of activity.
+  //
+  // T_MAX was 6 min originally — killed legitimate deep-research tasks
+  // (e.g. "gather 50 films from Wikipedia + find their YouTube videos")
+  // that were still actively making progress. T_STUCK + MAX_TOTAL + the
+  // loop detectors already handle the real pathologies; 20 min gives
+  // breathing room for honest long work while keeping a ceiling for the
+  // truly pathological case that slips past the other guards.
   const T_FIRST = 20_000;
   const T_STUCK = 90_000;
-  const T_MAX = 6 * 60_000;
+  const T_MAX = 20 * 60_000;
 
   // Every timeout path MUST also kill lingering processes and arm a tool
   // blackout — otherwise a dying claude keeps emitting clicks/navigates.
@@ -294,7 +301,7 @@ export async function handleMaxChat(messages) {
   }, 5000);
 
   const hardCeiling = setTimeout(() => {
-    timeoutCancel(`تجاوزت المهمة الحد الأقصى (${Math.round(T_MAX / 60000)} دقائق) — أُلغيَت. قسّمها لمهام أصغر.`);
+    timeoutCancel(`بلغت المهمّة سقف الـ ${Math.round(T_MAX / 60000)} دقيقة. حفظت ما أُنجِز في المحادثة؛ أكملها بطلب تكميليّ لو شئت.`);
   }, T_MAX);
 
   registerResponseHandler(id, (msg) => {
