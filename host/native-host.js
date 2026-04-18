@@ -49,8 +49,13 @@ function loadConfig() {
   }
   if (changed) {
     try {
-      fs.mkdirSync(CONFIG_DIR, { recursive: true });
-      fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+      // 0o700 on dir, 0o600 on file: on macOS/Linux the default umask
+      // produces 0644 which means any other local user (or process
+      // running under a different account) can read the shared
+      // TCP secret and impersonate the extension to the MCP server.
+      // On Windows the mode is ignored; ACLs already restrict to owner.
+      fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), { mode: 0o600 });
     } catch {}
     // Re-read in case another process wrote first — converge on that value.
     try {
@@ -223,13 +228,34 @@ function streamClaude(id, proc) {
   });
 }
 
+// Host-side caps on user-controllable payload. Panel already caps at
+// the UI level, but a compromised extension page could bypass that —
+// this is the authoritative limit. Generous enough to fit legitimate
+// pasted articles + screenshots, tight enough to block DoS.
+const MAX_PROMPT_CHARS = 256 * 1024;         // 256 KB of UTF-16
+const MAX_IMAGE_BYTES  = 10 * 1024 * 1024;   // 10 MB per image (base64 → ~7.5 MB raw)
+const MAX_IMAGE_COUNT  = 8;
+const IMAGE_MEDIA_OK   = /^image\/(png|jpeg|jpg|webp|gif)$/i;
+
 function handleMaxQuery(msg) {
   if (!CLAUDE_BIN) {
     write({ id: msg.id, type: "max_error", error: "NO_CLAUDE_CLI" });
     return;
   }
   const prompt = String(msg.prompt || "");
-  const images = Array.isArray(msg.images) ? msg.images : [];
+  if (prompt.length > MAX_PROMPT_CHARS) {
+    write({ id: msg.id, type: "max_error", error: "prompt exceeds 256KB cap" });
+    return;
+  }
+  const images = (Array.isArray(msg.images) ? msg.images : [])
+    .slice(0, MAX_IMAGE_COUNT)
+    .filter((img) => {
+      if (!img || typeof img !== "object") return false;
+      if (!IMAGE_MEDIA_OK.test(String(img.mediaType || ""))) return false;
+      const b64 = String(img.base64 || "");
+      // base64 is ~4/3 the raw bytes; cap at the base64-encoded size.
+      return b64.length > 0 && b64.length <= MAX_IMAGE_BYTES;
+    });
   if (!prompt && images.length === 0) {
     write({ id: msg.id, type: "max_error", error: "EMPTY_PROMPT" });
     return;
@@ -273,6 +299,20 @@ function handleMaxQuery(msg) {
     "mcp__claude-companion__run_javascript",
   ];
   for (const t of HARD_DISALLOW) args.push("--disallowedTools", t);
+
+  // Static system prompt — passed via --system so the portion that
+  // never changes between turns (rules, aliases, budget, execution
+  // method) hits Anthropic's server-side prompt cache (5 min TTL,
+  // ~90% discount on cached tokens). The extension keeps the dynamic
+  // part (tab info, memories, chat history) in the user message so
+  // it can change freely without invalidating the cache.
+  // Length guard — CLI arg lists have OS limits (Windows ≈ 32 K).
+  // We stay well under. If a future prompt grows past 8 K, pipe it
+  // via stdin instead.
+  const systemPrompt = typeof msg.system === "string" ? msg.system : "";
+  if (systemPrompt && systemPrompt.length < 8000) {
+    args.push("--system", systemPrompt);
+  }
 
   // If the user pasted images, switch to stream-json input so we can attach
   // them as proper image content blocks instead of text.

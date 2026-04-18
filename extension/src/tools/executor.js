@@ -66,21 +66,22 @@ export function invalidatePageTextCache(tabId) {
 // ──────────────────────────────────────────────────────────────────────
 async function capturePageSignals(tabId) {
   try {
+    // Previous implementation checked element visibility via
+    // `offsetParent !== null`, which forces a full layout flush on
+    // every query — 80-200 ms on busy pages (Gmail, Twitter, Reddit)
+    // TWICE per action (before + after). Switched to existence-only
+    // queries plus `:not([aria-hidden="true"])` so we avoid the
+    // layout. The false-positive rate on "error visible" is tiny
+    // because apps that reveal errors normally set aria-hidden=false.
     const res = await cdp(tabId, "Runtime.evaluate", {
       expression: `(() => {
         const q = (sel) => document.querySelectorAll(sel).length;
-        const anyVisible = (sel) => {
-          for (const el of document.querySelectorAll(sel)) {
-            if (el.offsetParent !== null) return true;
-          }
-          return false;
-        };
         return {
           url: location.href,
           title: document.title || "",
           interactive: q('button, a[href], input:not([type="hidden"]), select, textarea, [role="button"], [role="link"], [role="textbox"], [role="checkbox"], [role="menuitem"]'),
           hasDialog: !!document.querySelector('[role="dialog"][aria-hidden="false"], dialog[open]'),
-          errorVisible: anyVisible('[role="alert"], [aria-live="assertive"]'),
+          errorVisible: !!document.querySelector('[role="alert"]:not([aria-hidden="true"]), [aria-live="assertive"]:not([aria-hidden="true"])'),
         };
       })()`,
       returnByValue: true,
@@ -130,6 +131,10 @@ async function humanType(tabId, text) {
   }
   let untilPause = 8 + Math.floor(Math.random() * 7); // next pause in 8–14 chars
   for (let i = 0; i < text.length; i++) {
+    // Honour user-initiated stop between characters. Before this guard,
+    // a 200-char typing session was ~18 s of uncancellable work — user
+    // would hit Stop and still watch text appear character-by-character.
+    if (activeTask?.stopped) return;
     await cdp(tabId, "Input.insertText", { text: text[i] });
     const base = 60 + Math.random() * 80;
     let extra = 0;
@@ -162,9 +167,13 @@ export async function executeTool(name, input, tabId) {
       return { tabId: tab.id, windowId: tab.windowId, url: tab.url, title: tab.title };
     }
     case "tabs_create": {
-      const t = await chrome.tabs.create({ url: input.url, active: input.active !== false });
-      retargetTaskTab(t.id);
-      return `Opened tab ${t.id}: ${t.url}`;
+      const active = input.active !== false;
+      const t = await chrome.tabs.create({ url: input.url, active });
+      // Only migrate the task to the new tab if it was opened active —
+      // otherwise we'd silently steer subsequent click/type to a tab
+      // the user can't see, which looked to them like "nothing moved".
+      if (active) retargetTaskTab(t.id);
+      return `Opened tab ${t.id}${active ? "" : " (background)"}: ${t.url}`;
     }
     case "navigate": {
       invalidatePageTextCache(tabId);

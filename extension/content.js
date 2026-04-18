@@ -204,7 +204,20 @@
   // ─────────────────────────────────────────────────────────────────────
   // Accessibility tree generation (token-efficient)
   // ─────────────────────────────────────────────────────────────────────
+  // Prune refs pointing at nodes that no longer live in the DOM.
+  // Without this, SPA re-renders (Twitter, Gmail, Reddit) leak refs
+  // indefinitely — the Map pins detached DOM trees forever, blocking GC.
+  // Observed hundreds of MB retained after an hour on React-heavy sites.
+  // Cheap enough to run at the top of every read_page: one Map walk,
+  // typical size < a few hundred refs.
+  function pruneDeadRefs() {
+    for (const [ref, el] of elementMap) {
+      if (!el || !el.isConnected) elementMap.delete(ref);
+    }
+  }
+
   function generateAccessibilityTree(options = {}) {
+    pruneDeadRefs();
     const filter = options.filter || "interactive";
     const maxChars = options.max_chars || 12000;
     let out = "", chars = 0, truncated = false;

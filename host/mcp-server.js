@@ -48,8 +48,9 @@ function loadConfig() {
   }
   if (changed) {
     try {
-      fs.mkdirSync(CONFIG_DIR, { recursive: true });
-      fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+      // Owner-only perms — see native-host.js for the rationale.
+      fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), { mode: 0o600 });
     } catch {}
     try {
       const cfg2 = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));

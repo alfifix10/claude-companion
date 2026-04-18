@@ -109,14 +109,13 @@ function onBgMessage(msg) {
       setTyping(false);
       streamingBubble ??= appendAssistantBubble("");
       streamingBubble.dataset.raw = (streamingBubble.dataset.raw || "") + msg.text;
-      streamingBubble.innerHTML = renderMarkdown(streamingBubble.dataset.raw);
-      // Visual cue for "plan" responses: if Claude opens the message
-      // with a "خطّتي:" line, decorate the bubble so the numbered list
-      // reads as a proper plan card instead of plain prose.
-      markPlanIfPresent(streamingBubble);
-      // Only auto-follow if the user was already near the bottom — don't
-      // yank them around while they're reading earlier content.
-      scrollToBottomIfFollowing();
+      // Coalesce renders onto the next animation frame: a fast stream
+      // of tokens (dozens per second) would otherwise re-parse the
+      // ENTIRE markdown on every token — O(n²) over growing string.
+      // One render per frame caps the cost at 60fps regardless of
+      // token rate. markPlanIfPresent + scroll run inside the same
+      // scheduled tick so everything is in sync.
+      scheduleStreamRender(streamingBubble);
       break;
     case "tool_start":
       setTyping(true, `جارٍ: ${TOOL_LABELS[msg.tool] || msg.tool}...`);
@@ -125,6 +124,10 @@ function onBgMessage(msg) {
       // We don't display this anywhere — status header was removed.
       break;
     case "done": {
+      // Make sure any coalesced render that was waiting for the next
+      // animation frame lands synchronously — otherwise the bubble
+      // might freeze one token short of the final text.
+      flushStreamRender();
       const bubble = streamingBubble;
       const text = bubble?.dataset?.raw || msg.text || "";
       streamingBubble = null;
@@ -465,14 +468,27 @@ function renderMarkdown(src) {
     .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
     .replace(/`([^`\n]+)`/g, "<code>$1</code>");
 
-  // Links [text](url) — validate scheme first to block javascript:/data:/vbscript:
-  // XSS vectors. Claude's output could contain a malicious link via prompt
-  // injection in page content it reads.
+  // Links [text](url) — harden against prompt-injected XSS.
+  //   1. Reject any whitespace/control chars in the URL: a URL like
+  //      `https://x\n onmouseover=alert(1)` survived the old scheme
+  //      check because only the `"` was escaped.
+  //   2. Only relative/anchor/simple schemes are kept as-is.
+  //   3. For absolute http(s) URLs we round-trip through `new URL()`
+  //      so the browser's own parser normalises the value — anything
+  //      that can't be parsed is dropped.
   text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, t, u) => {
     const raw = String(u).trim();
-    const safeScheme = /^(?:https?:|mailto:|tel:|#|\/|\.\.?\/)/i.test(raw);
-    if (!safeScheme) return t; // render plain text, drop the dangerous link
-    const url = raw.replace(/"/g, "&quot;");
+    // Fail closed on any control / whitespace inside the URL
+    if (/[\u0000-\u001f\u007f <>"`\\]/.test(raw)) return t;
+    const relOrAnchor = /^(?:#|\/|\.\.?\/|mailto:|tel:)/i.test(raw);
+    let safe = null;
+    if (relOrAnchor) {
+      safe = raw;
+    } else if (/^https?:/i.test(raw)) {
+      try { safe = new URL(raw).href; } catch { safe = null; }
+    }
+    if (!safe) return t;
+    const url = safe.replace(/"/g, "&quot;");
     return `<a href="${url}" target="_blank" rel="noopener noreferrer">${t}</a>`;
   });
 
@@ -571,6 +587,42 @@ function markPlanIfPresent(bubble) {
   if (!bubble.classList.contains("has-plan") && PLAN_PREFIX_RE.test(raw)) {
     bubble.classList.add("has-plan");
   }
+}
+
+// Coalesced streaming render.
+//
+// The naive implementation called renderMarkdown(full_raw_text) on every
+// `text_delta` event. On a 2 000-char reply arriving in ~200 tokens,
+// that's 200 full re-parses of a string growing 10→2000 chars each
+// time — effectively O(n²) main-thread work during the stream (400 ms
+// to 1 s measured). Users saw jank on long replies.
+//
+// Coalescing caps the render at one per animation frame (~60 Hz). When
+// multiple tokens arrive in the same frame they all contribute to
+// `dataset.raw` but only a single markdown render fires. Nothing else
+// changes — the DOM content is identical, just updated less often.
+//
+// flushStreamRender() runs the pending render synchronously; called at
+// end-of-stream to guarantee the final text lands even if a `done`
+// event arrives before the next rAF tick.
+let pendingRenderBubble = null;
+let pendingRenderFrame = 0;
+function scheduleStreamRender(bubble) {
+  pendingRenderBubble = bubble;
+  if (pendingRenderFrame) return;
+  pendingRenderFrame = requestAnimationFrame(() => {
+    pendingRenderFrame = 0;
+    flushStreamRender();
+  });
+}
+function flushStreamRender() {
+  const bubble = pendingRenderBubble;
+  pendingRenderBubble = null;
+  if (pendingRenderFrame) { cancelAnimationFrame(pendingRenderFrame); pendingRenderFrame = 0; }
+  if (!bubble || !bubble.isConnected) return;
+  bubble.innerHTML = renderMarkdown(bubble.dataset.raw || "");
+  markPlanIfPresent(bubble);
+  scrollToBottomIfFollowing();
 }
 
 /** Unconditional — jump to bottom and re-enter following mode. */

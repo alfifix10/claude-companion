@@ -64,15 +64,17 @@ export function cancelActiveMaxTask() {
   scheduleDetachAll();
 }
 
-function buildPrompt({ userMsg, history, tab, memories }) {
-  const title = tab?.title || "";
-  const url = tab?.url || "";
-
-  let base = `You control the user's already-open Chromium browser via the \`mcp__claude-companion__*\` tools. Fulfill the user's request autonomously. Reply in Arabic by default (unless the user writes in English). Be concise — 1-4 sentences unless more is clearly needed.
-
-ACTIVE TAB:
-  title: ${title}
-  url:   ${url}
+// STATIC_SYSTEM is the portion of the prompt that doesn't change between
+// turns — rules, aliases, budget, execution discipline. Passed via the
+// CLI's --system flag so Anthropic's server-side prompt cache (5-minute
+// TTL, ~90% discount on cached tokens) kicks in automatically on
+// back-to-back turns. A ~900-token static block across a 10-turn
+// conversation saves ≈ 8 k tokens.
+//
+// Dynamic context (ACTIVE TAB, memories, chat history) goes into the
+// user message — we don't want a cache-miss every time the tab URL
+// changes.
+const STATIC_SYSTEM = `You control the user's already-open Chromium browser via the \`mcp__claude-companion__*\` tools. Fulfill the user's request autonomously. Reply in Arabic by default (unless the user writes in English). Be concise — 1-4 sentences unless more is clearly needed.
 
 ARABIC SITE NAMES → URLs (use these, DO NOT translate the word into a domain):
   يوتيوب → https://www.youtube.com
@@ -162,12 +164,13 @@ RULES:
     alternatives, not at the first failure.
   • Never call the exact same tool with the exact same input more than twice.`;
 
-  if (memories) {
-    base += `\n\nUSER MEMORIES:\n${memories.slice(0, 500)}`;
-  }
-
-  base += `\n\nCONVERSATION:\n${history}`;
-  return base;
+function buildDynamicUser({ history, tab, memories }) {
+  const title = tab?.title || "";
+  const url = tab?.url || "";
+  let ctx = `ACTIVE TAB:\n  title: ${title}\n  url:   ${url}`;
+  if (memories) ctx += `\n\nUSER MEMORIES:\n${memories.slice(0, 500)}`;
+  ctx += `\n\nCONVERSATION:\n${history}`;
+  return ctx;
 }
 
 export async function handleMaxChat(messages) {
@@ -185,7 +188,7 @@ export async function handleMaxChat(messages) {
     `${m.role === "user" ? "USER" : "ASSISTANT"}: ${typeof m.content === "string" ? m.content : "(structured content)"}`
   ).join("\n");
 
-  const prompt = buildPrompt({ userMsg: lastUser, history, tab, memories });
+  const userPrompt = buildDynamicUser({ history, tab, memories });
 
   broadcastToPanels({ type: "provider_info", provider: "Claude Max" });
 
@@ -411,7 +414,10 @@ export async function handleMaxChat(messages) {
     }
   });
 
-  const sent = sendMaxQuery(id, prompt, { images: activeTask?.images || [] });
+  const sent = sendMaxQuery(id, userPrompt, {
+    images: activeTask?.images || [],
+    system: STATIC_SYSTEM,
+  });
   if (!sent) {
     clearTimeout(timeoutTimer);
     finishTask({ type: "error", text: "فشل إرسال الطلب للمضيف. أعد تحميل الإضافة." });
@@ -440,8 +446,15 @@ export async function handleMaxChat(messages) {
       activeTask.messages = [];
     }
     broadcastToPanels(result);
+    // 2-second grace before clearing activeTask so a panel opening mid-
+    // completion can still read the final result via get_status. Guard
+    // against clobbering: if the user started ANOTHER task in the
+    // meantime, the new task has a different runId — don't touch it.
+    const finishedRunId = id;
     setTimeout(() => {
-      if (activeTask && !activeTask.running) setActiveTask(null);
+      if (activeTask && !activeTask.running && activeTask.runId === finishedRunId) {
+        setActiveTask(null);
+      }
     }, 2000);
   }
 }

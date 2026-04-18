@@ -225,6 +225,7 @@ export function sendMaxQuery(id, prompt, opts = {}) {
       model: opts.model,
       allowedTools: opts.allowedTools,
       images: opts.images || [],  // [{ mediaType, base64 }]
+      system: opts.system || "",   // Static system prompt — cached server-side
     });
     return true;
   } catch (err) {
