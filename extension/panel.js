@@ -97,6 +97,10 @@ function onBgMessage(msg) {
       streamingBubble ??= appendAssistantBubble("");
       streamingBubble.dataset.raw = (streamingBubble.dataset.raw || "") + msg.text;
       streamingBubble.innerHTML = renderMarkdown(streamingBubble.dataset.raw);
+      // Visual cue for "plan" responses: if Claude opens the message
+      // with a "خطّتي:" line, decorate the bubble so the numbered list
+      // reads as a proper plan card instead of plain prose.
+      markPlanIfPresent(streamingBubble);
       // Only auto-follow if the user was already near the bottom — don't
       // yank them around while they're reading earlier content.
       scrollToBottomIfFollowing();
@@ -663,6 +667,20 @@ let followingBottom = true;
 
 function distanceFromBottom() {
   return $messages.scrollHeight - $messages.scrollTop - $messages.clientHeight;
+}
+
+// When the system prompt asks Claude to lead with "خطّتي:" for multi-step
+// tasks, we detect that opening in the streaming bubble and add a CSS
+// class so the list renders as a proper plan card (left border, step
+// icons). Purely presentational — we don't parse or track step state
+// here, just help the user see at a glance "Claude has a plan".
+const PLAN_PREFIX_RE = /^(?:\s*\S{0,80})?خطّتي\s*:/;
+function markPlanIfPresent(bubble) {
+  if (!bubble) return;
+  const raw = bubble.dataset.raw || "";
+  if (!bubble.classList.contains("has-plan") && PLAN_PREFIX_RE.test(raw)) {
+    bubble.classList.add("has-plan");
+  }
 }
 
 /** Unconditional — jump to bottom and re-enter following mode. */

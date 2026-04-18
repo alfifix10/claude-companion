@@ -192,6 +192,26 @@ body {
   align-self: flex-end; background: var(--bg2); color: var(--text);
   border-bottom-left-radius: 3px;
 }
+/* "Plan" mode — Claude led the response with "خطّتي:". Give the bubble
+   an accent rail on the left and make its numbered list feel like a
+   checklist instead of generic prose. */
+.msg.assistant.has-plan {
+  border-left: 3px solid var(--accent);
+  padding-left: 13px;
+  background: linear-gradient(90deg, var(--accent-bg), var(--bg2) 40%);
+}
+.msg.assistant.has-plan ol {
+  padding-inline-start: 22px;
+  margin: 6px 0 2px;
+}
+.msg.assistant.has-plan ol li {
+  padding: 3px 0;
+  margin: 0;
+}
+.msg.assistant.has-plan ol li::marker {
+  color: var(--accent-br);
+  font-weight: 700;
+}
 .msg.error {
   align-self: center; background: #2a1515; color: #f87171;
   border-radius: 8px; font-size: 11.5px; text-align: center;
