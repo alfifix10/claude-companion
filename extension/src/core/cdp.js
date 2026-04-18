@@ -137,6 +137,29 @@ export async function takeScreenshot(tabId) {
   const opts = { format: "jpeg", quality: 45, optimizeForSpeed: true, captureBeyondViewport: false };
   if (clip) opts.clip = clip;
 
+  // Hide our own automation overlay so it doesn't end up baked into the
+  // screenshot as a thick orange frame. Best-effort — if the page has a
+  // hostile CSP that blocks Runtime.evaluate, the worst case is the old
+  // behaviour (border visible in shot).
+  const HIDE_OVERLAY_JS = `(() => {
+    const ids = ['__cc_automation_border__'];
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (el) el.style.setProperty('visibility', 'hidden', 'important');
+    }
+    // Click ripples are short-lived but still bake into screenshots if
+    // taken mid-animation — nuke any visible ones for the duration.
+    document.querySelectorAll('[style*="__cc_ripple"]').forEach(
+      el => el.style.setProperty('visibility', 'hidden', 'important')
+    );
+  })()`;
+  const SHOW_OVERLAY_JS = `(() => {
+    const el = document.getElementById('__cc_automation_border__');
+    if (el) el.style.removeProperty('visibility');
+  })()`;
+
+  try { await cdp(tabId, "Runtime.evaluate", { expression: HIDE_OVERLAY_JS }); } catch {}
+
   const res = await cdp(tabId, "Page.captureScreenshot", opts);
   let base64 = res.data;
 
@@ -145,6 +168,10 @@ export async function takeScreenshot(tabId) {
     const smaller = await cdp(tabId, "Page.captureScreenshot", { ...opts, quality: 25 });
     base64 = smaller.data;
   }
+
+  // Restore the border so the sticky-during-task indicator doesn't vanish
+  // permanently after a screenshot.
+  try { await cdp(tabId, "Runtime.evaluate", { expression: SHOW_OVERLAY_JS }); } catch {}
 
   const imageId = `shot_${Date.now()}`;
   screenshotStore.set(imageId, base64);

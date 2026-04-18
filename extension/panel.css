@@ -169,16 +169,18 @@ body {
    .msg-media: vertical stack of images when the user sends more than one.
    .msg-img:  clipped to fit inside the bubble, rounded corners matching
               the bubble geometry. */
-.msg.user.has-media { padding: 6px; }
-.msg.user .msg-text { padding: 3px 7px 6px; }
-.msg.user.has-media .msg-text + .msg-media { margin-top: 0; }
+/* Image-in-bubble: keep the orange frame thin. 3 px is enough to read
+   as "this is the user's message" without dominating the image. */
+.msg.user.has-media { padding: 3px; }
+.msg.user .msg-text { padding: 4px 8px 6px; }
+.msg.user.has-media .msg-text + .msg-media { margin-top: 3px; }
 .msg-media {
-  display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; gap: 3px;
 }
 .msg-img {
   display: block; max-width: 100%; max-height: 260px;
   width: auto; height: auto; object-fit: contain;
-  border-radius: 10px; background: rgba(0,0,0,.2);
+  border-radius: 12px; background: rgba(0,0,0,.2);
 }
 
 /* Message wrapper (bubble + copy button) */
