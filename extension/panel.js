@@ -446,11 +446,22 @@ function enterEditMode(wrap, msgIdx) {
   if (copyIco) copyIco.style.display = "none";
   wrap.appendChild(editor);
 
-  // field-sizing: content (set in CSS) auto-grows the textarea with
-  // the content natively on Chromium 123+. No JS height juggling —
-  // setting style.height would actually fight the CSS.
+  // Professional edit-box sizing: measure the existing content ONCE
+  // at open and lock the height there. Typing more falls back to
+  // internal scroll instead of growing the box — this is the key to
+  // keeping the [إلغاء] [إرسال] row in a fixed position while the
+  // user edits. field-sizing: content (the earlier approach) made
+  // the row jump every time a line wrapped.
+  //
+  // Floor 80 px so a one-word message doesn't produce a cramped
+  // editor; ceiling 280 px so a giant paste doesn't eat the whole
+  // chat column.
   ta.focus();
   ta.setSelectionRange(ta.value.length, ta.value.length);
+  // Measure AFTER appending to DOM, otherwise scrollHeight is 0.
+  ta.style.height = "auto";
+  const measured = Math.max(80, Math.min(ta.scrollHeight + 2, 280));
+  ta.style.height = measured + "px";
 
   const cancel = () => {
     editor.remove();

@@ -570,19 +570,19 @@ body {
 }
 .edit-textarea {
   width: 100%;
-  /* Match the main composer feel: short by default, auto-grows with
-     content up to a reasonable ceiling. field-sizing is the modern
-     native way to do this (Chromium 123+); no JS needed. */
-  field-sizing: content;
-  min-height: 40px;
-  max-height: 200px;
-  padding: 9px 12px;
+  /* Height is set ONCE by JS at open time to match the existing
+     message; no auto-grow. Typing more just scrolls internally,
+     which keeps the [إلغاء] [إرسال] row visually anchored — the
+     fundamental professional-editor behaviour (Discord, Linear,
+     Notion all do this). */
+  padding: 10px 12px;
   background: var(--input-bg);
   color: var(--text);
   border: 1px solid var(--input-br);
   border-radius: 10px;
-  font: inherit; font-size: 13px; line-height: 1.4;
+  font: inherit; font-size: 13px; line-height: 1.5;
   direction: rtl; resize: none; outline: none;
+  overflow-y: auto;
   transition: border-color .15s;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
