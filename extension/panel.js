@@ -38,6 +38,7 @@ function showNotice(text, { variant = "error", ms = 6000 } = {}) {
 }
 const $historyOverlay = document.getElementById("historyOverlay");
 const $historyList = document.getElementById("historyList");
+const $historySearch = document.getElementById("historySearch");
 const $closeHistoryBtn = document.getElementById("closeHistoryBtn");
 
 // Pasted images waiting to be sent with the next message.
@@ -1147,7 +1148,39 @@ function formatRelative(ts) {
   return new Date(ts).toLocaleDateString("ar");
 }
 
-async function renderHistoryList() {
+// Escape the five HTML-sensitive characters so snippet text can be
+// safely injected with innerHTML (the only markup we add is our own
+// trusted <mark>).
+function escapeHTML(s) {
+  return String(s).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+}
+
+// Build the highlighted snippet around the first case-insensitive
+// occurrence of `q` in `text`. Returns escaped HTML with <mark> around
+// the hit, or null if no match. ±40 chars of context on each side,
+// with "…" elision markers when we're clipping.
+function buildSnippet(text, q, windowChars = 40) {
+  if (!text || !q) return null;
+  const lower = text.toLowerCase();
+  const i = lower.indexOf(q.toLowerCase());
+  if (i === -1) return null;
+  const start = Math.max(0, i - windowChars);
+  const end = Math.min(text.length, i + q.length + windowChars);
+  const before = (start > 0 ? "…" : "") + text.slice(start, i);
+  const hit = text.slice(i, i + q.length);
+  const after = text.slice(i + q.length, end) + (end < text.length ? "…" : "");
+  return escapeHTML(before) + "<mark>" + escapeHTML(hit) + "</mark>" + escapeHTML(after);
+}
+
+// Track the live search term so re-renders (e.g. after delete) keep
+// the user's filter applied.
+let currentSearchQuery = "";
+let historySearchTimer = null;
+
+async function renderHistoryList(query = "") {
+  const q = (query || "").trim();
   const index = await convLoadIndex();
   $historyList.innerHTML = "";
   if (!index.length) {
@@ -1157,7 +1190,49 @@ async function renderHistoryList() {
     $historyList.appendChild(empty);
     return;
   }
+
+  // Search mode: pull every saved conversation in one batch call,
+  // then filter locally. At our cap (20 convs × 50 msgs × ~500 B)
+  // we're scanning ≤ 500 KB — substring search finishes in well
+  // under a frame.
+  let convsById = null;
+  if (q) {
+    const keys = index.map((e) => `conv_${e.id}`);
+    convsById = await chrome.storage.local.get(keys);
+  }
+
+  const rows = [];
   for (const meta of index) {
+    if (!q) {
+      rows.push({ meta, snippet: null });
+      continue;
+    }
+    const msgs = convsById[`conv_${meta.id}`];
+    let snippet = null;
+    if (Array.isArray(msgs)) {
+      // First matching message in the conversation wins the snippet.
+      for (const m of msgs) {
+        const text = typeof m.content === "string" ? m.content : "";
+        snippet = buildSnippet(text, q);
+        if (snippet) break;
+      }
+    }
+    // Fall back to title match so searching for a topic in the derived
+    // title still surfaces the conversation even when the raw messages
+    // don't contain the query verbatim.
+    if (!snippet) snippet = buildSnippet(meta.title || "", q);
+    if (snippet) rows.push({ meta, snippet });
+  }
+
+  if (q && rows.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "history-empty";
+    empty.textContent = `لا نتائج مطابقة لـ "${q}".`;
+    $historyList.appendChild(empty);
+    return;
+  }
+
+  for (const { meta, snippet } of rows) {
     const item = document.createElement("div");
     item.className = "conv-item";
     if (meta.id === currentConvId) item.classList.add("active");
@@ -1168,11 +1243,21 @@ async function renderHistoryList() {
     const title = document.createElement("div");
     title.className = "conv-title";
     title.textContent = meta.title || "محادثة";
-    const info = document.createElement("div");
-    info.className = "conv-meta";
-    info.textContent = `${formatRelative(meta.updatedAt)} • ${meta.count} رسالة`;
     body.appendChild(title);
-    body.appendChild(info);
+
+    if (snippet) {
+      // In search mode, show the matched context instead of the date
+      // + message-count meta — the snippet is the more useful signal.
+      const sn = document.createElement("div");
+      sn.className = "conv-snippet";
+      sn.innerHTML = snippet;  // safe: buildSnippet escapes; only <mark> is ours
+      body.appendChild(sn);
+    } else {
+      const info = document.createElement("div");
+      info.className = "conv-meta";
+      info.textContent = `${formatRelative(meta.updatedAt)} • ${meta.count} رسالة`;
+      body.appendChild(info);
+    }
     item.appendChild(body);
 
     const del = document.createElement("button");
@@ -1185,7 +1270,7 @@ async function renderHistoryList() {
     del.addEventListener("click", async (e) => {
       e.stopPropagation();
       await convDelete(meta.id);
-      await renderHistoryList();
+      await renderHistoryList(currentSearchQuery);
     });
     item.appendChild(del);
 
@@ -1289,8 +1374,25 @@ async function startNewConversation() {
   updateSend();
 }
 
-function openHistory() { renderHistoryList(); $historyOverlay.hidden = false; }
+function openHistory() {
+  // Fresh open = fresh filter. Resetting here keeps the previous session's
+  // query from lingering when the user comes back later.
+  if ($historySearch) $historySearch.value = "";
+  currentSearchQuery = "";
+  renderHistoryList();
+  $historyOverlay.hidden = false;
+}
 function closeHistory() { $historyOverlay.hidden = true; }
+
+// Debounced search input. 180 ms is enough to coalesce fast typing
+// without feeling laggy — the filter itself is instant at our scale.
+$historySearch?.addEventListener("input", () => {
+  currentSearchQuery = $historySearch.value;
+  clearTimeout(historySearchTimer);
+  historySearchTimer = setTimeout(() => {
+    renderHistoryList(currentSearchQuery);
+  }, 180);
+});
 
 $historyBtn?.addEventListener("click", openHistory);
 $closeHistoryBtn?.addEventListener("click", closeHistory);

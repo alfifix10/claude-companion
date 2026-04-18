@@ -240,6 +240,49 @@ body {
   flex-shrink: 0;
 }
 .history-title { font-size: 13px; font-weight: 700; color: var(--text); }
+
+/* Search box — sits between head and list. Filters the list by any
+   substring that appears in the stored message content (not just
+   titles). Snippets show the matched context with the term <mark>ed. */
+.history-search-row {
+  padding: 8px 10px 6px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.history-search {
+  width: 100%;
+  padding: 7px 12px;
+  border: 1px solid var(--input-br);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 12.5px; font-family: inherit;
+  direction: rtl; outline: none;
+  transition: border-color .15s;
+}
+.history-search:focus { border-color: var(--accent); }
+.history-search::placeholder { color: var(--text2); }
+.history-search::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  width: 14px; height: 14px; cursor: pointer;
+  background: var(--text2);
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2.2' stroke-linecap='round'><path d='M6 6l12 12M6 18L18 6'/></svg>") center / contain no-repeat;
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2.2' stroke-linecap='round'><path d='M6 6l12 12M6 18L18 6'/></svg>") center / contain no-repeat;
+}
+
+.conv-snippet {
+  font-size: 11px; color: var(--text2);
+  line-height: 1.5;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.conv-snippet mark {
+  background: var(--accent-bg);
+  color: var(--accent-br);
+  padding: 0 2px; border-radius: 3px;
+  font-weight: 600;
+}
+
 .history-list {
   flex: 1; overflow-y: auto; padding: 10px 8px 16px;
   display: flex; flex-direction: column; gap: 4px;
