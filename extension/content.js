@@ -497,6 +497,29 @@
     return true;
   }
 
+  // Tag the <input type=file> behind `ref` with a one-shot attribute so
+  // the executor side can reach it via CDP DOM.querySelector without
+  // needing to reimplement ref-resolution in the background context.
+  // Returns a throwaway selector that matches ONLY this element; the
+  // caller is responsible for removing the attribute afterward.
+  function markRefForUpload(ref) {
+    const el = resolveRef(ref);
+    if (!el) return { error: `Element ${ref} not found` };
+    const tag = (el.tagName || "").toLowerCase();
+    if (tag !== "input" || el.type !== "file") {
+      return { error: `Element ${ref} is not <input type="file"> (got <${tag} type="${el.type || ""}">)` };
+    }
+    const token = "cc_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+    el.setAttribute("data-cc-upload-target", token);
+    return { selector: `[data-cc-upload-target="${token}"]`, token };
+  }
+  function clearUploadMark(token) {
+    if (!token) return false;
+    const el = document.querySelector(`[data-cc-upload-target="${token}"]`);
+    if (el) el.removeAttribute("data-cc-upload-target");
+    return !!el;
+  }
+
   // ─────────────────────────────────────────────────────────────────────
   // Set-of-Mark labels for screenshots
   //
@@ -630,6 +653,8 @@
     if (msg.type === "setFormValue") { sendResponse({ result: setFormValue(msg.ref, msg.value) }); return true; }
     if (msg.type === "getRefCoordinates") { sendResponse({ result: getRefCoordinates(msg.ref) }); return true; }
     if (msg.type === "scrollToRef") { sendResponse({ result: scrollToRef(msg.ref) }); return true; }
+    if (msg.type === "markRefForUpload") { sendResponse({ result: markRefForUpload(msg.ref) }); return true; }
+    if (msg.type === "clearUploadMark") { sendResponse({ result: clearUploadMark(msg.token) }); return true; }
     if (msg.type === "highlightElements") { highlightElements(msg.refs || []); sendResponse({ result: true }); return true; }
     if (msg.type === "addScreenshotLabels") { sendResponse({ result: addScreenshotLabels(msg.max || 40) }); return true; }
     if (msg.type === "removeScreenshotLabels") { removeScreenshotLabels(); sendResponse({ result: true }); return true; }

@@ -59,4 +59,6 @@ export const nativeToolHandlers = {
   list_tabs: (a) => pass("list_tabs", a),
   tabs_overview: (a) => pass("tabs_overview", a),
   switch_tab: (a) => pass("switch_tab", a),
+  tabs_close: (a) => pass("tabs_close", a),
+  file_upload: (a) => pass("file_upload", a),
 };

@@ -461,6 +461,17 @@ server.tool("switch_tab", "Switch to a tab by ID.", {
   tabId: z.number(),
 }, async (a) => ({ content: [{ type: "text", text: String(await request("switch_tab", a)) }] }));
 
+server.tool("tabs_close", "Close one or more tabs by ID. Omit tabIds to close the currently active tab. Refuses to close the tab a running task is still driving — wait for it to finish first. Closing the last tab in a window closes the window.", {
+  tabIds: z.array(z.number()).optional(),
+  tabId: z.number().optional(),
+}, async (a) => ({ content: [{ type: "text", text: String(await request("tabs_close", a)) }] }));
+
+server.tool("file_upload", "Upload local file(s) to an <input type=\"file\"> element. Identify the input by `ref` (preferred — from read_page/find) OR `selector` (CSS). `files` must be ABSOLUTE paths on the user's machine (e.g. 'C:/Users/.../photo.jpg'). Multiple files require the input to have the `multiple` attribute. Safety: paths that look like credentials/secrets (.ssh, .aws, .env, *_rsa, *.pem, password/wallet/keystore, browser Login Data, etc.) are REFUSED — this is an anti-exfiltration guard against malicious page instructions.", {
+  ref: z.string().optional(),
+  selector: z.string().optional(),
+  files: z.array(z.string()).min(1),
+}, async (a) => ({ content: [{ type: "text", text: String(await request("file_upload", a)) }] }));
+
 // ──────────────────────────────────────────────────────────────────────────
 // Start MCP stdio transport (Claude Code side)
 // ──────────────────────────────────────────────────────────────────────────
