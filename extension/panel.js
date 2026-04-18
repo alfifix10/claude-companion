@@ -1272,12 +1272,17 @@ function initVoice() {
     $input.value = (prefix + committed + interim).trimStart();
     $input.dispatchEvent(new Event("input"));
   };
-  // Hard-error latch: once a fatal speech error fires in this session,
-  // stop auto-restart AND disable the mic button. The underlying
-  // condition (revoked permission, blocked network endpoint, missing
-  // mic) isn't going to resolve by retrying — re-enabling is a page
-  // reload away.
-  let voiceErrorShown = false;
+  // Two classes of speech errors:
+  //   • PERMANENT — condition won't resolve without user action.
+  //     Latch once, show notice, hard-disable the mic.
+  //   • TRANSIENT (network) — could be a momentary Shields flicker, a
+  //     WiFi blip, or the Google endpoint hiccuping. Show the notice
+  //     (throttled) and stop the current session, BUT leave the button
+  //     enabled so the user can try again. Previous iteration treated
+  //     network as permanent and left users staring at a disabled mic
+  //     after a single transient blip.
+  let permanentErrorShown = false;
+  let lastTransientNoticeAt = 0;
   const disableMic = (title) => {
     userWants = false;
     $mic.disabled = true;
@@ -1287,31 +1292,38 @@ function initVoice() {
   };
 
   recog.onerror = (e) => {
-    const fatal = ["not-allowed", "service-not-allowed", "network", "audio-capture"];
-    if (!fatal.includes(e.error)) return;  // no-speech, aborted — silent
+    const permanent = ["not-allowed", "service-not-allowed", "audio-capture"];
+    const isPermanent = permanent.includes(e.error);
+    const isTransient = e.error === "network";
+    if (!isPermanent && !isTransient) return; // no-speech, aborted — silent
 
-    // Show the explanation ONCE per session so stacked error bubbles
-    // don't pile up when the API keeps retrying internally.
-    if (voiceErrorShown) { disableMic($mic.title); return; }
-    voiceErrorShown = true;
+    // Stop whatever session is in flight so onend doesn't auto-restart.
+    userWants = false;
+    if (maxListenTimer) { clearTimeout(maxListenTimer); maxListenTimer = null; }
 
-    // Use the floating notice instead of a chat bubble: voice errors
-    // aren't part of the conversation, AND the chat area is hidden in
-    // fresh-chat mode so appendError would land invisibly there.
-    if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-      showNotice("إذن الميكروفون مرفوض");
-      disableMic("الإذن مرفوض — فعّله من إعدادات المتصفح");
-      try { chrome.tabs.create({ url: chrome.runtime.getURL("mic-permission.html") }); } catch {}
-    } else if (e.error === "network") {
-      // Brave Shields / corporate firewall / offline / geo-blocked —
-      // the Google speech endpoint is unreachable. Short notice, full
-      // explanation in the button's tooltip.
-      showNotice("التعرّف الصوتي معطَّل — جرّب Chrome أو أوقِف Shields");
-      disableMic("التعرّف الصوتي يحتاج خدمة Google — معطَّل في Brave Shields");
-    } else if (e.error === "audio-capture") {
-      showNotice("لا يوجد ميكروفون متَّصل");
-      disableMic("لا يوجد ميكروفون");
+    if (isPermanent) {
+      if (permanentErrorShown) { disableMic($mic.title); return; }
+      permanentErrorShown = true;
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        showNotice("إذن الميكروفون مرفوض");
+        disableMic("الإذن مرفوض — فعّله من إعدادات المتصفح");
+        try { chrome.tabs.create({ url: chrome.runtime.getURL("mic-permission.html") }); } catch {}
+      } else {
+        showNotice("لا يوجد ميكروفون متَّصل");
+        disableMic("لا يوجد ميكروفون");
+      }
+      return;
     }
+
+    // Transient network error — throttle the notice (once per 10 s) and
+    // keep the mic button enabled so the user can retry. Full hint in
+    // the tooltip for the curious.
+    const now = Date.now();
+    if (now - lastTransientNoticeAt >= 10_000) {
+      lastTransientNoticeAt = now;
+      showNotice("التعرّف الصوتي معطَّل الآن — جرّب مجدداً أو أوقِف Shields");
+    }
+    $mic.title = "التعرّف الصوتي يحتاج خدمة Google — في Brave أوقِف Shields";
   };
   recog.onend = () => {
     recognizing = false;
