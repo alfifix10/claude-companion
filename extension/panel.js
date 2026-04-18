@@ -19,6 +19,10 @@ const $welcome = document.getElementById("welcome");
 const $tasksRow = document.getElementById("tasksRow");
 const $attachments = document.getElementById("attachments");
 const $scrollBtn = document.getElementById("scrollBtn");
+const $briefing = document.getElementById("briefing");
+const $briefingTitle = document.getElementById("briefingTitle");
+const $briefingPreview = document.getElementById("briefingPreview");
+const $briefingClose = document.getElementById("briefingClose");
 
 // Pasted images waiting to be sent with the next message.
 // { mediaType: "image/png", base64: "iVBOR..." }
@@ -34,6 +38,9 @@ function setLoading(on) {
   $send.title = on ? "إيقاف صارم" : "إرسال";
   if (on) {
     $send.disabled = false;            // always clickable as stop
+    // Hide the page briefing during a task — it competes for attention
+    // with the streaming answer. It comes back on the next tab change.
+    try { $briefing.hidden = true; } catch {}
   } else {
     $send.disabled = !$input.value.trim();
     setTyping(false);
@@ -219,6 +226,7 @@ async function updateTabInfo() {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (tab) {
       $tabTitle.textContent = tab.title || tab.url || "(بلا عنوان)";
+      scheduleBriefing(tab);
     }
   } catch {}
 }
@@ -227,6 +235,133 @@ chrome.tabs?.onActivated?.addListener(updateTabInfo);
 chrome.tabs?.onUpdated?.addListener((id, ch, tab) => {
   if (!tab?.active || !ch.url) return;
   updateTabInfo();
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Proactive page briefing
+//
+// When the user opens a readable article, we pull Readability text from
+// the content script LOCALLY (no Claude call) and show a compact preview
+// + four action chips. Clicking a chip drops a prepared prompt into the
+// input and sends — that's the only time Claude is charged.
+//
+// Why in-panel instead of background-pushed:
+//   • Each panel decides for itself whether to show briefings (per-panel
+//     user settings later).
+//   • Readability runs inside the page's content script already for the
+//     get_page_text tool, so we reuse that path — no new wire protocol.
+//
+// Cache: URL → extraction. Skip re-extraction when the user bounces
+// between the same two tabs.
+// ─────────────────────────────────────────────────────────────────────
+const BRIEFING_MIN_CHARS = 200;         // shorter pages aren't worth briefing
+const BRIEFING_DEBOUNCE = 600;          // ms — survive rapid tab-flipping
+const BRIEFING_CACHE_MAX = 20;
+const briefingCache = new Map();        // URL → { title, preview, fullText }
+let briefingTimer = 0;
+let briefingHiddenByUser = false;       // user-dismissed for this session
+let briefingCurrentUrl = "";
+
+function isBriefableUrl(url) {
+  if (!url) return false;
+  return /^https?:\/\//.test(url);     // exclude chrome://, about:, file:, etc.
+}
+
+function scheduleBriefing(tab) {
+  if (!tab || !isBriefableUrl(tab.url)) { hideBriefing(); return; }
+  if (briefingHiddenByUser) return;
+  if (isLoading) return;               // don't overlay during a running task
+  if (briefingTimer) clearTimeout(briefingTimer);
+  briefingTimer = setTimeout(() => runBriefing(tab), BRIEFING_DEBOUNCE);
+}
+
+async function runBriefing(tab) {
+  briefingCurrentUrl = tab.url;
+  const cached = briefingCache.get(tab.url);
+  if (cached) { renderBriefing(cached); return; }
+
+  try {
+    // Ask the content script for Readability text directly. Cheap and
+    // local — no Claude, no MCP hop.
+    const resp = await chrome.tabs.sendMessage(tab.id, { type: "getPageText" }).catch(() => null);
+    const raw = resp?.result;
+    if (!raw) { hideBriefing(); return; }
+
+    let data;
+    try { data = JSON.parse(raw); } catch { hideBriefing(); return; }
+    const fullText = (data?.text || "").trim();
+    if (fullText.length < BRIEFING_MIN_CHARS) { hideBriefing(); return; }
+
+    const entry = {
+      title: data.title || tab.title || "(بلا عنوان)",
+      preview: fullText.slice(0, 300).replace(/\s+/g, " "),
+      fullText,
+      url: tab.url,
+    };
+    // LRU-lite: trim when we grow too big.
+    if (briefingCache.size >= BRIEFING_CACHE_MAX) {
+      briefingCache.delete(briefingCache.keys().next().value);
+    }
+    briefingCache.set(tab.url, entry);
+    // Only render if the tab the user is looking at didn't change mid-fetch.
+    if (briefingCurrentUrl === tab.url) renderBriefing(entry);
+  } catch { hideBriefing(); }
+}
+
+function renderBriefing(entry) {
+  if (briefingHiddenByUser || isLoading) return;
+  $briefingTitle.textContent = entry.title;
+  $briefingPreview.textContent = entry.preview + (entry.fullText.length > 300 ? "…" : "");
+  $briefing.hidden = false;
+}
+
+function hideBriefing() {
+  $briefing.hidden = true;
+}
+
+// User dismissed with × — stay hidden until they navigate to a fresh URL,
+// at which point we reset the flag.
+$briefingClose?.addEventListener("click", () => {
+  briefingHiddenByUser = true;
+  hideBriefing();
+});
+
+// Reset the "hidden by user" flag on URL change — a new page deserves
+// a new briefing, even if they hid the last one.
+let briefingLastUrl = "";
+setInterval(async () => {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (tab?.url && tab.url !== briefingLastUrl) {
+      briefingLastUrl = tab.url;
+      briefingHiddenByUser = false;
+    }
+  } catch {}
+}, 1000);
+
+// Briefing chips — each turns into a ready-made user message that uses
+// the freshly-extracted page text as context. The text is INJECTED into
+// $input so the user can tweak it before hitting send, if they want.
+const BRIEF_PROMPTS = {
+  summarize:  "لخّص هذه الصفحة في 3-5 نقاط مختصرة.",
+  explain:    "اشرح لي موضوع هذه الصفحة كأنني مبتدئ في الموضوع.",
+  translate:  "ترجم هذه الصفحة إلى العربية، مع الحفاظ على الأسماء والمصطلحات التقنيّة.",
+  key_points: "ما أهم 5 أفكار في هذه الصفحة؟",
+};
+
+document.querySelectorAll(".briefing .chip").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const kind = btn.dataset.brief;
+    const prompt = BRIEF_PROMPTS[kind];
+    if (!prompt) return;
+    // The page content is fetched fresh by Claude via get_page_text —
+    // we don't re-send the raw text through the input, we just tell
+    // Claude WHAT to do and let it fetch. Smaller prompt, cleaner UI.
+    $input.value = prompt;
+    $input.dispatchEvent(new Event("input"));
+    send();
+    hideBriefing();
+  });
 });
 
 
