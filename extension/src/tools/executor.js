@@ -366,6 +366,54 @@ export async function executeTool(name, input, tabId) {
       const tabs = await chrome.tabs.query({ lastFocusedWindow: true });
       return tabs.map((t) => `[${t.id}]${t.active ? " *" : ""} ${t.title} — ${t.url}`).join("\n");
     }
+    case "tabs_overview": {
+      // Cross-tab snapshot. For each normal (http/https) tab we ask the
+      // content script for its Readability text in parallel, keep the
+      // first 300 chars. Tabs on chrome://, file://, the Web Store, or
+      // discarded pages have no content script — we include them with
+      // an "(no content accessible)" marker so Claude still knows they
+      // exist.
+      const cap = Math.min(Math.max(input?.max_tabs || 10, 1), 15);
+      const all = await chrome.tabs.query({ lastFocusedWindow: true });
+      const tabs = all.slice(0, cap);
+
+      async function snippetFor(tab) {
+        if (!/^https?:\/\//.test(tab.url || "")) return null;
+        // Fast path: if the page-text cache already has this tab, use it.
+        const cached = pageTextCache.get(tab.id);
+        if (cached && cached.url === tab.url && Date.now() - cached.ts < PAGE_TEXT_TTL_MS) {
+          return cached.text;
+        }
+        try {
+          const resp = await Promise.race([
+            sendContentMessage(tab.id, { type: "getPageText" }),
+            new Promise((r) => setTimeout(() => r(null), 1500)),
+          ]);
+          if (!resp?.result) return null;
+          const d = JSON.parse(resp.result);
+          // Opportunistic cache-fill — the next get_page_text on this
+          // tab gets a cache hit for free.
+          pageTextCache.set(tab.id, {
+            url: d.url || tab.url,
+            title: d.title || tab.title,
+            text: d.text || "",
+            ts: Date.now(),
+          });
+          return d.text || "";
+        } catch { return null; }
+      }
+
+      const snippets = await Promise.all(tabs.map(snippetFor));
+      const lines = tabs.map((t, i) => {
+        const header = `[${t.id}]${t.active ? " *" : ""} ${t.title || "(untitled)"}\n    ${t.url}`;
+        const snip = snippets[i];
+        if (snip == null) return header + "\n    (no content accessible — chrome://, file://, or discarded)";
+        const trimmed = snip.trim().replace(/\s+/g, " ").slice(0, 300);
+        return header + (trimmed ? `\n    ${trimmed}${snip.length > 300 ? "…" : ""}` : "\n    (empty)");
+      });
+      const truncatedNote = all.length > cap ? `\n\n(${all.length - cap} more tabs not shown — raise max_tabs to include them)` : "";
+      return `Overview of ${tabs.length} tab(s):\n\n${lines.join("\n\n")}${truncatedNote}`;
+    }
     case "switch_tab": {
       await chrome.tabs.update(input.tabId, { active: true });
       const t = await chrome.tabs.get(input.tabId);

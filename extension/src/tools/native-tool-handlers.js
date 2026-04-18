@@ -57,5 +57,6 @@ export const nativeToolHandlers = {
   hover: (a) => pass("hover", a),
   select_option: (a) => pass("select_option", a),
   list_tabs: (a) => pass("list_tabs", a),
+  tabs_overview: (a) => pass("tabs_overview", a),
   switch_tab: (a) => pass("switch_tab", a),
 };

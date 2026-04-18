@@ -444,9 +444,13 @@ server.tool("select_option", "Pick an option in a dropdown by ref.", {
   value: z.string().optional(),
 }, async (a) => ({ content: [{ type: "text", text: String(await request("select_option", a)) }] }));
 
-server.tool("list_tabs", "List all tabs in the focused window.", {}, async () => ({
+server.tool("list_tabs", "List all tabs in the focused window (IDs + titles + URLs only — no content).", {}, async () => ({
   content: [{ type: "text", text: String(await request("list_tabs", {})) }],
 }));
+
+server.tool("tabs_overview", "List all tabs PLUS a short content snippet from each — useful for cross-tab reasoning like 'compare these three articles' or 'find the tab that talks about X'. Extracts ~300 characters of Readability text per tab in parallel. Cheaper than calling get_page_text on each tab individually.", {
+  max_tabs: z.number().int().min(1).max(15).optional(),
+}, async (a) => ({ content: [{ type: "text", text: String(await request("tabs_overview", a)) }] }));
 
 server.tool("switch_tab", "Switch to a tab by ID.", {
   tabId: z.number(),
