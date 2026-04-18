@@ -70,21 +70,6 @@ body {
 .chip:hover { border-color: var(--accent); color: var(--accent-br); background: var(--accent-bg); }
 .chip.warn:hover { border-color: var(--red); color: var(--red); background: rgba(239,68,68,.1); }
 .chip:active { transform: scale(.96); }
-/* Chip disabled when its context doesn't apply (e.g. no text selected on
-   the active tab for 📌 المحدَّد). Visually faded, non-interactive. */
-.chip:disabled,
-.chip[disabled] {
-  opacity: .45;
-  cursor: default;
-  pointer-events: none;
-}
-/* When a selection IS present, the chip lights up with a subtle accent to
-   signal "click me now". */
-.chip.has-selection {
-  border-color: var(--accent);
-  color: var(--accent-br);
-  background: var(--accent-bg);
-}
 
 /* User-defined tasks row */
 .tasks-row {
