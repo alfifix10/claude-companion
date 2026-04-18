@@ -959,7 +959,19 @@ document.querySelectorAll(".chip").forEach((btn) => {
       get_text: { action: "get_text" },
     };
     const hit = map[action];
-    if (hit) await runLocal(hit, currentCancel = { aborted: false });
+    if (!hit) return;
+    // If a task is already streaming, clicking a quick-action chip means
+    // "cancel that and do this instead" — same ChatGPT-style behaviour
+    // as re-sending while a response streams. Without this we race: the
+    // old currentCancel gets overwritten, the old task keeps streaming,
+    // and both results land in the same chat in unpredictable order.
+    if (isLoading) {
+      hardStop("");
+      // Give hardStop a beat to tear down the bg port + tool blackout
+      // before the new local action starts dispatching CDP calls.
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    await runLocal(hit, currentCancel = { aborted: false });
   });
 });
 
