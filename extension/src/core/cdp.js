@@ -6,11 +6,34 @@
 import { attachedTabs, screenshotStore, pendingDialogs } from "./state.js";
 import { sleep } from "./utils.js";
 
+// URL schemes where Chromium blocks chrome.debugger.attach and content
+// scripts. We preflight-check so the user sees a clear Arabic message
+// instead of the raw "Cannot access a chrome:// URL" from the browser.
+const RESTRICTED_SCHEME = /^(?:chrome|brave|edge|about|chrome-extension|devtools|view-source|chrome-search|chrome-untrusted):/i;
+const RESTRICTED_HOST = /^https?:\/\/chrome\.google\.com\/webstore/i;
+function describeRestrictedUrl(url) {
+  if (!url) return null;
+  if (RESTRICTED_SCHEME.test(url) || RESTRICTED_HOST.test(url)) {
+    return "صفحة داخليّة — افتح موقعاً عادياً ثم حاول.";
+  }
+  return null;
+}
+
 export async function ensureAttached(tabId) {
   // A new attach means a fresh period of activity — cancel any pending
   // idle-detach from a previous task so we don't tear the pipe out mid-flight.
   cancelDetachSchedule();
   if (attachedTabs.has(tabId)) return;
+  // Preflight URL check — Chromium would reject the attach with an
+  // English error; surface a friendlier one without attempting first.
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const why = describeRestrictedUrl(tab?.url);
+    if (why) throw new Error(why);
+  } catch (e) {
+    if (e?.message?.startsWith("صفحة داخليّة")) throw e;
+    // get() itself failed — fall through and let attach() surface it.
+  }
   await chrome.debugger.attach({ tabId }, "1.3");
   attachedTabs.set(tabId, { enabledDomains: new Set() });
   await ensureDomain(tabId, "Page");
