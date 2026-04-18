@@ -508,6 +508,7 @@ function renderMarkdown(src) {
 }
 
 function appendError(text) {
+  removeWelcome();
   const d = document.createElement("div");
   d.className = "msg error";
   d.textContent = text;
@@ -519,6 +520,7 @@ function appendError(text) {
 // Much cleaner than one box per tool. Screenshots render separately.
 function appendToolActions(actions) {
   if (!actions?.length) return;
+  removeWelcome();
 
   // Collapse to unique labels — if Claude did read_page 3 times, show once.
   const labels = [];
@@ -767,6 +769,7 @@ async function runLocal(hit, myCancel) {
     else {
       if (r?.toolActions) appendToolActions(r.toolActions);
       if (r?.screenshot) {
+        removeWelcome();
         const img = document.createElement("img");
         img.className = "tool-screenshot";
         img.src = `data:image/jpeg;base64,${r.screenshot}`;
