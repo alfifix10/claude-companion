@@ -103,12 +103,23 @@ RULES:
   • JS dialogs (confirm/prompt) are auto-dismissed for safety. If you need the
     action to go through, look for an in-page button or ask the user.
 
+  CHOOSE THE RIGHT TOOL:
+  • For Gmail tasks: if a Gmail MCP (mcp__*_Gmail__*) is available, USE IT.
+    Do not UI-automate Gmail with click/type — Gmail's JS-heavy UI will
+    fight you. The MCP calls the Gmail API directly.
+  • Same principle for Slack, GitHub, Drive, Notion, any service whose
+    MCP is present in the tool list.
+  • Fall back to mcp__claude-companion__* browser tools only when no
+    service-specific MCP exists.
+
   STOP CONDITIONS (do NOT keep burning tokens):
-  • If the SAME tool call fails twice, STOP retrying. Explain the blocker to
-    the user in plain Arabic, suggest one alternative, and wait.
-  • After 3 errors in a row, STOP and summarize what you tried.
-  • If you've called 15+ tools and still haven't made concrete progress, STOP
-    and ask the user to narrow the task or confirm the approach.
+  • If the SAME tool call fails twice with the same input, STOP retrying.
+    Explain the blocker in plain Arabic, propose ONE alternative, and wait.
+  • If you've called 15+ tools on the same sub-goal without progress, STOP
+    and ask the user to narrow the task.
+  • When you change approach (e.g. click → find → keyboard shortcut), that
+    is EXPECTED. Keep going. Only stop when you've exhausted plausible
+    alternatives, not at the first failure.
   • Never call the exact same tool with the exact same input more than twice.`;
 
   if (memories) {
@@ -163,19 +174,25 @@ export async function handleMaxChat(messages) {
   let lastProgressAt = Date.now();
 
   // Anti-stuck guardrails so a wandering task doesn't silently burn the
-  // Max quota for minutes on end.
+  // Max quota for minutes on end. Tuned to tolerate legitimate exploration
+  // of messy sites (Gmail, Twitter, dynamic SPAs) without capping Claude
+  // at the first sign of turbulence.
   //   • toolCallCount:     hard cap per task (catches endless exploration)
-  //   • consecutiveErrors: stops after N failures in a row
+  //   • consecutiveErrors: stops only after MANY same-tool failures; we
+  //                        reset when Claude switches to a different tool,
+  //                        because "the click failed, now I'll try find"
+  //                        is exactly the adaptive behaviour we want.
   //   • recentCalls:       stops if the same (tool, input) repeats — the
   //                        classic "Claude keeps clicking a ref that no
   //                        longer exists" loop.
   let toolCallCount = 0;
   let consecutiveErrors = 0;
+  let lastErrorTool = null;
   const recentCalls = []; // { name, inputKey }
-  const MAX_TOOL_CALLS = 40;
+  const MAX_TOOL_CALLS = 50;
   const LOOP_WINDOW = 4;
   const LOOP_REPEATS = 3;      // 3 identical (tool, input) inside the window = loop
-  const MAX_CONSECUTIVE_ERRORS = 3;
+  const MAX_CONSECUTIVE_ERRORS = 6;  // was 3, too eager — Gmail etc. fail 4+ times casually
 
   // Three safety nets so a misbehaving task can't run forever:
   //   1. No-first-event (20s):  the host never emitted a single event.
@@ -277,17 +294,27 @@ export async function handleMaxChat(messages) {
             // fall back to keyword heuristic for older runtimes.
             const isError = block.is_error === true
               || /^(error|failed|exception|timed? out)/i.test(content.trim());
+            const errTool = toolActions[toolActions.length - 1]?.tool;
             if (isError) {
-              consecutiveErrors++;
+              // Reset the streak when Claude switches tools — that's
+              // legitimate adaptation, not repeated failure. Only count
+              // errors that come from the SAME tool as the previous error.
+              if (lastErrorTool && errTool === lastErrorTool) {
+                consecutiveErrors++;
+              } else {
+                consecutiveErrors = 1;
+              }
+              lastErrorTool = errTool || null;
               if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
                 timeoutCancel(
-                  `توقّفت: ${consecutiveErrors} أخطاء أدوات متتالية. `
-                  + `الصفحة ربّما تغيّرت أو الأداة لا تناسب الموقف — راجع ثم أعد الطلب.`
+                  `توقّفت: الأداة "${errTool}" فشلت ${consecutiveErrors} مرّات متتالية. `
+                  + `جرّب أداة أخرى أو غيّر الأسلوب — النقطة هنا محصَّنة.`
                 );
                 return;
               }
             } else {
               consecutiveErrors = 0;
+              lastErrorTool = null;
             }
           }
         }
