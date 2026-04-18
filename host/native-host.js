@@ -514,11 +514,29 @@ process.stdin.on("data", (chunk) => {
   }
 });
 
-process.stdin.on("end", () => {
-  if (tcpSocket) tcpSocket.destroy();
-  for (const p of activeProcs.values()) { try { p.kill(); } catch {} }
-  process.exit(0);
-});
+// When the browser goes away (stdin EOF on the native-messaging pipe)
+// we MUST take every claude subprocess with us. Using p.kill() here
+// sends SIGTERM, which Windows doesn't propagate to grandchildren —
+// so claude's own mcp-server kept running after browser close, and
+// its tool calls kept firing on the next browser launch. killTree
+// shells out to `taskkill /F /T /PID` on Windows and does the full
+// SIGTERM→SIGKILL dance on POSIX.
+//
+// SIGINT / SIGTERM / SIGHUP cover the other ways this process can be
+// asked to quit (Ctrl-C from a dev shell, OS shutdown, service mgr).
+function shutdown() {
+  if (tcpSocket) { try { tcpSocket.destroy(); } catch {} }
+  for (const p of activeProcs.values()) { try { killTree(p); } catch {} }
+  activeProcs.clear();
+  // Give taskkill a beat to finish before we exit, otherwise Node
+  // tears down the spawn handles mid-call and the taskkill process
+  // inherits nothing to operate on.
+  setTimeout(() => process.exit(0), 150);
+}
+process.stdin.on("end", shutdown);
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+process.on("SIGHUP", shutdown);
 
 // Announce readiness immediately.
 write({ type: "ready", claudeBin: CLAUDE_BIN, ts: Date.now(), tcpPort: TCP_PORT });

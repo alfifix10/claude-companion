@@ -61,6 +61,12 @@ function setLoading(on) {
   }
 }
 
+// Short window after hardStop where residual events from the dying
+// subprocess are dropped. Without it, a buffered text_delta that
+// reaches us after we set isLoading=false would re-flip the UI to
+// "loading" via the resume-detection path below.
+let stopBlackoutUntil = 0;
+
 function hardStop(reason = "أوقفت العملية.") {
   // 1. Abort any in-flight local runLocal
   if (currentCancel) currentCancel.aborted = true;
@@ -70,6 +76,7 @@ function hardStop(reason = "أوقفت العملية.") {
   streamingBubble = null;
   // 4. Reset all UI state
   setLoading(false);
+  stopBlackoutUntil = Date.now() + 3000;
   if (reason) appendError(reason);
 }
 
@@ -101,9 +108,32 @@ function connectBg() {
 }
 
 function onBgMessage(msg) {
-  // Ignore any message from a task the user already stopped.
-  // `isLoading` is the reliable signal — hardStop sets it false.
-  if (!isLoading && msg.type !== "no_task") return;
+  // Three cases where !isLoading, each handled differently:
+  //
+  //   1. Post-stop residue. hardStop just fired; the dying subprocess
+  //      may emit a few more text_delta / tool_results before it dies.
+  //      Drop everything for 3 seconds so we don't resurrect the UI.
+  //
+  //   2. Panel resume. The user closed the panel (or the whole tab /
+  //      browser) while a task was running, then reopened it. The bg
+  //      replays the task's buffered messages via get_status. Outside
+  //      the post-stop blackout, a live event arriving while idle is
+  //      the resume signal — flip back to loading so the stop button
+  //      works and incoming text_deltas render into a bubble.
+  //
+  //   3. no_task. Cheap signal that get_status found nothing. Keep.
+  const postStopBlackout = Date.now() < stopBlackoutUntil;
+  if (!isLoading && postStopBlackout && msg.type !== "no_task") return;
+  if (!isLoading && !postStopBlackout &&
+      (msg.type === "text_delta" || msg.type === "tool_start")) {
+    // Resuming a task that started in a previous panel session.
+    setLoading(true);
+    removeWelcome();
+    setTyping(true, "Claude يفكّر...");
+  }
+  // After the resume path, idle + non-resume types still fall through
+  // to the switch so `done` / `error` / `no_task` land correctly even
+  // on a freshly-opened panel.
 
   switch (msg.type) {
     case "text_delta":
