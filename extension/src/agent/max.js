@@ -348,18 +348,32 @@ export async function handleMaxChat(messages) {
               );
               return;
             }
-            const inputKey = safeInputKey(block.input);
-            recentCalls.push({ name, inputKey });
-            if (recentCalls.length > LOOP_WINDOW) recentCalls.shift();
-            const identical = recentCalls.filter(
-              (c) => c.name === name && c.inputKey === inputKey
-            ).length;
-            if (identical >= LOOP_REPEATS) {
-              timeoutCancel(
-                `توقّفت: تكرّرت الأداة "${name}" بنفس المُدخلات ${identical} مرّات — `
-                + `حلقة واضحة. جرّب مقاربة مختلفة.`
-              );
-              return;
+            // Loop detection: 3 identical (tool, input) calls inside a
+            // 4-call window = real stuck loop (e.g. clicking a ref that
+            // doesn't exist anymore).
+            //
+            // EXEMPT: tools whose semantics MEAN "do the same thing
+            // again" — scrolling through long content, waiting for a
+            // dynamic change, re-reading the page after an action.
+            // These routinely repeat with identical input and that's
+            // healthy progress, not a loop. The older version fired
+            // "توقّفت: تكرّرت الأداة scroll" on pages long enough to
+            // need 3 page-downs, which is the wrong signal.
+            const REPEAT_SAFE = new Set(["scroll", "wait_for", "read_page"]);
+            if (!REPEAT_SAFE.has(name)) {
+              const inputKey = safeInputKey(block.input);
+              recentCalls.push({ name, inputKey });
+              if (recentCalls.length > LOOP_WINDOW) recentCalls.shift();
+              const identical = recentCalls.filter(
+                (c) => c.name === name && c.inputKey === inputKey
+              ).length;
+              if (identical >= LOOP_REPEATS) {
+                timeoutCancel(
+                  `توقّفت: تكرّرت الأداة "${name}" بنفس المُدخلات ${identical} مرّات — `
+                  + `حلقة واضحة. جرّب مقاربة مختلفة.`
+                );
+                return;
+              }
             }
           }
         }
