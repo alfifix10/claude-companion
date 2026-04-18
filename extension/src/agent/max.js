@@ -19,6 +19,22 @@ import {
 import { getActiveTab, sendContentMessage, scheduleDetachAll } from "../core/cdp.js";
 import { rejectToolsFor } from "../tools/native-tool-handlers.js";
 
+// Stable key for a tool-call input so we can detect exact repeats. Uses
+// JSON with sorted keys; falls back to String() if the input is weird
+// (circular references etc.).
+function safeInputKey(input) {
+  try {
+    if (input === null || input === undefined) return "";
+    if (typeof input !== "object") return String(input);
+    const keys = Object.keys(input).sort();
+    const obj = {};
+    for (const k of keys) obj[k] = input[k];
+    return JSON.stringify(obj);
+  } catch {
+    return String(input);
+  }
+}
+
 // Toggle the task-level sticky border. Individual tool calls pulse it
 // separately so there's always a visual even if this fails to reach the tab.
 async function setBorder(tabId, show) {
@@ -81,7 +97,15 @@ RULES:
   • If you get a Chromium error page, say so plainly and suggest a fix.
   • Prefer read_page over screenshot — it's 10× cheaper in tokens.
   • JS dialogs (confirm/prompt) are auto-dismissed for safety. If you need the
-    action to go through, look for an in-page button or ask the user.`;
+    action to go through, look for an in-page button or ask the user.
+
+  STOP CONDITIONS (do NOT keep burning tokens):
+  • If the SAME tool call fails twice, STOP retrying. Explain the blocker to
+    the user in plain Arabic, suggest one alternative, and wait.
+  • After 3 errors in a row, STOP and summarize what you tried.
+  • If you've called 15+ tools and still haven't made concrete progress, STOP
+    and ask the user to narrow the task or confirm the approach.
+  • Never call the exact same tool with the exact same input more than twice.`;
 
   if (memories) {
     base += `\n\nUSER MEMORIES:\n${memories.slice(0, 500)}`;
@@ -133,6 +157,21 @@ export async function handleMaxChat(messages) {
   let assistantText = "";
   let firstEventSeen = false;
   let lastProgressAt = Date.now();
+
+  // Anti-stuck guardrails so a wandering task doesn't silently burn the
+  // Max quota for minutes on end.
+  //   • toolCallCount:     hard cap per task (catches endless exploration)
+  //   • consecutiveErrors: stops after N failures in a row
+  //   • recentCalls:       stops if the same (tool, input) repeats — the
+  //                        classic "Claude keeps clicking a ref that no
+  //                        longer exists" loop.
+  let toolCallCount = 0;
+  let consecutiveErrors = 0;
+  const recentCalls = []; // { name, inputKey }
+  const MAX_TOOL_CALLS = 40;
+  const LOOP_WINDOW = 4;
+  const LOOP_REPEATS = 3;      // 3 identical (tool, input) inside the window = loop
+  const MAX_CONSECUTIVE_ERRORS = 3;
 
   // Three safety nets so a misbehaving task can't run forever:
   //   1. No-first-event (20s):  the host never emitted a single event.
@@ -195,6 +234,29 @@ export async function handleMaxChat(messages) {
               borderShown = true;
               setBorder(activeTask?.tabId, true);
             }
+
+            // ── Anti-stuck: budget + loop detection ──
+            toolCallCount++;
+            if (toolCallCount > MAX_TOOL_CALLS) {
+              timeoutCancel(
+                `توقّفت: تجاوزت ${MAX_TOOL_CALLS} خطوة أداة دون إنجاز واضح. `
+                + `قسّم المهمّة إلى خطوات أصغر وحدّد الهدف بدقّة.`
+              );
+              return;
+            }
+            const inputKey = safeInputKey(block.input);
+            recentCalls.push({ name, inputKey });
+            if (recentCalls.length > LOOP_WINDOW) recentCalls.shift();
+            const identical = recentCalls.filter(
+              (c) => c.name === name && c.inputKey === inputKey
+            ).length;
+            if (identical >= LOOP_REPEATS) {
+              timeoutCancel(
+                `توقّفت: تكرّرت الأداة "${name}" بنفس المُدخلات ${identical} مرّات — `
+                + `حلقة واضحة. جرّب مقاربة مختلفة.`
+              );
+              return;
+            }
           }
         }
       } else if (ev.type === "user" && ev.message?.content) {
@@ -205,6 +267,23 @@ export async function handleMaxChat(messages) {
               : String(block.content || "");
             if (toolActions.length) {
               toolActions[toolActions.length - 1].result = content.slice(0, 200);
+            }
+            // ── Anti-stuck: consecutive-error detection ──
+            // is_error is the authoritative signal from the MCP layer;
+            // fall back to keyword heuristic for older runtimes.
+            const isError = block.is_error === true
+              || /^(error|failed|exception|timed? out)/i.test(content.trim());
+            if (isError) {
+              consecutiveErrors++;
+              if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                timeoutCancel(
+                  `توقّفت: ${consecutiveErrors} أخطاء أدوات متتالية. `
+                  + `الصفحة ربّما تغيّرت أو الأداة لا تناسب الموقف — راجع ثم أعد الطلب.`
+                );
+                return;
+              }
+            } else {
+              consecutiveErrors = 0;
             }
           }
         }
