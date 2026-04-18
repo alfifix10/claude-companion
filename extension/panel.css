@@ -329,7 +329,13 @@ body {
   background: var(--input-bg); color: var(--text);
   font-family: inherit; font-size: 12.5px; line-height: 1.7;
   direction: rtl; outline: none; resize: none;
+  /* Auto-grow with content (Chromium 123+). Clamped between
+     min/max so the field can never cover the whole panel and
+     never collapse below a usable first-draft height. Above
+     max-height the textarea starts scrolling internally. */
+  field-sizing: content;
   min-height: 80px;
+  max-height: 240px;
   transition: border-color .15s;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
