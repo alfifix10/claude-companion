@@ -7,6 +7,9 @@ import { attachedTabs, screenshotStore, pendingDialogs } from "./state.js";
 import { sleep } from "./utils.js";
 
 export async function ensureAttached(tabId) {
+  // A new attach means a fresh period of activity — cancel any pending
+  // idle-detach from a previous task so we don't tear the pipe out mid-flight.
+  cancelDetachSchedule();
   if (attachedTabs.has(tabId)) return;
   await chrome.debugger.attach({ tabId }, "1.3");
   attachedTabs.set(tabId, { enabledDomains: new Set() });
@@ -19,6 +22,40 @@ export async function ensureAttached(tabId) {
       width: win.width, height: win.height, deviceScaleFactor: 1, mobile: false,
     });
   } catch {}
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Idle detach
+//
+// Chromium shows a mandatory "Extension is debugging this browser" bar
+// while any tab has chrome.debugger attached. The bar steals ~36 px of
+// vertical space from both the page AND the side panel, which users
+// reasonably find annoying when they're not actively running a task.
+//
+// Policy: once the current Max task finishes, wait DETACH_IDLE_MS of
+// quiet, then detach every tab we attached. If a new task starts inside
+// that window, ensureAttached cancels the pending detach — avoids a
+// bar-flicker between back-to-back prompts.
+// ──────────────────────────────────────────────────────────────────────────
+const DETACH_IDLE_MS = 5_000;
+let detachTimer = null;
+
+export function cancelDetachSchedule() {
+  if (detachTimer) { clearTimeout(detachTimer); detachTimer = null; }
+}
+
+export function scheduleDetachAll(delayMs = DETACH_IDLE_MS) {
+  cancelDetachSchedule();
+  if (attachedTabs.size === 0) return; // nothing to detach
+  detachTimer = setTimeout(async () => {
+    detachTimer = null;
+    // Snapshot first — we mutate the map as we go.
+    const tabIds = [...attachedTabs.keys()];
+    for (const tabId of tabIds) {
+      try { await chrome.debugger.detach({ tabId }); } catch {}
+      attachedTabs.delete(tabId);
+    }
+  }, delayMs);
 }
 
 export async function ensureDomain(tabId, domain) {

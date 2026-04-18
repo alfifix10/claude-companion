@@ -16,7 +16,7 @@ import {
   ensureHealthyPort, sendMaxQuery, cancelMaxQuery, cancelAllHost,
   registerResponseHandler, unregisterResponseHandler,
 } from "../messaging/native.js";
-import { getActiveTab, sendContentMessage } from "../core/cdp.js";
+import { getActiveTab, sendContentMessage, scheduleDetachAll } from "../core/cdp.js";
 import { rejectToolsFor } from "../tools/native-tool-handlers.js";
 
 // Toggle the task-level sticky border. Individual tool calls pulse it
@@ -43,6 +43,9 @@ export function cancelActiveMaxTask() {
     const tabId = activeTask?.tabId;
     if (tabId) setBorder(tabId, false);
   } catch {}
+  // Same reasoning — user-initiated stop should also release the debugger
+  // bar after a short idle, so the browser feels "clean" again.
+  scheduleDetachAll();
 }
 
 function buildPrompt({ userMsg, history, tab, memories }) {
@@ -250,6 +253,10 @@ export async function handleMaxChat(messages) {
     // Only hide if we actually showed one. Prevents an unnecessary content-
     // script ping on tabs we never touched.
     if (borderShown) setBorder(activeTask?.tabId, false);
+    // Schedule debugger detach so Chromium's "is debugging this browser"
+    // bar disappears after ~5s of idle. A new task arriving within that
+    // window cancels the detach (see ensureAttached).
+    scheduleDetachAll();
     if (activeTask) {
       activeTask.running = false;
       activeTask.finalResult = result;
