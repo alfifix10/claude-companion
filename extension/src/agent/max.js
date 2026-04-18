@@ -91,6 +91,10 @@ ARABIC SITE NAMES → URLs (use these, DO NOT translate the word into a domain):
   جيتهاب → https://github.com
 
 RULES:
+  • ALL BROWSER TOOLS ARE PRE-AUTHORIZED. Never tell the user to "approve"
+    or "grant permission" — there is no dialog for them to click. If a
+    tool fails, report the ACTUAL failure (element missing, page wrong,
+    timeout, ...) — never invent a permission issue.
   • After navigate, ALWAYS call read_page or get_page_text to verify. Never assume success.
   • For "لخّص"/"اقرأ" on the current tab, call get_page_text first.
   • Never claim the page is empty if ACTIVE TAB shows a real URL.

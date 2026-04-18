@@ -235,37 +235,25 @@ function handleMaxQuery(msg) {
     return;
   }
 
-  const args = ["-p", "--output-format", "stream-json", "--verbose"];
+  const args = [
+    "-p", "--output-format", "stream-json", "--verbose",
+    // We run headless (`-p`): there is no human sitting at the CLI to
+    // answer permission prompts. Without skip-permissions, Claude
+    // verbalises "I need approval" and never actually runs the tool —
+    // the user saw this as endless "لازم توافق على إذن" messages for
+    // tools that would otherwise succeed instantly.
+    //
+    // Security is enforced by --disallowedTools below (a hard filter
+    // respected even under skip-permissions) plus the extension's own
+    // sandbox: we never expose Bash/Write/Edit to the CLI, so a
+    // compromised prompt cannot get shell or filesystem access through
+    // this path.
+    "--dangerously-skip-permissions",
+  ];
   if (msg.model) args.push("--model", msg.model);
 
-  // SECURITY: a layered authorisation model.
-  //   Allow:    every user-configured MCP server, plus safe read-only
-  //             built-ins.
-  //   Disallow: built-ins that touch the filesystem or spawn shells.
-  //
-  // Why multiple MCP patterns:
-  //   The Claude CLI's wildcard glob treats `__` as a segment separator,
-  //   so `mcp__*` does NOT match `mcp__server__tool`. We therefore pass
-  //   several patterns — the explicit one for our server (always works)
-  //   plus a double-wildcard that matches every MCP server the user has
-  //   registered. Without this, user-configured MCPs (Gmail, GitHub, etc.)
-  //   hang on permission prompts, which cannot be answered in -p mode.
-  //
-  // We still block Bash / Write / Edit / NotebookEdit on the built-in
-  // side — a compromised prompt cannot get code execution or mutate the
-  // user's filesystem through the CLI.
-  //
-  // msg.allowedTools from the caller is IGNORED by design — a compromised
-  // panel.js must not be able to widen the blast radius.
-  const HARD_ALLOWLIST = [
-    "mcp__claude-companion__*",   // our own server — explicit, always works
-    "mcp__*__*",                   // any other MCP server the user registered
-    "Read", "Grep", "Glob", "WebFetch", "WebSearch",
-  ];
-  for (const t of HARD_ALLOWLIST) args.push("--allowedTools", t);
-
-  // Belt-and-suspenders — explicitly deny anything that could touch the FS
-  // or spawn shells, even if a future CLI version changes allowlist semantics.
+  // Hard filter on built-in tools that could touch the filesystem or
+  // spawn shells. Respected even with --dangerously-skip-permissions.
   const HARD_DISALLOW = ["Bash", "Write", "Edit", "NotebookEdit"];
   for (const t of HARD_DISALLOW) args.push("--disallowedTools", t);
 
