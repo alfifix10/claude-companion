@@ -371,8 +371,149 @@ function attachCopyButton(wrap, getText) {
   wrap.appendChild(btn);
 }
 
-function appendUser(text) {
-  appendUserMessage(text, []);
+function appendUser(text, msgIdx) {
+  appendUserMessage(text, [], msgIdx);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// In-place editor for sent user messages (ChatGPT-style).
+//
+// Click ✎ → bubble transforms into textarea + [حفظ] [إلغاء].
+// Save   → every subsequent DOM bubble is removed, conversation[] is
+//          truncated to the edited slot, and send() fires the new
+//          text. Claude sees a fresh context — the old assistant
+//          reply is gone from both UI and future requests.
+// Cancel → the bubble snaps back to its original rendered state.
+//
+// Images on the original bubble are dropped on save (pendingImages is
+// always empty at edit time). The common edit-and-resend use case is
+// text-only, so this is a simplification worth its weight.
+// ─────────────────────────────────────────────────────────────────────
+function attachEditButton(wrap, msgIdx) {
+  const btn = document.createElement("button");
+  btn.className = "edit-ico";
+  btn.title = "تعديل وإعادة الإرسال";
+  btn.setAttribute("aria-label", "تعديل الرسالة");
+  btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>`;
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    enterEditMode(wrap, msgIdx);
+  });
+  wrap.appendChild(btn);
+}
+
+function enterEditMode(wrap, msgIdx) {
+  const msgEl = wrap.querySelector(".msg");
+  const textEl = wrap.querySelector(".msg-text");
+  if (!msgEl || !textEl) return;  // image-only bubble — nothing to edit
+
+  const originalText = textEl.textContent;
+
+  // Build the editor UI.
+  const editor = document.createElement("div");
+  editor.className = "edit-box";
+  const ta = document.createElement("textarea");
+  ta.className = "edit-textarea";
+  ta.value = originalText;
+  ta.dir = "rtl";
+  const actions = document.createElement("div");
+  actions.className = "edit-actions";
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "edit-save";
+  saveBtn.textContent = "حفظ";
+  saveBtn.title = "Enter";
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "edit-cancel";
+  cancelBtn.textContent = "إلغاء";
+  cancelBtn.title = "Escape";
+  actions.appendChild(saveBtn);
+  actions.appendChild(cancelBtn);
+  editor.appendChild(ta);
+  editor.appendChild(actions);
+
+  // Swap bubble for editor — keep the edit/copy icons out of the way.
+  msgEl.style.display = "none";
+  const editIco = wrap.querySelector(".edit-ico");
+  const copyIco = wrap.querySelector(".copy-ico");
+  if (editIco) editIco.style.display = "none";
+  if (copyIco) copyIco.style.display = "none";
+  wrap.appendChild(editor);
+
+  // Autosize textarea to content up to a sensible cap; Chromium 123+
+  // has field-sizing: content which does the same thing in pure CSS,
+  // so the JS path is a no-op there.
+  ta.style.height = "auto";
+  ta.style.height = Math.min(ta.scrollHeight + 2, 240) + "px";
+  ta.focus();
+  ta.setSelectionRange(ta.value.length, ta.value.length);
+
+  const cancel = () => {
+    editor.remove();
+    msgEl.style.display = "";
+    if (editIco) editIco.style.display = "";
+    if (copyIco) copyIco.style.display = "";
+  };
+  const save = () => {
+    const newText = ta.value.trim();
+    if (!newText) return;                        // empty = stay in edit mode
+    if (newText === originalText) { cancel(); return; }
+    commitEdit(wrap, msgIdx, newText);
+  };
+
+  saveBtn.addEventListener("click", save);
+  cancelBtn.addEventListener("click", cancel);
+  ta.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); save(); }
+    else if (e.key === "Escape")          { e.preventDefault(); cancel(); }
+  });
+  ta.addEventListener("input", () => {
+    // Re-autosize on every keystroke (covers paste, long lines).
+    ta.style.height = "auto";
+    ta.style.height = Math.min(ta.scrollHeight + 2, 240) + "px";
+  });
+}
+
+function commitEdit(wrap, msgIdx, newText) {
+  // If a task is currently streaming, the user pressing save is
+  // basically "forget that, here's my new question" — stop the task
+  // first, same pattern send() uses for overlap.
+  if (isLoading) {
+    hardStop("");
+    setTimeout(() => performEdit(wrap, msgIdx, newText), 150);
+  } else {
+    performEdit(wrap, msgIdx, newText);
+  }
+}
+
+function performEdit(wrap, msgIdx, newText) {
+  // 1. Peel every DOM node after the edited bubble (and the bubble
+  //    itself) — includes tool-lines, screenshots, error bubbles,
+  //    later user/assistant bubbles. send() below re-adds the
+  //    current edited turn from scratch.
+  let node = wrap.nextSibling;
+  while (node) {
+    const nxt = node.nextSibling;
+    node.remove();
+    node = nxt;
+  }
+  wrap.remove();
+
+  // 2. Truncate conversation[] to everything BEFORE the edited slot.
+  //    send() will push the new user message at exactly msgIdx, so
+  //    the DOM data-msg-idx links stay stable for earlier bubbles.
+  if (Number.isFinite(msgIdx) && msgIdx >= 0 && msgIdx <= conversation.length) {
+    conversation = conversation.slice(0, msgIdx);
+  }
+
+  // 3. Persist the truncated state before firing the request — matches
+  //    how send() saves on completion.
+  saveHistory();
+
+  // 4. Replay through the normal send path. Images aren't carried
+  //    over; if the user wants them back, they can paste again.
+  $input.value = newText;
+  $input.dispatchEvent(new Event("input"));
+  send();
 }
 
 /**
@@ -388,10 +529,17 @@ function appendUser(text) {
  * Copy button still only copies the text; copying images is browser-clumsy
  * and out of scope here.
  */
-function appendUserMessage(text, images) {
+function appendUserMessage(text, images, msgIdx) {
   if (!text && (!images || images.length === 0)) return;
   removeWelcome();
   const wrap = makeMessageWrap("user");
+  // msgIdx links the DOM bubble back to its slot in conversation[] so
+  // the edit button can truncate correctly. At send() time the push
+  // into conversation happens AFTER this call, so conversation.length
+  // IS the upcoming slot. When replaying history, the caller already
+  // knows the index and passes it explicitly.
+  const idx = (typeof msgIdx === "number") ? msgIdx : conversation.length;
+  wrap.dataset.msgIdx = String(idx);
   const d = document.createElement("div");
   d.className = "msg user";
   // Image-only bubble uses a tighter padding via .has-media so the
@@ -417,9 +565,13 @@ function appendUserMessage(text, images) {
     d.appendChild(wrap2);
   }
   wrap.appendChild(d);
-  // Copy button for text portion only — image copy is browser-specific and
-  // adds complexity for marginal value.
-  if (text) attachCopyButton(wrap, () => text);
+  // Copy + edit buttons for text portion only. Image-only bubbles
+  // don't get an editor (there's nothing textual to edit) and the
+  // clipboard flow for images is browser-specific anyway.
+  if (text) {
+    attachEditButton(wrap, idx);
+    attachCopyButton(wrap, () => text);
+  }
   $messages.appendChild(wrap);
   scrollToBottom();
 }
@@ -1277,8 +1429,11 @@ async function loadHistory() {
 
 function renderStoredConversation(messages) {
   setFreshChat(false);
-  for (const m of messages) {
-    if (m.role === "user") appendUser(m.content);
+  // Pass the loop index as msgIdx so each replayed user bubble keeps
+  // its link back to conversation[] (used by the edit button).
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role === "user") appendUser(m.content, i);
     else appendAssistantBubble(m.content);
   }
 }
