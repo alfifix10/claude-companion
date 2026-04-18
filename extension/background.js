@@ -28,15 +28,47 @@ chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true }).catch(() =>
 
 
 // ──────────────────────────────────────────────────────────────────────────
-// Keep-alive alarm — every 20 seconds, below the 30s SW idle limit
+// Keep-alive
+//
+// MV3 kills a quiet service worker after ~30 s. Three overlapping
+// strategies keep us alive when there's work to do and let us die
+// cleanly when there isn't:
+//
+//   1. chrome.alarms "keepalive" at 1 min. Chrome clamps anything
+//      lower than 0.5 min on stable builds — the old 20/60 value
+//      was silently being rounded up. 1 min is explicit and honest;
+//      alarms act as a cold-restart trigger, not a primary keep-awake.
+//
+//   2. `setInterval(chrome.runtime.getPlatformInfo, 20 s)`. A pending
+//      chrome.* API call is one of the few things that reliably
+//      resets the SW idle timer — setInterval/setTimeout alone do
+//      NOT keep the SW alive in MV3. We issue a cheap async call
+//      every 20 s, which keeps the SW warm for as long as it's
+//      alive in the first place.
+//
+//   3. Panel port (chrome.runtime.connect from panel.js) — an open
+//      long-lived port keeps the SW alive as long as the panel is
+//      open. Handled in messaging/panel.js.
+//
+// When all three quiesce (no panel, no task, no alarm tick yet),
+// the SW is free to sleep — that's correct MV3 behaviour.
 // ──────────────────────────────────────────────────────────────────────────
-chrome.alarms.create("keepalive", { periodInMinutes: 20 / 60 });
+chrome.alarms.create("keepalive", { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== "keepalive") return;
-  // Cheap wake-up: ensure the native port is healthy (reconnects if needed).
-  // Doesn't spawn anything expensive — just keeps the pipe warm.
+  // Cold-restart hook: the alarm can fire even after the SW was
+  // fully unloaded. Re-establish the native port if it's dropped.
   if (!nativePort) connectNativeHost();
 });
+
+// Re-arm the cheap chrome.* call every 20 s. Wrapped in a try so a
+// future Chrome change that makes getPlatformInfo throw synchronously
+// can't prevent the worker from starting up.
+try {
+  setInterval(() => {
+    try { chrome.runtime.getPlatformInfo(() => void chrome.runtime.lastError); } catch {}
+  }, 20_000);
+} catch {}
 
 // ──────────────────────────────────────────────────────────────────────────
 // Tab lifecycle cleanup

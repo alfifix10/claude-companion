@@ -250,11 +250,28 @@ function handleMaxQuery(msg) {
     // this path.
     "--dangerously-skip-permissions",
   ];
-  if (msg.model) args.push("--model", msg.model);
+  // msg.model is validated against a strict allowlist before reaching the
+  // CLI — a crafted "model" field like "foo & calc.exe" would otherwise
+  // ride into cmd.exe when we go through a shell on Windows.
+  const MODEL_ALLOWED = /^[A-Za-z0-9._:/-]{1,64}$/;
+  if (msg.model) {
+    if (!MODEL_ALLOWED.test(String(msg.model))) {
+      write({ id: msg.id, type: "max_error", error: "invalid model name" });
+      return;
+    }
+    args.push("--model", String(msg.model));
+  }
 
   // Hard filter on built-in tools that could touch the filesystem or
   // spawn shells. Respected even with --dangerously-skip-permissions.
-  const HARD_DISALLOW = ["Bash", "Write", "Edit", "NotebookEdit"];
+  // run_javascript is listed here too: the tool exposes arbitrary
+  // Runtime.evaluate on the user's active tab, which combined with
+  // skip-permissions + any third-party MCP would be a session hijack
+  // vector (see SECURITY_REVIEW.md finding #2).
+  const HARD_DISALLOW = [
+    "Bash", "Write", "Edit", "NotebookEdit",
+    "mcp__claude-companion__run_javascript",
+  ];
   for (const t of HARD_DISALLOW) args.push("--disallowedTools", t);
 
   // If the user pasted images, switch to stream-json input so we can attach
@@ -265,8 +282,20 @@ function handleMaxQuery(msg) {
 
   try {
     const isWin = process.platform === "win32";
-    const proc = spawn(CLAUDE_BIN, args, {
-      shell: isWin,
+    // AVOID shell: true on Windows. With shell: true, every arg is
+    // interpolated into a cmd.exe command line where metacharacters
+    // (`&`, `|`, `>`, `%VAR%`) would execute. Instead, launch .cmd
+    // shims via cmd.exe /c with args passed as an array — cmd.exe
+    // then hands each arg to the target process without re-parsing.
+    let cmd = CLAUDE_BIN;
+    let finalArgs = args;
+    let useShell = false;
+    if (isWin && /\.cmd$/i.test(CLAUDE_BIN)) {
+      cmd = process.env.COMSPEC || "cmd.exe";
+      finalArgs = ["/d", "/s", "/c", CLAUDE_BIN, ...args];
+    }
+    const proc = spawn(cmd, finalArgs, {
+      shell: useShell,
       windowsHide: true,
       env: { ...process.env, CLAUDE_COMPANION_SESSION: SESSION_ID },
       stdio: ["pipe", "pipe", "pipe"],

@@ -7,12 +7,50 @@
   --accent: #c2632f;   /* Claude orange, dimmed */
   --accent-br: #d97d4d;
   --accent-bg: rgba(194,99,47,.12);
+  --accent-ring: rgba(217,125,77,.55);  /* focus ring on interactive */
   --border: #2a2d3a;
   --input-bg: #1e2130;
   --input-br: #3a3d4a;
   --green: #22c55e;
   --red: #ef4444;
   --warn: #f59e0b;
+  /* Z-index scale — replaces magic numbers at overlays / floats / toasts */
+  --z-float: 10;
+  --z-overlay: 50;
+  --z-toast: 100;
+}
+
+/* ─── Accessibility essentials ─────────────────────────────────────
+   1. Keyboard users get a clearly-visible ring on every interactive
+      surface. :focus-visible only triggers for keyboard-initiated
+      focus (not mouse clicks), so mouse users don't see it.
+   2. Users who requested reduced motion (OS-level setting) get their
+      wish honoured — all animations + transitions collapse to near-
+      instant. Scroll behaviour also drops to auto.
+   ────────────────────────────────────────────────────────────────── */
+.ibtn:focus-visible,
+.chip:focus-visible,
+.task-chip:focus-visible,
+.starter-chip:focus-visible,
+.send-btn:focus-visible,
+.mic-btn:focus-visible,
+.scroll-btn:focus-visible,
+.copy-ico:focus-visible,
+.conv-item:focus-visible,
+.conv-delete:focus-visible,
+.settings-save-btn:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent-br);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { width: 100%; height: 100%; }
@@ -185,7 +223,7 @@ body {
    Clicking an item loads it into the main chat view; the × per row
    deletes it with no confirmation (matches the feel of a chat sidebar). */
 .history-overlay {
-  position: absolute; inset: 0; z-index: 50;
+  position: absolute; inset: 0; z-index: var(--z-overlay);
   background: var(--bg);
   display: flex; flex-direction: column;
   animation: histSlide .18s ease-out;
@@ -259,7 +297,7 @@ body {
   font-size: 11.5px; line-height: 1.5;
   text-align: center; direction: rtl;
   box-shadow: 0 4px 14px rgba(0,0,0,.35);
-  z-index: 100;
+  z-index: var(--z-toast);
   animation: noticeIn .2s cubic-bezier(0.2, 0, 0.2, 1);
 }
 .notice.info {
@@ -352,7 +390,7 @@ body {
   pointer-events: none; /* unclickable while hidden */
   transition: opacity .18s ease, transform .18s ease, background .18s;
   box-shadow: 0 4px 14px rgba(0,0,0,.35);
-  z-index: 10;
+  z-index: var(--z-float);
 }
 .scroll-btn.visible {
   opacity: 1;

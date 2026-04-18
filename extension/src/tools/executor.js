@@ -300,29 +300,39 @@ export async function executeTool(name, input, tabId) {
       // the image and can say "click label 5" — we resolve to the ref.
       // Useful for complex pages where A11y refs get stale and for any
       // "find me this button" situation where coords are too fragile.
+      //
+      // try/finally is critical: if takeScreenshot throws (tab crashed,
+      // debugger detached, tab switched), the labels would otherwise
+      // stay painted on the page until the user navigates or reloads
+      // — a high-visibility failure mode. The content script also
+      // auto-removes them after 8 s as a secondary safety net.
       let labels = null;
-      if (input.labels) {
-        try {
-          const resp = await sendContentMessage(tabId, {
-            type: "addScreenshotLabels",
-            max: Math.min(Math.max(input.max_labels || 30, 5), 60),
-          });
-          labels = resp?.result?.labels || null;
-        } catch {}
+      let labelsAdded = false;
+      try {
+        if (input.labels) {
+          try {
+            const resp = await sendContentMessage(tabId, {
+              type: "addScreenshotLabels",
+              max: Math.min(Math.max(input.max_labels || 30, 5), 60),
+            });
+            labels = resp?.result?.labels || null;
+            labelsAdded = !!labels;
+          } catch {}
+        }
+        const { base64 } = await takeScreenshot(tabId);
+        if (labels && Object.keys(labels).length) {
+          const lines = Object.entries(labels)
+            .map(([n, m]) => `  ${n}: ${m.role}${m.name ? ` "${m.name}"` : ""} @(${m.x},${m.y}) ref=${m.ref}`)
+            .join("\n");
+          return { type: "screenshot_labeled", base64, labels,
+            text: `Screenshot with ${Object.keys(labels).length} labeled interactive elements:\n${lines}\n\nTo act on one: "click ref=<value>" from the legend above, or use coordinates (x,y) from the entry.` };
+        }
+        return { type: "screenshot", base64 };
+      } finally {
+        if (labelsAdded) {
+          try { await sendContentMessage(tabId, { type: "removeScreenshotLabels" }); } catch {}
+        }
       }
-      const { base64 } = await takeScreenshot(tabId);
-      if (input.labels) {
-        try { await sendContentMessage(tabId, { type: "removeScreenshotLabels" }); } catch {}
-      }
-      if (labels && Object.keys(labels).length) {
-        // Serialise the mapping as a small legend Claude can read.
-        const lines = Object.entries(labels)
-          .map(([n, m]) => `  ${n}: ${m.role}${m.name ? ` "${m.name}"` : ""} @(${m.x},${m.y}) ref=${m.ref}`)
-          .join("\n");
-        return { type: "screenshot_labeled", base64, labels,
-          text: `Screenshot with ${Object.keys(labels).length} labeled interactive elements:\n${lines}\n\nTo act on one: "click ref=<value>" from the legend above, or use coordinates (x,y) from the entry.` };
-      }
-      return { type: "screenshot", base64 };
     }
     case "scroll": {
       await ensureAttached(tabId);
@@ -408,7 +418,26 @@ export async function executeTool(name, input, tabId) {
     }
     case "run_javascript": {
       await ensureAttached(tabId);
-      const r = await cdp(tabId, "Runtime.evaluate", { expression: input.code, returnByValue: true, awaitPromise: true });
+      // Hard 10-second cap on evaluated JS — without it, an infinite
+      // loop (`while(true){}`) or a never-resolving promise
+      // (`new Promise(()=>{})`) wedges the whole tool pipeline for the
+      // CDP default (~30 s) and blocks every subsequent action. On
+      // timeout we call Runtime.terminateExecution so the next tool
+      // call starts on a clean context.
+      const RUN_JS_TIMEOUT = 10_000;
+      const evalPromise = cdp(tabId, "Runtime.evaluate", {
+        expression: input.code,
+        returnByValue: true,
+        awaitPromise: true,
+      });
+      const timeoutPromise = new Promise((resolve) => {
+        setTimeout(() => resolve({ __timeout: true }), RUN_JS_TIMEOUT);
+      });
+      const r = await Promise.race([evalPromise, timeoutPromise]);
+      if (r?.__timeout) {
+        try { await cdp(tabId, "Runtime.terminateExecution", {}); } catch {}
+        return `Error: run_javascript timed out after ${RUN_JS_TIMEOUT}ms (execution terminated).`;
+      }
       if (r.exceptionDetails) return `Error: ${r.exceptionDetails.text || JSON.stringify(r.exceptionDetails)}`;
       const v = r.result;
       if (v.type === "undefined") return "undefined";
