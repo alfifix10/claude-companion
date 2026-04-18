@@ -125,6 +125,13 @@ RULES:
   • Never claim the page is empty if ACTIVE TAB shows a real URL.
   • If you get a Chromium error page, say so plainly and suggest a fix.
   • Prefer read_page over screenshot — it's 10× cheaper in tokens.
+  • When DOM refs from read_page don't work (canvas apps like Google Docs,
+    heavily styled sites, stale refs after re-render), call screenshot
+    with labels=true. It returns the image plus a legend mapping each
+    numbered badge to its ref + coordinates. Click by ref OR by (x,y).
+  • Every mutating tool (click / drag / Enter-press) now returns a
+    trailer showing what changed: "| → /new-url, +8 عناصر, ⚠ حوار ظهر".
+    Read it FIRST — don't re-call read_page unless you need detail.
   • JS dialogs (confirm/prompt) are auto-dismissed for safety. If you need the
     action to go through, look for an in-page button or ask the user.
 

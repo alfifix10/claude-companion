@@ -408,11 +408,15 @@ server.tool("form_input", "Set the value of a form field by ref.", {
   value: z.string(),
 }, async (a) => ({ content: [{ type: "text", text: String(await request("form_input", a)) }] }));
 
-server.tool("screenshot", "Capture a JPEG screenshot of the viewport.", {}, async () => {
-  const r = await request("screenshot", {});
+server.tool("screenshot", "Capture a JPEG screenshot of the viewport. Set labels=true to overlay numbered badges on every visible interactive element and return a legend mapping each label to its ref + coordinates — use this when DOM refs are unreliable (canvas-heavy pages, dynamic SPAs) or when you want to see WHERE each element is on screen.", {
+  labels: z.boolean().optional(),
+  max_labels: z.number().int().min(5).max(60).optional(),
+}, async (a) => {
+  const r = await request("screenshot", a);
   if (r && typeof r === "object" && r.base64) {
+    const text = r.text || "Screenshot captured.";
     return { content: [
-      { type: "text", text: "Screenshot captured." },
+      { type: "text", text },
       { type: "image", data: r.base64, mimeType: "image/jpeg" },
     ]};
   }

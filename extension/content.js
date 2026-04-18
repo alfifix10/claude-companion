@@ -485,6 +485,120 @@
   }
 
   // ─────────────────────────────────────────────────────────────────────
+  // Set-of-Mark labels for screenshots
+  //
+  // Paints numbered badges on every visible interactive element before
+  // a screenshot is taken, so Claude can look at the image and say
+  // "click label 5" instead of guessing coordinates or hunting refs.
+  // Same technique used by browser-use and OpenAI Operator.
+  //
+  // Returns a mapping { "1": { ref, role, name, x, y, w, h }, ... }
+  // so the caller can resolve "label 5" back to a real interactable
+  // element with its DOM ref.
+  //
+  // Labels are capped at 40 to keep the image readable and to bias
+  // toward the most-interactable subset. Overlay is removed via
+  // removeScreenshotLabels() or auto-expires after 8 s as a safety.
+  // ─────────────────────────────────────────────────────────────────────
+  const LABEL_CONTAINER_ID = "__cc_som_labels__";
+  let labelAutoHideTimer = null;
+
+  function addScreenshotLabels(maxLabels = 40) {
+    removeScreenshotLabels();
+    ensureStyle();
+    const container = document.createElement("div");
+    container.id = LABEL_CONTAINER_ID;
+    container.style.cssText = `
+      position: fixed; inset: 0; pointer-events: none;
+      z-index: 2147483647;
+    `;
+
+    // Only label elements that are actually interactive + visible in viewport.
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const candidates = [];
+    // Use querySelectorAll for speed — only a handful of selectors.
+    const sel = 'button, a[href], input:not([type="hidden"]), select, textarea, '
+      + '[role="button"], [role="link"], [role="textbox"], [role="checkbox"], '
+      + '[role="menuitem"], [role="tab"], [role="option"], [tabindex]:not([tabindex="-1"])';
+    for (const el of document.querySelectorAll(sel)) {
+      if (!isVisible(el)) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 6 || r.height < 6) continue;
+      if (r.right < 0 || r.bottom < 0 || r.left > vw || r.top > vh) continue;
+      candidates.push({ el, r, area: r.width * r.height });
+    }
+    // Sort by area descending — bigger / more obvious elements get
+    // lower label numbers, which reads nicer in the image.
+    candidates.sort((a, b) => b.area - a.area);
+    const chosen = candidates.slice(0, maxLabels);
+
+    const mapping = {};
+    const hues = ["#f97316", "#22c55e", "#3b82f6", "#a855f7", "#ec4899"];
+    chosen.forEach((c, idx) => {
+      const n = idx + 1;
+      const ref = getOrAssignRef(c.el);
+      const role = getRole(c.el) || "";
+      const name = getAccessibleName(c.el) || "";
+      const color = hues[idx % hues.length];
+
+      // Ring around the element
+      const ring = document.createElement("div");
+      ring.style.cssText = `
+        position: fixed;
+        left: ${Math.max(0, c.r.left - 2)}px;
+        top: ${Math.max(0, c.r.top - 2)}px;
+        width: ${c.r.width + 4}px;
+        height: ${c.r.height + 4}px;
+        border: 2px solid ${color};
+        border-radius: 4px;
+        box-sizing: border-box;
+      `;
+      container.appendChild(ring);
+
+      // Number badge — top-right corner of the element, clamped inside viewport
+      const badgeSize = 18;
+      let bx = c.r.right - badgeSize;
+      let by = Math.max(0, c.r.top - badgeSize / 2);
+      if (bx + badgeSize > vw) bx = vw - badgeSize;
+      if (bx < 0) bx = 0;
+      const badge = document.createElement("div");
+      badge.textContent = String(n);
+      badge.style.cssText = `
+        position: fixed;
+        left: ${bx}px; top: ${by}px;
+        width: ${badgeSize}px; height: ${badgeSize}px;
+        background: ${color}; color: #fff;
+        font: bold 11px -apple-system, sans-serif;
+        line-height: ${badgeSize}px; text-align: center;
+        border-radius: 4px;
+        box-shadow: 0 1px 3px rgba(0,0,0,.4);
+      `;
+      container.appendChild(badge);
+
+      mapping[n] = {
+        ref, role,
+        name: name.slice(0, 60),
+        x: Math.round(c.r.x + c.r.width / 2),
+        y: Math.round(c.r.y + c.r.height / 2),
+        w: Math.round(c.r.width),
+        h: Math.round(c.r.height),
+      };
+    });
+
+    (document.body || document.documentElement).appendChild(container);
+    if (labelAutoHideTimer) clearTimeout(labelAutoHideTimer);
+    labelAutoHideTimer = setTimeout(removeScreenshotLabels, 8000);
+    return { labels: mapping, count: chosen.length, total: candidates.length };
+  }
+
+  function removeScreenshotLabels() {
+    if (labelAutoHideTimer) { clearTimeout(labelAutoHideTimer); labelAutoHideTimer = null; }
+    const el = document.getElementById(LABEL_CONTAINER_ID);
+    if (el) el.remove();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
   // Message handler (bridge from service worker)
   // ─────────────────────────────────────────────────────────────────────
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -504,6 +618,8 @@
     if (msg.type === "getRefCoordinates") { sendResponse({ result: getRefCoordinates(msg.ref) }); return true; }
     if (msg.type === "scrollToRef") { sendResponse({ result: scrollToRef(msg.ref) }); return true; }
     if (msg.type === "highlightElements") { highlightElements(msg.refs || []); sendResponse({ result: true }); return true; }
+    if (msg.type === "addScreenshotLabels") { sendResponse({ result: addScreenshotLabels(msg.max || 40) }); return true; }
+    if (msg.type === "removeScreenshotLabels") { removeScreenshotLabels(); sendResponse({ result: true }); return true; }
     if (msg.type === "showAutomationBorder") {
       showBorder({ sticky: !!msg.sticky, autoHideMs: msg.autoHideMs });
       sendResponse({ result: true });

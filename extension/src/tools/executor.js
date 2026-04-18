@@ -295,7 +295,33 @@ export async function executeTool(name, input, tabId) {
     }
     case "screenshot": {
       await ensureAttached(tabId);
+      // Set-of-Mark mode: overlay numbered labels on every interactive
+      // element before taking the shot, then remove them. Claude sees
+      // the image and can say "click label 5" — we resolve to the ref.
+      // Useful for complex pages where A11y refs get stale and for any
+      // "find me this button" situation where coords are too fragile.
+      let labels = null;
+      if (input.labels) {
+        try {
+          const resp = await sendContentMessage(tabId, {
+            type: "addScreenshotLabels",
+            max: Math.min(Math.max(input.max_labels || 30, 5), 60),
+          });
+          labels = resp?.result?.labels || null;
+        } catch {}
+      }
       const { base64 } = await takeScreenshot(tabId);
+      if (input.labels) {
+        try { await sendContentMessage(tabId, { type: "removeScreenshotLabels" }); } catch {}
+      }
+      if (labels && Object.keys(labels).length) {
+        // Serialise the mapping as a small legend Claude can read.
+        const lines = Object.entries(labels)
+          .map(([n, m]) => `  ${n}: ${m.role}${m.name ? ` "${m.name}"` : ""} @(${m.x},${m.y}) ref=${m.ref}`)
+          .join("\n");
+        return { type: "screenshot_labeled", base64, labels,
+          text: `Screenshot with ${Object.keys(labels).length} labeled interactive elements:\n${lines}\n\nTo act on one: "click ref=<value>" from the legend above, or use coordinates (x,y) from the entry.` };
+      }
       return { type: "screenshot", base64 };
     }
     case "scroll": {
