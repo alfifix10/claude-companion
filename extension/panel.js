@@ -389,7 +389,7 @@ function appendUser(text, msgIdx) {
 // always empty at edit time). The common edit-and-resend use case is
 // text-only, so this is a simplification worth its weight.
 // ─────────────────────────────────────────────────────────────────────
-function attachEditButton(wrap, msgIdx) {
+function attachEditButton(parent, msgIdx) {
   const btn = document.createElement("button");
   btn.className = "edit-ico";
   btn.title = "تعديل وإعادة الإرسال";
@@ -397,9 +397,14 @@ function attachEditButton(wrap, msgIdx) {
   btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>`;
   btn.addEventListener("click", (e) => {
     e.stopPropagation();
-    enterEditMode(wrap, msgIdx);
+    // `parent` is the .msg-actions column — enterEditMode needs the
+    // outer .msg-wrap (where .msg and .msg-text actually live).
+    // Climb up at click time instead of closing over `parent`, which
+    // would break if the DOM structure changes again later.
+    const msgWrap = btn.closest(".msg-wrap");
+    if (msgWrap) enterEditMode(msgWrap, msgIdx);
   });
-  wrap.appendChild(btn);
+  parent.appendChild(btn);
 }
 
 function enterEditMode(wrap, msgIdx) {
