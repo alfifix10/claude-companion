@@ -1051,20 +1051,63 @@ async function convDelete(id) {
   }
 }
 
+/**
+ * The single authoritative reset point for "start a new conversation".
+ *
+ * After this resolves the panel is guaranteed to be in this state:
+ *   • no task running — any in-flight one is hard-stopped first so we
+ *     never wipe the DOM out from under a streaming bubble
+ *   • currentConvId === null; nothing persists in storage yet. A new
+ *     conversation will be minted by ensureCurrentConv on first save.
+ *   • streamingBubble === null so no stale reference points at a
+ *     detached DOM node
+ *   • conversation array, messages DOM, and welcome screen reset
+ *   • pasted-image attachments cleared — they belonged to the previous
+ *     chat's context, carrying them over would be confusing
+ *   • floating scroll-to-bottom button hidden (empty list = nothing to
+ *     scroll), followingBottom flag back to true
+ *   • input text PRESERVED — "what I'm composing" is independent of
+ *     which conversation is active (matches ChatGPT / Claude.ai)
+ *   • send button state re-evaluated against that preserved text
+ *   • history overlay closed
+ *   • keyboard focus on the input, ready to type
+ *
+ * Idempotent: calling it twice in a row is a no-op on the second call
+ * except for the focus, which is harmless.
+ */
 async function startNewConversation() {
+  // 1. Stop any streaming task before we tear down its render target.
   if (isLoading) {
     hardStop("");
     await new Promise((r) => setTimeout(r, 150));
   }
-  // Don't orphan an empty conv in storage — just reset local state.
-  // ensureCurrentConv will mint a new id on the first save.
+
+  // 2. Chat state.
   currentConvId = null;
   await chrome.storage.local.remove("currentConvId");
   conversation = [];
+  streamingBubble = null;
+
+  // 3. DOM — empty message list, welcome panel back.
   $messages.innerHTML = "";
   $welcome.style.display = "block";
   $messages.appendChild($welcome);
+
+  // 4. Attachments belonged to the previous chat's context.
+  if (pendingImages.length) {
+    pendingImages = [];
+    renderAttachments();
+  }
+
+  // 5. Scroll button — with no content there is nothing to scroll to.
+  //    updateScrollBtn recomputes visibility from distanceFromBottom.
+  followingBottom = true;
+  updateScrollBtn();
+
+  // 6. UX — close overlay, focus input, re-evaluate send button.
   closeHistory();
+  try { $input.focus({ preventScroll: true }); } catch { $input.focus(); }
+  updateSend();
 }
 
 function openHistory() { renderHistoryList(); $historyOverlay.hidden = false; }
