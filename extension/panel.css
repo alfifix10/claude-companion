@@ -246,19 +246,19 @@ body {
 .conv-item:hover .conv-delete { opacity: .7; }
 .conv-delete:hover { opacity: 1 !important; color: var(--red); background: rgba(239,68,68,.1); }
 
-/* Transient notice — slots in just below the header so it doesn't
-   cover the + / 🕐 / ⚙ buttons. For errors/info that shouldn't land
-   in the chat history. */
+/* Transient notice — floats just above the input row so it's next to
+   the mic/send buttons (the usual source) and doesn't block the chips
+   or chat area. For errors/info that shouldn't land in the chat. */
 .notice {
-  position: fixed; top: 56px; left: 50%;
+  position: fixed; bottom: 72px; left: 50%;
   transform: translateX(-50%);
   max-width: calc(100% - 20px); width: max-content;
-  padding: 8px 14px; border-radius: 8px;
+  padding: 7px 13px; border-radius: 8px;
   background: #2a1515; color: #fca5a5;
   border: 1px solid rgba(239, 68, 68, .25);
-  font-size: 11.5px; line-height: 1.55;
+  font-size: 11.5px; line-height: 1.5;
   text-align: center; direction: rtl;
-  box-shadow: 0 6px 18px rgba(0,0,0,.35);
+  box-shadow: 0 4px 14px rgba(0,0,0,.35);
   z-index: 100;
   animation: noticeIn .2s cubic-bezier(0.2, 0, 0.2, 1);
 }
@@ -268,7 +268,7 @@ body {
 }
 .notice[hidden] { display: none; }
 @keyframes noticeIn {
-  from { opacity: 0; transform: translate(-50%, -4px); }
+  from { opacity: 0; transform: translate(-50%, 6px); }
   to   { opacity: 1; transform: translate(-50%, 0); }
 }
 
