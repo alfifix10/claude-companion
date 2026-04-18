@@ -570,14 +570,18 @@ body {
 }
 .edit-textarea {
   width: 100%;
-  min-height: 72px;
-  max-height: 240px;
-  padding: 10px 12px;
+  /* Match the main composer feel: short by default, auto-grows with
+     content up to a reasonable ceiling. field-sizing is the modern
+     native way to do this (Chromium 123+); no JS needed. */
+  field-sizing: content;
+  min-height: 40px;
+  max-height: 200px;
+  padding: 9px 12px;
   background: var(--input-bg);
   color: var(--text);
   border: 1px solid var(--input-br);
   border-radius: 10px;
-  font: inherit; font-size: 13px; line-height: 1.6;
+  font: inherit; font-size: 13px; line-height: 1.4;
   direction: rtl; resize: none; outline: none;
   transition: border-color .15s;
   scrollbar-width: thin;

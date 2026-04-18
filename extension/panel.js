@@ -444,11 +444,9 @@ function enterEditMode(wrap, msgIdx) {
   if (copyIco) copyIco.style.display = "none";
   wrap.appendChild(editor);
 
-  // Autosize textarea to content up to a sensible cap; Chromium 123+
-  // has field-sizing: content which does the same thing in pure CSS,
-  // so the JS path is a no-op there.
-  ta.style.height = "auto";
-  ta.style.height = Math.min(ta.scrollHeight + 2, 240) + "px";
+  // field-sizing: content (set in CSS) auto-grows the textarea with
+  // the content natively on Chromium 123+. No JS height juggling —
+  // setting style.height would actually fight the CSS.
   ta.focus();
   ta.setSelectionRange(ta.value.length, ta.value.length);
 
@@ -471,11 +469,7 @@ function enterEditMode(wrap, msgIdx) {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); save(); }
     else if (e.key === "Escape")          { e.preventDefault(); cancel(); }
   });
-  ta.addEventListener("input", () => {
-    // Re-autosize on every keystroke (covers paste, long lines).
-    ta.style.height = "auto";
-    ta.style.height = Math.min(ta.scrollHeight + 2, 240) + "px";
-  });
+  // No input listener needed — field-sizing: content handles growth.
 }
 
 function commitEdit(wrap, msgIdx, newText) {
