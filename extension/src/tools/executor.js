@@ -28,6 +28,38 @@ function pulseBorder(tabId) {
   sendContentMessage(tabId, { type: "showAutomationBorder", autoHideMs: 2500 }).catch(() => {});
 }
 
+// Human-paced typing. Input.insertText is atomic — the whole string
+// appears in one tick, which most keystroke-listening apps (Gmail,
+// Twitter composer, Google Docs, rich-text editors) notice and either
+// mishandle or flag as bot input. Typing one character at a time with
+// variable delays solves both:
+//   • Each insertText triggers the site's input/keyup listeners in the
+//     same cadence a keyboard would.
+//   • Variable delay (60–140 ms) + occasional "thinking pause" (200–
+//     450 ms every 8–14 chars) reproduces the irregular rhythm of a
+//     human typist.
+// For very long text (>300 chars) we fall back to instant insertText —
+// Claude typically means "paste this" for long content, and a 300-char
+// string at 90 ms average is already ~27 s of waiting.
+async function humanType(tabId, text) {
+  if (!text) return;
+  if (text.length > 300) {
+    await cdp(tabId, "Input.insertText", { text });
+    return;
+  }
+  let untilPause = 8 + Math.floor(Math.random() * 7); // next pause in 8–14 chars
+  for (let i = 0; i < text.length; i++) {
+    await cdp(tabId, "Input.insertText", { text: text[i] });
+    const base = 60 + Math.random() * 80;
+    let extra = 0;
+    if (--untilPause <= 0) {
+      extra = 200 + Math.random() * 250;
+      untilPause = 8 + Math.floor(Math.random() * 7);
+    }
+    await sleep(base + extra);
+  }
+}
+
 function rippleAt(tabId, x, y) {
   if (!tabId || x == null) return;
   sendContentMessage(tabId, { type: "showClickRipple", x, y }).catch(() => {});
@@ -110,7 +142,7 @@ export async function executeTool(name, input, tabId) {
     }
     case "type_text": {
       await ensureAttached(tabId);
-      await cdp(tabId, "Input.insertText", { text: input.text });
+      await humanType(tabId, input.text);
       return `Typed "${input.text.slice(0, 50)}${input.text.length > 50 ? "..." : ""}"`;
     }
     case "press_key": {

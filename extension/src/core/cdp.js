@@ -84,13 +84,94 @@ export async function dispatchMouse(tabId, type, x, y, opts = {}) {
   });
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Human-like mouse path
+//
+// A raw Input.dispatchMouseEvent to (x, y) is a single teleport — no
+// mousemove history, which is the exact fingerprint sites like Stripe,
+// Cloudflare Turnstile, and Gmail's click handlers look for. Real users
+// move the cursor along a curved path with mousemove events before the
+// click lands, so we reproduce that:
+//
+//   1. Start from the last known cursor position on this tab (or a
+//      plausible edge pixel on first call).
+//   2. Trace a quadratic Bezier to the target with a perpendicular
+//      offset control point — gives a soft, non-straight arc.
+//   3. Emit 6–9 mouseMoved events along the arc with 8–20 ms jitter.
+//   4. Sleep briefly on target (hover-before-click), then press/release
+//      with a slightly random hold duration.
+//
+// Total added latency: ~100–250 ms per click. Worth it — this alone
+// unblocks dozens of sites that silently ignored synthetic clicks.
+// ──────────────────────────────────────────────────────────────────────────
+
+const lastMousePos = new Map(); // tabId → { x, y }
+
+function bezier(t, p0, p1, p2) {
+  const mt = 1 - t;
+  return {
+    x: mt * mt * p0.x + 2 * mt * t * p1.x + t * t * p2.x,
+    y: mt * mt * p0.y + 2 * mt * t * p1.y + t * t * p2.y,
+  };
+}
+
+function curveControlPoint(from, to) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const dist = Math.hypot(dx, dy) || 1;
+  // Perpendicular offset, scaled to the distance but capped so short
+  // hops don't produce wild arcs.
+  const magnitude = Math.min(dist * 0.25, 90) * (Math.random() * 0.6 + 0.4);
+  const sign = Math.random() < 0.5 ? 1 : -1;
+  return {
+    x: (from.x + to.x) / 2 + (-dy / dist) * magnitude * sign,
+    y: (from.y + to.y) / 2 + (dx / dist) * magnitude * sign,
+  };
+}
+
+async function humanMouseMove(tabId, from, to, modifiers = 0) {
+  const cp = curveControlPoint(from, to);
+  const steps = 6 + Math.floor(Math.random() * 4); // 6–9
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const p = bezier(t, from, cp, to);
+    await dispatchMouse(tabId, "mouseMoved", Math.round(p.x), Math.round(p.y), { modifiers });
+    await sleep(8 + Math.random() * 12);
+  }
+}
+
 export async function mouseClick(tabId, x, y, opts = {}) {
-  const base = { button: opts.button || "left", clickCount: opts.clickCount || 1, modifiers: opts.modifiers || 0 };
-  await dispatchMouse(tabId, "mouseMoved", x, y, { modifiers: base.modifiers });
-  await sleep(40);
+  const base = {
+    button: opts.button || "left",
+    clickCount: opts.clickCount || 1,
+    modifiers: opts.modifiers || 0,
+  };
+
+  // Start point: wherever the cursor was last seen on this tab, or a
+  // plausible neutral position if this is the first click.
+  const from = lastMousePos.get(tabId) || {
+    x: 40 + Math.random() * 80,
+    y: 40 + Math.random() * 80,
+  };
+  await humanMouseMove(tabId, from, { x, y }, base.modifiers);
+  lastMousePos.set(tabId, { x, y });
+
+  // Brief hover before the press — real users don't click the instant
+  // the cursor arrives. Random 50–130 ms.
+  await sleep(50 + Math.random() * 80);
   await dispatchMouse(tabId, "mousePressed", x, y, base);
-  await sleep(40);
+  // Hold duration — real clicks are 40–110 ms between down and up.
+  await sleep(40 + Math.random() * 70);
   await dispatchMouse(tabId, "mouseReleased", x, y, base);
+}
+
+// Public accessor so other modules can know where we last moved the
+// cursor (useful for drag gestures and chained hovers later).
+export function getLastMousePos(tabId) {
+  return lastMousePos.get(tabId) || null;
+}
+export function clearLastMousePos(tabId) {
+  lastMousePos.delete(tabId);
 }
 
 // ──────────────────────────────────────────────────────────────────────────

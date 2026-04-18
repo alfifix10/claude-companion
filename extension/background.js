@@ -13,7 +13,7 @@
  */
 
 import { attachedTabs, consoleMessages, networkRequests, pendingDialogs, tabGroupTabs, nativePort } from "./src/core/state.js";
-import { cdp } from "./src/core/cdp.js";
+import { cdp, clearLastMousePos } from "./src/core/cdp.js";
 import { recoverTabGroupState } from "./src/core/tabs.js";
 import { connectNativeHost, ensureHealthyPort } from "./src/messaging/native.js";
 import { restoreFromNativeIfEmpty, mirrorToNative } from "./src/core/user-data.js";
@@ -51,6 +51,8 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   // Was missing: a dialog open at the moment of close leaves a stale entry.
   // Chromium sometimes recycles tab IDs, so this can mislead later dialogs.
   pendingDialogs.delete(tabId);
+  // Mouse-position memory for human-like click paths.
+  clearLastMousePos(tabId);
 });
 
 chrome.debugger.onDetach.addListener((source) => {
