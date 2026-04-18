@@ -14,6 +14,7 @@
 
 import { attachedTabs, consoleMessages, networkRequests, pendingDialogs, tabGroupTabs, nativePort } from "./src/core/state.js";
 import { cdp, clearLastMousePos } from "./src/core/cdp.js";
+import { invalidatePageTextCache } from "./src/tools/executor.js";
 import { recoverTabGroupState } from "./src/core/tabs.js";
 import { connectNativeHost, ensureHealthyPort } from "./src/messaging/native.js";
 import { restoreFromNativeIfEmpty, mirrorToNative } from "./src/core/user-data.js";
@@ -53,6 +54,14 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   pendingDialogs.delete(tabId);
   // Mouse-position memory for human-like click paths.
   clearLastMousePos(tabId);
+  // Extracted-text cache — no reason to keep it after the tab closes.
+  invalidatePageTextCache(tabId);
+});
+
+// URL change in an existing tab is a navigation — invalidate the cache
+// so Claude sees the fresh content on the next get_page_text.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.url) invalidatePageTextCache(tabId);
 });
 
 chrome.debugger.onDetach.addListener((source) => {

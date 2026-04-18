@@ -28,6 +28,29 @@ function pulseBorder(tabId) {
   sendContentMessage(tabId, { type: "showAutomationBorder", autoHideMs: 2500 }).catch(() => {});
 }
 
+// Per-URL cache of get_page_text output.
+//
+// Readability extraction + serialisation runs ~100–300 ms inside the
+// content script, and Claude frequently calls get_page_text twice in a
+// row (once to confirm navigation, once to actually consume the text).
+// Caching the previous result saves that round-trip entirely when the
+// page has not been interacted with.
+//
+// Invalidation rules (see invalidatePageTextCache below):
+//   • Any click / type_text / form_input / press_key / scroll / drag
+//     on the tab → evict that tab's entry.
+//   • navigate → evict.
+//   • 60-second TTL as a defensive fallback for pages that update on
+//     their own (news tickers, timelines).
+// Everything else (read_page, screenshot, etc.) is allowed to re-use.
+const pageTextCache = new Map(); // tabId → { url, title, text, ts }
+const PAGE_TEXT_TTL_MS = 60_000;
+
+export function invalidatePageTextCache(tabId) {
+  if (tabId == null) return;
+  pageTextCache.delete(tabId);
+}
+
 // Human-paced typing. Input.insertText is atomic — the whole string
 // appears in one tick, which most keystroke-listening apps (Gmail,
 // Twitter composer, Google Docs, rich-text editors) notice and either
@@ -86,6 +109,7 @@ export async function executeTool(name, input, tabId) {
       return `Opened tab ${t.id}: ${t.url}`;
     }
     case "navigate": {
+      invalidatePageTextCache(tabId);
       if (input.direction === "back") { await cdp(tabId, "Page.goBack", {}); return "Went back"; }
       if (input.direction === "forward") { await cdp(tabId, "Page.goForward", {}); return "Went forward"; }
       let url = input.url;
@@ -107,10 +131,23 @@ export async function executeTool(name, input, tabId) {
       return `Page${tag}: ${tab.title}\nURL: ${tab.url}\n\n${resp?.result || "(error reading page)"}`;
     }
     case "get_page_text": {
+      const tab = await chrome.tabs.get(tabId);
+      const cached = pageTextCache.get(tabId);
+      if (cached
+          && cached.url === tab.url
+          && Date.now() - cached.ts < PAGE_TEXT_TTL_MS) {
+        return `Title: ${cached.title}\nURL: ${cached.url}\n\n${cached.text.slice(0, 15000)}`;
+      }
       const resp = await sendContentMessage(tabId, { type: "getPageText" });
       if (!resp?.result) return "Error extracting text";
       try {
         const d = JSON.parse(resp.result);
+        pageTextCache.set(tabId, {
+          url: d.url || tab.url,
+          title: d.title || tab.title,
+          text: d.text || "",
+          ts: Date.now(),
+        });
         return `Title: ${d.title}\nURL: ${d.url}\n\n${(d.text || "").slice(0, 15000)}`;
       } catch { return resp.result; }
     }
@@ -130,6 +167,7 @@ export async function executeTool(name, input, tabId) {
       const [x, y] = await resolveClickTarget(tabId, input);
       if (x == null) return "Element not found (ref may have expired — call read_page again)";
       await ensureAttached(tabId);
+      invalidatePageTextCache(tabId);
       const button = input.button || "left";
       const modifiers = modifiersBitmask(input.modifiers);
       const urlBefore = (await cdp(tabId, "Runtime.evaluate", { expression: "location.href", returnByValue: true }))?.result?.value;
@@ -159,6 +197,7 @@ export async function executeTool(name, input, tabId) {
       if (src[0] == null) return "Drag source not found (ref expired?)";
       if (dst[0] == null) return "Drag destination not found (ref expired?)";
       await ensureAttached(tabId);
+      invalidatePageTextCache(tabId);
       rippleAt(tabId, src[0], src[1]);
       await mouseDrag(tabId, src[0], src[1], dst[0], dst[1]);
       await waitForDomStable(tabId);
@@ -167,11 +206,13 @@ export async function executeTool(name, input, tabId) {
     }
     case "type_text": {
       await ensureAttached(tabId);
+      invalidatePageTextCache(tabId);
       await humanType(tabId, input.text);
       return `Typed "${input.text.slice(0, 50)}${input.text.length > 50 ? "..." : ""}"`;
     }
     case "press_key": {
       await ensureAttached(tabId);
+      invalidatePageTextCache(tabId);
       const { key, modifiers } = parseKeyCombo(input.key);
       const code = key.length === 1 ? `Key${key.toUpperCase()}` : key;
       await cdp(tabId, "Input.dispatchKeyEvent", { type: "keyDown", key, code, modifiers });
@@ -179,6 +220,7 @@ export async function executeTool(name, input, tabId) {
       return `Pressed ${input.key}`;
     }
     case "form_input": {
+      invalidatePageTextCache(tabId);
       const resp = await sendContentMessage(tabId, { type: "setFormValue", ref: input.ref, value: input.value });
       if (resp?.result?.error) return `Error: ${resp.result.error}`;
       return `Set ${input.ref} = "${input.value}"`;

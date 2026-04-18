@@ -24,6 +24,40 @@ const SHORTCUTS = [
     action: "scroll", extract: () => ({ direction: "up" }) },
   { pattern: /^(?:افتح|اذهب\s+الى|اذهب\s+إلى|روح|انتقل|go\s+to|open)\s+(.+)$/i,
     action: "navigate", extract: (m) => ({ url: m[1].trim() }) },
+
+  // Pure browser-history moves — no AI needed, no DOM work.
+  { pattern: /^(?:ارجع|رجوع|خلف|للخلف|back)$/i,
+    action: "history", extract: () => ({ direction: "back" }) },
+  { pattern: /^(?:تقدم|للأمام|امام|أمام|forward)$/i,
+    action: "history", extract: () => ({ direction: "forward" }) },
+  { pattern: /^(?:حدّث|حدث|تحديث|reload|refresh)$/i,
+    action: "reload" },
+
+  // Tab management — instant, no AI.
+  { pattern: /^(?:اغلق\s+التبويب|اغلق\s+تبويب|اقفل\s+التبويب|close\s+tab)$/i,
+    action: "close_current_tab" },
+  { pattern: /^(?:تبويب\s+جديد|افتح\s+تبويب|new\s+tab)$/i,
+    action: "new_tab" },
+  { pattern: /^(?:التبويبات|اعرض\s+التبويبات|قائمة\s+التبويبات|list\s+tabs|show\s+tabs)$/i,
+    action: "list_tabs" },
+  { pattern: /^(?:التبويب\s+التالي|التالي|next\s+tab)$/i,
+    action: "switch_tab_rel", extract: () => ({ dir: 1 }) },
+  { pattern: /^(?:التبويب\s+السابق|السابق|previous\s+tab|prev\s+tab)$/i,
+    action: "switch_tab_rel", extract: () => ({ dir: -1 }) },
+
+  // Zoom — plain CSS/CDP, instant.
+  { pattern: /^(?:قرّب|قرب|كبّر|كبر|zoom\s+in)$/i,
+    action: "zoom", extract: () => ({ delta: +0.1 }) },
+  { pattern: /^(?:بعّد|بعد|صغّر|صغر|zoom\s+out)$/i,
+    action: "zoom", extract: () => ({ delta: -0.1 }) },
+  { pattern: /^(?:zoom\s+reset|حجم\s+أصلي|حجم\s+اصلي)$/i,
+    action: "zoom", extract: () => ({ reset: true }) },
+
+  // Find in page — uses find-as-you-type focus trick (triggers Ctrl+F).
+  // We can't actually open Chrome's native Find bar from an extension
+  // reliably, so we use content-script findElements + scroll-into-view.
+  { pattern: /^(?:ابحث\s+عن|ابحث|find|search\s+in\s+page)\s+(.+)$/i,
+    action: "find_in_page", extract: (m) => ({ query: m[1].trim() }) },
 ];
 
 // Common Arabic names → canonical URLs
@@ -172,6 +206,61 @@ export async function executeLocal(action, params = {}) {
       if (!/^https?:\/\//i.test(url)) url = "https://" + url;
       await executeTool("navigate", { url }, tabId);
       return { toolActions: [{ tool: "navigate", detail: url }] };
+    }
+    case "history": {
+      // Pure history traversal — no DOM work. CDP is faster than navigate
+      // because no tab update round-trip.
+      await executeTool("navigate", { direction: params.direction }, tabId);
+      return { toolActions: [{ tool: "navigate", detail: params.direction === "back" ? "رجوع" : "تقدّم" }] };
+    }
+    case "reload": {
+      await chrome.tabs.reload(tabId);
+      return { toolActions: [{ tool: "reload" }] };
+    }
+    case "close_current_tab": {
+      const info = `${tab.title || tab.url}`;
+      await chrome.tabs.remove(tabId);
+      return { text: `أُغلق التبويب: ${info}`, toolActions: [{ tool: "tabs_close" }] };
+    }
+    case "new_tab": {
+      const t = await chrome.tabs.create({ url: "chrome://newtab/", active: true });
+      return { text: `فُتح تبويب جديد (${t.id})`, toolActions: [{ tool: "tabs_create" }] };
+    }
+    case "list_tabs": {
+      const tabs = await chrome.tabs.query({ currentWindow: true });
+      const list = tabs
+        .map((t) => `${t.active ? "▸ " : "  "}[${t.id}] ${t.title || "(بلا عنوان)"}\n    ${t.url}`)
+        .join("\n");
+      return { text: `التبويبات (${tabs.length}):\n${list}` };
+    }
+    case "switch_tab_rel": {
+      // Rotate within the current window. +1 = next, -1 = previous.
+      const all = await chrome.tabs.query({ currentWindow: true });
+      const ordered = all.sort((a, b) => a.index - b.index);
+      const curIdx = ordered.findIndex((t) => t.active);
+      if (curIdx < 0) return { error: "لم أجد التبويب النشط" };
+      const nextIdx = (curIdx + params.dir + ordered.length) % ordered.length;
+      const next = ordered[nextIdx];
+      await chrome.tabs.update(next.id, { active: true });
+      return { text: `→ ${next.title || next.url}`, toolActions: [{ tool: "switch_tab" }] };
+    }
+    case "zoom": {
+      const current = await chrome.tabs.getZoom(tabId);
+      const target = params.reset
+        ? 1.0
+        : Math.max(0.3, Math.min(3.0, current + (params.delta || 0)));
+      await chrome.tabs.setZoom(tabId, target);
+      return { text: `Zoom: ${Math.round(target * 100)}%`, toolActions: [{ tool: "zoom" }] };
+    }
+    case "find_in_page": {
+      // Find the first match and scroll it into view. Highlights via the
+      // existing findElements path so the user sees a visual cue.
+      const resp = await sendContentMessage(tabId, { type: "findElements", query: params.query });
+      const hits = resp?.result || [];
+      if (!hits.length) return { error: `لا يوجد "${params.query}" في الصفحة` };
+      try { await sendContentMessage(tabId, { type: "scrollToRef", ref: hits[0].ref }); } catch {}
+      try { await sendContentMessage(tabId, { type: "highlightElements", refs: hits.slice(0, 8).map((h) => h.ref) }); } catch {}
+      return { text: `عثرت على ${hits.length} نتيجة لـ "${params.query}". الأولى مُظلّلة في الصفحة.` };
     }
     default:
       return { error: `إجراء غير معروف: ${action}` };
