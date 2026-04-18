@@ -55,25 +55,15 @@
     <div class="tasks-row" id="tasksRow"></div>
 
     <!-- Chat-area wrapper holds everything that reflows between the
-         "fresh chat" layout (welcome + centered input) and the regular
-         "active chat" layout (scrolling messages + input pinned bottom). -->
+         "fresh chat" layout (welcome + centered input + starter chips
+         below) and the regular "active chat" layout (scrolling messages
+         + input pinned bottom). -->
     <div class="chat-area" id="chatArea">
-      <!-- Welcome screen — shown in fresh-chat mode. Outside .messages so
-           it doesn't show in active conversations with history. -->
+      <!-- Welcome header — logo + greeting, shown in fresh-chat mode only.
+           The input box is the real hero below; this is just a frame. -->
       <div class="welcome" id="welcome">
         <img src="icons/icon128.png" alt="" class="welcome-logo">
         <h2 class="welcome-title">كيف أساعدك اليوم؟</h2>
-        <div class="starter-cards">
-          <button class="starter-card" data-starter="summarize">
-            <span>لخّص هذه الصفحة</span>
-          </button>
-          <button class="starter-card" data-starter="youtube">
-            <span>افتح يوتيوب</span>
-          </button>
-          <button class="starter-card" data-starter="compare">
-            <span>قارن بين التبويبات المفتوحة</span>
-          </button>
-        </div>
       </div>
 
       <!-- Messages — scrollable list, only meaningful in active mode. -->
@@ -113,6 +103,14 @@
           <rect x="6" y="6" width="12" height="12" rx="2"/>
         </svg>
       </button>
+    </div>
+
+    <!-- Starter chips — small horizontal pills below the input, visible
+         only in fresh-chat mode. One click fills the input and sends. -->
+    <div class="starter-row" id="starterRow">
+      <button class="starter-chip" data-starter="summarize">لخّص هذه الصفحة</button>
+      <button class="starter-chip" data-starter="youtube">افتح يوتيوب</button>
+      <button class="starter-chip" data-starter="compare">قارن التبويبات</button>
     </div>
     </div><!-- /.chat-area -->
 

@@ -159,7 +159,7 @@ const STARTER_PROMPTS = {
   youtube:   "افتح يوتيوب",
   compare:   "اعرض التبويبات المفتوحة ولخّص محتوى كلّ واحد بسطرَين",
 };
-document.querySelectorAll(".starter-card").forEach((btn) => {
+document.querySelectorAll(".starter-chip").forEach((btn) => {
   btn.addEventListener("click", () => {
     const kind = btn.dataset.starter;
     const prompt = STARTER_PROMPTS[kind];
