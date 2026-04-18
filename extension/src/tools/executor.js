@@ -51,6 +51,64 @@ export function invalidatePageTextCache(tabId) {
   pageTextCache.delete(tabId);
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Page-delta capture
+//
+// After any state-changing tool (click, type, form_input, press_key,
+// drag, navigate) we want to tell Claude IMMEDIATELY what that action
+// caused on the page, without Claude having to spend another tool call
+// on read_page just to check. Signal payload is intentionally tiny —
+// just enough to answer "did this click open a modal? navigate? lose
+// elements? surface an error?"
+//
+// The query runs as one Runtime.evaluate, ~30–60 ms total. Results
+// attach as a short trailer on the tool-result string.
+// ──────────────────────────────────────────────────────────────────────
+async function capturePageSignals(tabId) {
+  try {
+    const res = await cdp(tabId, "Runtime.evaluate", {
+      expression: `(() => {
+        const q = (sel) => document.querySelectorAll(sel).length;
+        const anyVisible = (sel) => {
+          for (const el of document.querySelectorAll(sel)) {
+            if (el.offsetParent !== null) return true;
+          }
+          return false;
+        };
+        return {
+          url: location.href,
+          title: document.title || "",
+          interactive: q('button, a[href], input:not([type="hidden"]), select, textarea, [role="button"], [role="link"], [role="textbox"], [role="checkbox"], [role="menuitem"]'),
+          hasDialog: !!document.querySelector('[role="dialog"][aria-hidden="false"], dialog[open]'),
+          errorVisible: anyVisible('[role="alert"], [aria-live="assertive"]'),
+        };
+      })()`,
+      returnByValue: true,
+    });
+    return res?.result?.value || null;
+  } catch { return null; }
+}
+
+function formatPageDelta(before, after) {
+  if (!before || !after) return "";
+  const parts = [];
+  if (before.url !== after.url) {
+    try {
+      const u = new URL(after.url);
+      parts.push(`→ ${u.pathname}${u.search || ""}`);
+    } catch { parts.push(`→ ${after.url}`); }
+  }
+  if (before.title !== after.title && after.title) {
+    const t = after.title.slice(0, 60);
+    parts.push(`"${t}${after.title.length > 60 ? "…" : ""}"`);
+  }
+  const diff = after.interactive - before.interactive;
+  if (Math.abs(diff) > 2) parts.push(`${diff > 0 ? "+" : ""}${diff} عناصر`);
+  if (!before.hasDialog && after.hasDialog) parts.push("⚠ حوار ظهر");
+  if (!before.errorVisible && after.errorVisible) parts.push("⚠ خطأ ظاهر");
+  return parts.length ? ` | ${parts.join(", ")}` : "";
+}
+
 // Human-paced typing. Input.insertText is atomic — the whole string
 // appears in one tick, which most keystroke-listening apps (Gmail,
 // Twitter composer, Google Docs, rich-text editors) notice and either
@@ -170,17 +228,15 @@ export async function executeTool(name, input, tabId) {
       invalidatePageTextCache(tabId);
       const button = input.button || "left";
       const modifiers = modifiersBitmask(input.modifiers);
-      const urlBefore = (await cdp(tabId, "Runtime.evaluate", { expression: "location.href", returnByValue: true }))?.result?.value;
+      const before = await capturePageSignals(tabId);
       rippleAt(tabId, x, y);
       await mouseClick(tabId, x, y, { button, modifiers });
       await waitForDomStable(tabId);
-      try {
-        const urlAfter = (await cdp(tabId, "Runtime.evaluate", { expression: "location.href", returnByValue: true }))?.result?.value;
-        if (urlAfter && urlAfter !== urlBefore) return `Clicked → navigated to ${urlAfter}.${dialogNote(tabId)}`;
-      } catch {}
+      const after = await capturePageSignals(tabId);
+      const delta = formatPageDelta(before, after);
       const modNote = input.modifiers?.length ? ` with ${input.modifiers.join("+")}` : "";
       const btnNote = button !== "left" ? ` (${button} button)` : "";
-      return `Clicked${btnNote}${modNote} at (${x}, ${y}).${dialogNote(tabId)}`;
+      return `Clicked${btnNote}${modNote} at (${x}, ${y})${delta}.${dialogNote(tabId)}`;
     }
     case "drag": {
       // Resolve source + destination independently — either can be a ref
@@ -198,11 +254,14 @@ export async function executeTool(name, input, tabId) {
       if (dst[0] == null) return "Drag destination not found (ref expired?)";
       await ensureAttached(tabId);
       invalidatePageTextCache(tabId);
+      const beforeDrag = await capturePageSignals(tabId);
       rippleAt(tabId, src[0], src[1]);
       await mouseDrag(tabId, src[0], src[1], dst[0], dst[1]);
       await waitForDomStable(tabId);
       rippleAt(tabId, dst[0], dst[1]);
-      return `Dragged from (${src[0]}, ${src[1]}) to (${dst[0]}, ${dst[1]}).${dialogNote(tabId)}`;
+      const afterDrag = await capturePageSignals(tabId);
+      const dragDelta = formatPageDelta(beforeDrag, afterDrag);
+      return `Dragged from (${src[0]}, ${src[1]}) to (${dst[0]}, ${dst[1]})${dragDelta}.${dialogNote(tabId)}`;
     }
     case "type_text": {
       await ensureAttached(tabId);
@@ -215,8 +274,17 @@ export async function executeTool(name, input, tabId) {
       invalidatePageTextCache(tabId);
       const { key, modifiers } = parseKeyCombo(input.key);
       const code = key.length === 1 ? `Key${key.toUpperCase()}` : key;
+      // Enter / Tab / Escape often submit or navigate — capture the
+      // delta so Claude knows what just happened.
+      const triggeringKey = /^(Enter|NumpadEnter|Tab|Escape)$/i.test(key);
+      const before = triggeringKey ? await capturePageSignals(tabId) : null;
       await cdp(tabId, "Input.dispatchKeyEvent", { type: "keyDown", key, code, modifiers });
       await cdp(tabId, "Input.dispatchKeyEvent", { type: "keyUp", key, code, modifiers });
+      if (triggeringKey) {
+        await waitForDomStable(tabId);
+        const after = await capturePageSignals(tabId);
+        return `Pressed ${input.key}${formatPageDelta(before, after)}`;
+      }
       return `Pressed ${input.key}`;
     }
     case "form_input": {
