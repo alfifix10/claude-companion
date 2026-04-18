@@ -18,6 +18,7 @@ const $tabDot = document.getElementById("tabDot");
 const $welcome = document.getElementById("welcome");
 const $tasksRow = document.getElementById("tasksRow");
 const $attachments = document.getElementById("attachments");
+const $scrollBtn = document.getElementById("scrollBtn");
 
 // Pasted images waiting to be sent with the next message.
 // { mediaType: "image/png", base64: "iVBOR..." }
@@ -89,7 +90,9 @@ function onBgMessage(msg) {
       streamingBubble ??= appendAssistantBubble("");
       streamingBubble.dataset.raw = (streamingBubble.dataset.raw || "") + msg.text;
       streamingBubble.innerHTML = renderMarkdown(streamingBubble.dataset.raw);
-      scrollToBottom();
+      // Only auto-follow if the user was already near the bottom — don't
+      // yank them around while they're reading earlier content.
+      scrollToBottomIfFollowing();
       break;
     case "tool_start":
       setTyping(true, `جارٍ: ${TOOL_LABELS[msg.tool] || msg.tool}...`);
@@ -106,6 +109,10 @@ function onBgMessage(msg) {
       if (text) conversation.push({ role: "assistant", content: text });
       setLoading(false);
       saveHistory();
+      // If the user had scrolled up to read something else while the
+      // answer was streaming, give the floating ↓ button a brief pulse so
+      // they notice the reply is ready.
+      notifyNewMessage();
       break;
     }
     case "error":
@@ -420,7 +427,79 @@ function appendToolActions(actions) {
   scrollToBottom();
 }
 
-function scrollToBottom() { $messages.scrollTop = $messages.scrollHeight; }
+// ─────────────────────────────────────────────────────────────────────
+// Scroll management
+//
+// The user can be in one of two modes:
+//   • "following"  — they're at (or near) the bottom, so we auto-scroll
+//                    as new streamed tokens arrive. Default.
+//   • "browsing"   — they've scrolled up to read older content. We must
+//                    NOT yank them to the bottom; that's rude and loses
+//                    their place. Instead we show the floating ↓ button.
+//
+// The floating button:
+//   • Appears when we're in browsing mode.
+//   • Pulses for ~1.4s when a new assistant message arrives while it's
+//     visible — one-shot attention, not per-token noise.
+// ─────────────────────────────────────────────────────────────────────
+const NEAR_BOTTOM_PX = 60;   // slack so tiny overshoot still counts as "at bottom"
+const SHOW_BTN_PX    = 150;  // button appears when farther than this from bottom
+let followingBottom = true;
+
+function distanceFromBottom() {
+  return $messages.scrollHeight - $messages.scrollTop - $messages.clientHeight;
+}
+
+/** Unconditional — jump to bottom and re-enter following mode. */
+function scrollToBottom() {
+  $messages.scrollTop = $messages.scrollHeight;
+  followingBottom = true;
+  updateScrollBtn();
+}
+
+/** Only scrolls if the user was already near the bottom. Use this for
+ *  streaming/reactive updates so we don't yank a reader around. */
+function scrollToBottomIfFollowing() {
+  if (followingBottom) {
+    $messages.scrollTop = $messages.scrollHeight;
+  }
+}
+
+function updateScrollBtn() {
+  if (!$scrollBtn) return;
+  const d = distanceFromBottom();
+  $scrollBtn.classList.toggle("visible", d > SHOW_BTN_PX);
+}
+
+/** Called when a new assistant message lands. If the user is NOT at the
+ *  bottom, fire a one-shot pulse so they notice there's something new. */
+function notifyNewMessage() {
+  if (distanceFromBottom() > SHOW_BTN_PX && $scrollBtn) {
+    // Restart the animation: remove the class, force reflow, re-add.
+    $scrollBtn.classList.remove("pulse");
+    void $scrollBtn.offsetWidth;
+    $scrollBtn.classList.add("pulse");
+  }
+}
+
+// Throttle scroll handling via requestAnimationFrame — a fast wheel can
+// fire dozens of events per second; we only need one visual update per frame.
+let scrollRaf = 0;
+$messages.addEventListener("scroll", () => {
+  if (scrollRaf) return;
+  scrollRaf = requestAnimationFrame(() => {
+    scrollRaf = 0;
+    followingBottom = distanceFromBottom() <= NEAR_BOTTOM_PX;
+    updateScrollBtn();
+  });
+}, { passive: true });
+
+$scrollBtn?.addEventListener("click", () => {
+  $messages.scrollTo({ top: $messages.scrollHeight, behavior: "smooth" });
+  followingBottom = true;
+  // Hide immediately on click — visual feedback even before smooth-scroll completes.
+  $scrollBtn.classList.remove("visible", "pulse");
+});
 
 function setTyping(show, text) {
   $typing.style.display = show ? "flex" : "none";
@@ -648,15 +727,8 @@ document.querySelectorAll(".chip").forEach((btn) => {
       await chrome.storage.local.remove("chatHistory");
       return;
     }
-    // Scroll buttons jump straight to top/bottom of the chat — no stepping.
-    if (action === "scroll_down") {
-      $messages.scrollTo({ top: $messages.scrollHeight, behavior: "smooth" });
-      return;
-    }
-    if (action === "scroll_up") {
-      $messages.scrollTo({ top: 0, behavior: "smooth" });
-      return;
-    }
+    // scroll_up / scroll_down chips were removed; the floating ↓ button
+    // replaces both (see scrollBtn + the followingBottom logic above).
     const map = {
       screenshot: { action: "screenshot" },
       read_page: { action: "read_page" },

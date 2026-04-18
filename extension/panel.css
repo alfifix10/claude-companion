@@ -100,13 +100,59 @@ body {
 .welcome p { line-height: 1.7; margin-bottom: 8px; font-size: 13px; }
 .welcome .hint-sm { color: var(--accent-br); font-size: 11.5px; opacity: .9; }
 
-/* Messages */
+/* Messages — wrapper lets us position the floating scroll button relative
+   to the scroll container without disturbing its layout. */
+.messages-wrap {
+  flex: 1; position: relative; display: flex; flex-direction: column;
+  min-height: 0; /* essential so the inner scroll container actually scrolls */
+}
 .messages {
   flex: 1; overflow-y: auto; padding: 12px;
   display: flex; flex-direction: column; gap: 10px; scroll-behavior: smooth;
 }
 .messages::-webkit-scrollbar { width: 3px; }
 .messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* Floating scroll-to-bottom button.
+   • Hidden by default; .visible class toggles it on when the user has
+     scrolled up far enough from the bottom.
+   • .pulse fires a one-shot attention animation when a new assistant
+     message arrives while the button is visible. */
+.scroll-btn {
+  position: absolute; bottom: 14px; left: 50%;
+  transform: translateX(-50%) translateY(8px);
+  width: 34px; height: 34px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; border: 1px solid var(--border);
+  background: var(--bg2); color: var(--text);
+  cursor: pointer; opacity: 0;
+  pointer-events: none; /* unclickable while hidden */
+  transition: opacity .18s ease, transform .18s ease, background .18s;
+  box-shadow: 0 4px 14px rgba(0,0,0,.35);
+  z-index: 10;
+}
+.scroll-btn.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  pointer-events: auto;
+}
+.scroll-btn:hover { background: var(--accent-bg); color: var(--accent-br); border-color: var(--accent); }
+.scroll-btn:active { transform: translateX(-50%) translateY(0) scale(.94); }
+.scroll-btn.pulse { animation: scrollPulse 1.4s ease-out 1; }
+@keyframes scrollPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(217, 125, 77, .55), 0 4px 14px rgba(0,0,0,.35); }
+  70%  { box-shadow: 0 0 0 10px rgba(217, 125, 77, 0),   0 4px 14px rgba(0,0,0,.35); }
+  100% { box-shadow: 0 0 0 0 rgba(217, 125, 77, 0),      0 4px 14px rgba(0,0,0,.35); }
+}
+/* Small badge for "new messages while you were scrolled up" — reserved
+   for a future unread-count feature; hidden by default via [hidden]. */
+.scroll-btn-badge {
+  position: absolute; top: -4px; right: -4px;
+  min-width: 14px; height: 14px; padding: 0 4px;
+  border-radius: 7px; background: var(--accent);
+  color: #fff; font-size: 10px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
 .msg {
   max-width: 88%; padding: 9px 13px; border-radius: 14px;
   font-size: 13px; line-height: 1.6; word-wrap: break-word; white-space: pre-wrap;
