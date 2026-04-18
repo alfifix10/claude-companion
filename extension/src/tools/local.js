@@ -58,6 +58,24 @@ const SHORTCUTS = [
   // reliably, so we use content-script findElements + scroll-into-view.
   { pattern: /^(?:ابحث\s+عن|ابحث|find|search\s+in\s+page)\s+(.+)$/i,
     action: "find_in_page", extract: (m) => ({ query: m[1].trim() }) },
+
+  // Clipboard copies — straight to the panel, no Claude, no CDP.
+  { pattern: /^(?:انسخ\s+الرابط|انسخ\s+العنوان|انسخ\s+الـurl|copy\s+(?:url|link|address))$/i,
+    action: "copy_url" },
+  { pattern: /^(?:انسخ\s+اسم\s+الصفحة|انسخ\s+عنوان\s+التبويب|copy\s+title)$/i,
+    action: "copy_title" },
+
+  // Tab state toggles.
+  { pattern: /^(?:ضاعف\s+التبويب|كرّر\s+التبويب|كرر\s+التبويب|duplicate\s+tab)$/i,
+    action: "duplicate_tab" },
+  { pattern: /^(?:اكتم|كتم|mute)$/i,
+    action: "set_muted", extract: () => ({ muted: true }) },
+  { pattern: /^(?:فكّ\s+الكتم|فك\s+الكتم|الغِ\s+الكتم|الغ\s+الكتم|unmute)$/i,
+    action: "set_muted", extract: () => ({ muted: false }) },
+  { pattern: /^(?:ثبّت|ثبت\s+التبويب|pin|pin\s+tab)$/i,
+    action: "set_pinned", extract: () => ({ pinned: true }) },
+  { pattern: /^(?:فكّ\s+التثبيت|فك\s+التثبيت|unpin|unpin\s+tab)$/i,
+    action: "set_pinned", extract: () => ({ pinned: false }) },
 ];
 
 // Common Arabic names → canonical URLs
@@ -261,6 +279,38 @@ export async function executeLocal(action, params = {}) {
       try { await sendContentMessage(tabId, { type: "scrollToRef", ref: hits[0].ref }); } catch {}
       try { await sendContentMessage(tabId, { type: "highlightElements", refs: hits.slice(0, 8).map((h) => h.ref) }); } catch {}
       return { text: `عثرت على ${hits.length} نتيجة لـ "${params.query}". الأولى مُظلّلة في الصفحة.` };
+    }
+    case "copy_url": {
+      // Clipboard API is only available in secure contexts; the side panel
+      // qualifies, but we also guard for older browsers.
+      const value = tab.url || "";
+      try {
+        await navigator.clipboard.writeText(value);
+        return { text: `نُسخ: ${value}` };
+      } catch (e) {
+        return { error: `تعذّر النسخ: ${e?.message || e}` };
+      }
+    }
+    case "copy_title": {
+      const value = tab.title || "";
+      try {
+        await navigator.clipboard.writeText(value);
+        return { text: `نُسخ العنوان: "${value}"` };
+      } catch (e) {
+        return { error: `تعذّر النسخ: ${e?.message || e}` };
+      }
+    }
+    case "duplicate_tab": {
+      const copy = await chrome.tabs.duplicate(tabId);
+      return { text: `ضوعف التبويب (${copy?.id}): ${copy?.url || tab.url}` };
+    }
+    case "set_muted": {
+      await chrome.tabs.update(tabId, { muted: !!params.muted });
+      return { text: params.muted ? `كُتم صوت التبويب 🔇` : `أُعيد صوت التبويب 🔊` };
+    }
+    case "set_pinned": {
+      await chrome.tabs.update(tabId, { pinned: !!params.pinned });
+      return { text: params.pinned ? `ثُبِّت التبويب 📌` : `أُزيل التثبيت` };
     }
     default:
       return { error: `إجراء غير معروف: ${action}` };
