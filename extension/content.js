@@ -523,4 +523,54 @@
 
   // Expose for executeScript fallback
   window.__claudeCompanion = { generateAccessibilityTree, generateAccessibilityTreeDiff, getPageText, findElements, setFormValue, resolveRef, getRefCoordinates, scrollToRef, elementMap };
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Text selection tracking
+  //
+  // Powers the "📌 المحدَّد" chip in the side panel. The panel lives in a
+  // separate document, so clicking it collapses the page selection — we
+  // cannot read it at click time. Instead we push every meaningful change
+  // to the background, which stores the last non-empty value per tab.
+  // On click, the panel pulls THAT stored text.
+  //
+  // The selectionchange event fires on every keystroke of a drag-select,
+  // so we debounce. 200 ms feels snappy while saving dozens of messages
+  // per drag.
+  // ─────────────────────────────────────────────────────────────────────
+  const SELECTION_CAP = 8000;
+  let selDebounce = 0;
+  let lastSentSelection = "";
+
+  function pushSelection() {
+    let text = "";
+    try {
+      const sel = document.getSelection();
+      text = sel ? sel.toString() : "";
+    } catch { text = ""; }
+    // Normalise whitespace for a stable comparison; don't send the same
+    // value twice in a row.
+    const trimmed = text.trim();
+    const truncated = trimmed.length > SELECTION_CAP
+      ? trimmed.slice(0, SELECTION_CAP) + "\n[trimmed at 8000 chars]"
+      : trimmed;
+    if (truncated === lastSentSelection) return;
+    lastSentSelection = truncated;
+    try {
+      chrome.runtime.sendMessage({
+        type: "selection_update",
+        text: truncated,
+        url: location.href,
+      });
+    } catch {}
+  }
+
+  document.addEventListener("selectionchange", () => {
+    if (selDebounce) clearTimeout(selDebounce);
+    selDebounce = setTimeout(pushSelection, 200);
+  }, { passive: true });
+
+  // Also fire once when the script loads in case a selection already
+  // exists (e.g. the user selected text, then opened the side panel —
+  // which injected this script via activeTab).
+  setTimeout(pushSelection, 300);
 })();

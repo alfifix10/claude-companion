@@ -19,6 +19,39 @@ const $welcome = document.getElementById("welcome");
 const $tasksRow = document.getElementById("tasksRow");
 const $attachments = document.getElementById("attachments");
 const $scrollBtn = document.getElementById("scrollBtn");
+const $chipSelection = document.getElementById("chipSelection");
+
+// Latest selection reported by content.js on the active tab. Used by the
+// "📌 المحدَّد" chip click handler — we can't read the page selection at
+// click time because focusing the panel collapses it.
+let currentSelection = { text: "", url: "" };
+
+function updateSelectionChip(text, url) {
+  currentSelection = { text: text || "", url: url || "" };
+  if (!$chipSelection) return;
+  const has = !!currentSelection.text;
+  $chipSelection.disabled = !has;
+  $chipSelection.classList.toggle("has-selection", has);
+  // Tooltip shows a preview — fast glance confirmation of what will be sent.
+  if (has) {
+    const preview = currentSelection.text.slice(0, 140).replace(/\s+/g, " ");
+    const more = currentSelection.text.length > 140 ? "..." : "";
+    $chipSelection.title = `اسأل عن: "${preview}${more}"`;
+  } else {
+    $chipSelection.title = "ظلّل نصّاً في الصفحة أوّلاً";
+  }
+}
+
+// Ask background for the initial state — handles the case where the user
+// had already selected text before opening the side panel.
+function requestSelectionState() {
+  try {
+    chrome.runtime.sendMessage({ type: "get_selection" }, (resp) => {
+      if (chrome.runtime.lastError || !resp) return;
+      updateSelectionChip(resp.text, resp.url);
+    });
+  } catch {}
+}
 
 // Pasted images waiting to be sent with the next message.
 // { mediaType: "image/png", base64: "iVBOR..." }
@@ -80,6 +113,13 @@ function connectBg() {
 }
 
 function onBgMessage(msg) {
+  // Selection updates are independent of task state — the chip should
+  // track the page's current selection even when we're idle.
+  if (msg.type === "selection_changed") {
+    updateSelectionChip(msg.text, msg.url);
+    return;
+  }
+
   // Ignore any message from a task the user already stopped.
   // `isLoading` is the reliable signal — hardStop sets it false.
   if (!isLoading && msg.type !== "no_task") return;
@@ -729,6 +769,30 @@ document.querySelectorAll(".chip").forEach((btn) => {
     }
     // scroll_up / scroll_down chips were removed; the floating ↓ button
     // replaces both (see scrollBtn + the followingBottom logic above).
+
+    // Ask Claude about the currently-selected text on the page. If the
+    // user has typed a question in the input, use that as the prompt and
+    // attach the selection as context. Otherwise send a generic "analyse"
+    // prompt. Either way we send via the normal chat flow — the selection
+    // becomes part of the user message that Claude sees.
+    if (action === "ask_selection") {
+      const sel = (currentSelection.text || "").trim();
+      if (!sel) return; // chip should already be disabled, but be safe
+      const userText = $input.value.trim();
+      const header = userText
+        ? userText
+        : "اشرح أو لخّص النصّ التالي، أو أجب عن أي سؤال ضمني فيه:";
+      const ctx = currentSelection.url
+        ? `\n\n[مظلَّل من: ${currentSelection.url}]\n"""\n${sel}\n"""`
+        : `\n\n"""\n${sel}\n"""`;
+      $input.value = header + ctx;
+      // Defer to send() so we reuse its cancellation + streaming path
+      // rather than duplicating it here.
+      $input.dispatchEvent(new Event("input"));
+      send();
+      return;
+    }
+
     const map = {
       screenshot: { action: "screenshot" },
       read_page: { action: "read_page" },
@@ -738,6 +802,10 @@ document.querySelectorAll(".chip").forEach((btn) => {
     if (hit) await runLocal(hit, currentCancel = { aborted: false });
   });
 });
+
+// On panel open, pull the active tab's selection state so the chip is
+// already accurate before the user interacts with the page.
+requestSelectionState();
 
 // ─────────────────────────────────────────────────────────────────────
 // History persistence

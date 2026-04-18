@@ -12,7 +12,7 @@
  *   and let it sleep cleanly when idle.
  */
 
-import { attachedTabs, consoleMessages, networkRequests, pendingDialogs, tabGroupTabs, nativePort } from "./src/core/state.js";
+import { attachedTabs, consoleMessages, networkRequests, pendingDialogs, tabGroupTabs, nativePort, tabSelections, connectedPanels } from "./src/core/state.js";
 import { cdp } from "./src/core/cdp.js";
 import { recoverTabGroupState } from "./src/core/tabs.js";
 import { connectNativeHost, ensureHealthyPort } from "./src/messaging/native.js";
@@ -51,6 +51,8 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   // Was missing: a dialog open at the moment of close leaves a stale entry.
   // Chromium sometimes recycles tab IDs, so this can mislead later dialogs.
   pendingDialogs.delete(tabId);
+  // Same concern for stored selections.
+  tabSelections.delete(tabId);
 });
 
 chrome.debugger.onDetach.addListener((source) => {
@@ -135,10 +137,59 @@ restoreFromNativeIfEmpty().catch(() => {});
 
 // Settings page can't directly hit the native port (it's a plain script, not
 // a service-worker module). It asks us to mirror via runtime.sendMessage.
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+// Content script also uses this channel to push text-selection updates.
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === "mirror_user_data") {
     mirrorToNative(msg.data || {});
     sendResponse({ ok: true });
     return true;
   }
+
+  // Selection state from content.js. Store per-tab so the panel can pick
+  // up whichever tab is currently active — NOT just the most-recent any-tab
+  // selection, which would cause a wrong-tab chip state after switching.
+  if (msg?.type === "selection_update" && sender?.tab?.id !== undefined) {
+    const tabId = sender.tab.id;
+    if (msg.text) {
+      tabSelections.set(tabId, { text: msg.text, url: msg.url || "", ts: Date.now() });
+    } else {
+      tabSelections.delete(tabId);
+    }
+    // Only notify panels if the update is for the currently-active tab.
+    // Other tabs' selections are stored but silent.
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }).then((tabs) => {
+      const activeId = tabs[0]?.id;
+      if (activeId !== tabId) return;
+      broadcastSelection(tabId);
+    }).catch(() => {});
+    return false;
+  }
+
+  // Panel pulls the current active tab's selection on demand (e.g. when
+  // it first opens, or the user switches tabs).
+  if (msg?.type === "get_selection") {
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }).then((tabs) => {
+      const activeId = tabs[0]?.id;
+      const entry = activeId !== undefined ? tabSelections.get(activeId) : null;
+      sendResponse({ text: entry?.text || "", url: entry?.url || "" });
+    }).catch(() => sendResponse({ text: "", url: "" }));
+    return true; // async sendResponse
+  }
+});
+
+function broadcastSelection(tabId) {
+  const entry = tabSelections.get(tabId);
+  const msg = {
+    type: "selection_changed",
+    text: entry?.text || "",
+    url: entry?.url || "",
+  };
+  for (const p of [...connectedPanels]) {
+    try { p.postMessage(msg); } catch { connectedPanels.delete(p); }
+  }
+}
+
+// Tab-switch → refresh the panel's chip state for the new active tab.
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  broadcastSelection(tabId);
 });

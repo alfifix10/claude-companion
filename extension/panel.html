@@ -28,6 +28,9 @@
       <button class="chip" data-quick="screenshot">📸 لقطة</button>
       <button class="chip" data-quick="read_page">🎯 العناصر</button>
       <button class="chip" data-quick="get_text">📝 النص</button>
+      <!-- Enables only when the user has selected text on the active tab.
+           Click sends that selection (optionally with user input) to Claude. -->
+      <button class="chip" data-quick="ask_selection" id="chipSelection" disabled>📌 المحدَّد</button>
       <button class="chip warn" data-quick="clear_all">🧹 مسح</button>
     </div>
 

@@ -20,6 +20,12 @@ export const screenshotStore = new Map();
 // JS dialog tracking
 export const pendingDialogs = new Map();
 
+// Latest text selection per tab (pushed by content.js on selectionchange).
+// Powers the side panel's "📌 المحدَّد" chip: clicking it pulls the active
+// tab's stored selection and sends it to Claude as context.
+// tabId → { text: string, url: string, ts: number }
+export const tabSelections = new Map();
+
 // Tab group tracking (if we adopt tab grouping later)
 export let tabGroupId = null;
 export const tabGroupTabs = new Set();
