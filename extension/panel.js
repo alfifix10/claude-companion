@@ -515,11 +515,44 @@ function renderMarkdown(src) {
   return text;
 }
 
+// Map the most common English/technical error strings that leak up from
+// CDP / Chromium / the network stack into a short Arabic explanation.
+// Anything we don't recognise falls through so we don't hide real info.
+function humanizeError(text) {
+  const s = String(text ?? "").trim();
+  if (!s) return "خطأ غير معروف";
+  // Keep already-Arabic messages as-is (our own layers).
+  if (/[\u0600-\u06FF]/.test(s)) return s;
+
+  const map = [
+    [/Cannot access a chrome:\/\/ URL|Cannot access contents of (?:url|the page)/i,
+     "صفحة داخليّة — افتح موقعاً عادياً ثم حاول."],
+    [/No tab with id/i,                          "التبويب أُغلِق — أعد فتحه."],
+    [/Debugger is already attached/i,            "المتصفّح متّصل بالفعل — أعد المحاولة."],
+    [/Detached while handling command|Target closed/i,
+                                                 "التبويب أُغلِق أثناء التنفيذ."],
+    [/Cannot navigate to invalid URL/i,          "رابط غير صالح."],
+    [/ERR_NAME_NOT_RESOLVED/i,                   "فشل حلّ عنوان الموقع."],
+    [/ERR_INTERNET_DISCONNECTED|Failed to fetch|NetworkError/i,
+                                                 "تعذّر الاتصال بالشبكة."],
+    [/ERR_CONNECTION_REFUSED/i,                  "الخادم رفض الاتصال."],
+    [/ERR_TIMED_OUT/i,                           "انتهت مهلة الاتصال."],
+    [/ERR_CERT_|ERR_SSL_/i,                      "مشكلة في شهادة الموقع."],
+    [/NO_NATIVE_HOST/i,                          "جسر الإضافة غير متّصل — أعد تحميل الإضافة."],
+    [/POST_FAILED/i,                             "فشل إرسال الطلب للمضيف."],
+    [/TIMEOUT/i,                                 "انتهت المهلة دون ردّ."],
+  ];
+  for (const [re, ar] of map) if (re.test(s)) return ar;
+  // Unknown English error — flag it clearly as technical so the user
+  // doesn't confuse it with the assistant's actual reply.
+  return "خطأ فنيّ: " + s;
+}
+
 function appendError(text) {
   removeWelcome();
   const d = document.createElement("div");
   d.className = "msg error";
-  d.textContent = text;
+  d.textContent = humanizeError(text);
   $messages.appendChild(d);
   scrollToBottom();
 }
@@ -794,7 +827,9 @@ async function runLocal(hit, myCancel) {
     if (myCancel.aborted) { clearTimeout(hardTimer); return; }
     clearTimeout(hardTimer);
     setLoading(false);
-    appendError("خطأ: " + e.message);
+    // Let humanizeError translate/prefix — double-prefixing produces
+    // "خطأ: خطأ فنيّ: ..." which reads badly.
+    appendError(e?.message || String(e));
   }
 }
 
