@@ -984,6 +984,32 @@ document.querySelectorAll(".chip").forEach((btn) => {
       await startNewConversation();
       return;
     }
+    if (action === "copy_chat") {
+      // Format the whole conversation as plain text so the user can
+      // paste it into a doc, an email, or another LLM. Structured
+      // (image) content is flagged inline so round-trips don't lie
+      // about what was actually in the chat.
+      if (!conversation.length) {
+        showNotice("لا توجد محادثة للنسخ", { variant: "info", ms: 1500 });
+        return;
+      }
+      const parts = [];
+      for (const m of conversation) {
+        const role = m.role === "user" ? "المستخدم" : "المساعد";
+        const body = typeof m.content === "string"
+          ? m.content
+          : "[محتوى غير نصّيّ — صور/أدوات]";
+        parts.push(`${role}:\n${body}`);
+      }
+      const text = parts.join("\n\n──────────────\n\n");
+      try {
+        await navigator.clipboard.writeText(text);
+        showNotice("تم نسخ المحادثة", { variant: "info", ms: 1500 });
+      } catch (e) {
+        showNotice("فشل النسخ: " + (e?.message || e), { ms: 2500 });
+      }
+      return;
+    }
     // scroll_up / scroll_down chips were removed; the floating ↓ button
     // replaces both (see scrollBtn + the followingBottom logic above).
     const map = {
