@@ -339,24 +339,63 @@ setInterval(async () => {
   } catch {}
 }, 1000);
 
-// Briefing chips — each turns into a ready-made user message that uses
-// the freshly-extracted page text as context. The text is INJECTED into
-// $input so the user can tweak it before hitting send, if they want.
-const BRIEF_PROMPTS = {
+// Briefing chips — each turns into a ready-made user message. We INLINE
+// the already-extracted page text so Claude can answer immediately,
+// without a round-trip through get_page_text.
+//
+// Why: the briefing feature already ran Readability and cached the
+// result in briefingCache. If we only send the instruction ("لخّص هذه
+// الصفحة") and let Claude call get_page_text, we pay:
+//   • Claude's "I need to read the page" reasoning delay
+//   • CDP round-trip to the content script (~300–500 ms)
+//   • Another Claude turn to consume the result
+// Total: ~1 second of dead air before the first character of the answer
+// appears. Token cost is unchanged either way — the text gets sent
+// regardless. By inlining it at chip-click time, the answer starts
+// streaming within ~200 ms.
+//
+// If the cache miss happens (first chip click before briefing rendered),
+// we fall back to the old behaviour: Claude fetches it itself.
+const BRIEF_INSTRUCTIONS = {
+  summarize:  "لخّص النصّ التالي في 3-5 نقاط مختصرة:",
+  explain:    "اشرح موضوع النصّ التالي كأنني مبتدئ — بساطة ولغة واضحة:",
+  translate:  "ترجم النصّ التالي إلى العربية، مع الحفاظ على الأسماء والمصطلحات التقنيّة:",
+  key_points: "استخرج أهم 5 أفكار من النصّ التالي:",
+};
+const BRIEF_FALLBACK = {
   summarize:  "لخّص هذه الصفحة في 3-5 نقاط مختصرة.",
   explain:    "اشرح لي موضوع هذه الصفحة كأنني مبتدئ في الموضوع.",
   translate:  "ترجم هذه الصفحة إلى العربية، مع الحفاظ على الأسماء والمصطلحات التقنيّة.",
   key_points: "ما أهم 5 أفكار في هذه الصفحة؟",
 };
+const BRIEF_INLINE_CAP = 10000; // chars — stay under prompt-bloat territory
 
 document.querySelectorAll(".briefing .chip").forEach((btn) => {
-  btn.addEventListener("click", () => {
+  btn.addEventListener("click", async () => {
     const kind = btn.dataset.brief;
-    const prompt = BRIEF_PROMPTS[kind];
+    // Pull the cached extraction for the CURRENT active tab — the
+    // briefing we're showing is for that tab by definition.
+    let entry = null;
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      if (tab?.url) entry = briefingCache.get(tab.url);
+    } catch {}
+
+    let prompt;
+    if (entry?.fullText && BRIEF_INSTRUCTIONS[kind]) {
+      // Inline the text. Truncate with a clear marker so Claude knows
+      // there's more if it needs to call read_page / get_page_text.
+      const text = entry.fullText.length > BRIEF_INLINE_CAP
+        ? entry.fullText.slice(0, BRIEF_INLINE_CAP)
+          + `\n\n[النصّ مقتطع — لو تحتاج الباقي نادِ get_page_text]`
+        : entry.fullText;
+      prompt = `${BRIEF_INSTRUCTIONS[kind]}\n\nالعنوان: ${entry.title}\n\n"""\n${text}\n"""`;
+    } else {
+      // Cache miss — fall back to the "let Claude fetch it" style.
+      prompt = BRIEF_FALLBACK[kind];
+    }
     if (!prompt) return;
-    // The page content is fetched fresh by Claude via get_page_text —
-    // we don't re-send the raw text through the input, we just tell
-    // Claude WHAT to do and let it fetch. Smaller prompt, cleaner UI.
+
     $input.value = prompt;
     $input.dispatchEvent(new Event("input"));
     send();
