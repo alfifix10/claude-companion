@@ -300,18 +300,24 @@ function handleMaxQuery(msg) {
   ];
   for (const t of HARD_DISALLOW) args.push("--disallowedTools", t);
 
-  // Static system prompt — passed via --system so the portion that
-  // never changes between turns (rules, aliases, budget, execution
+  // Static system prompt — passed via --system-prompt so the portion
+  // that never changes between turns (rules, aliases, budget, execution
   // method) hits Anthropic's server-side prompt cache (5 min TTL,
   // ~90% discount on cached tokens). The extension keeps the dynamic
   // part (tab info, memories, chat history) in the user message so
   // it can change freely without invalidating the cache.
+  //
+  // NOTE: the CLI flag is --system-prompt, not --system. commander.js
+  // silently absorbs unknown flags and swallows the following arg as
+  // its value — which previously ate our prompt and produced empty
+  // assistant replies.
+  //
   // Length guard — CLI arg lists have OS limits (Windows ≈ 32 K).
   // We stay well under. If a future prompt grows past 8 K, pipe it
   // via stdin instead.
   const systemPrompt = typeof msg.system === "string" ? msg.system : "";
   if (systemPrompt && systemPrompt.length < 8000) {
-    args.push("--system", systemPrompt);
+    args.push("--system-prompt", systemPrompt);
   }
 
   // If the user pasted images, switch to stream-json input so we can attach
