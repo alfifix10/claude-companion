@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>مرافق كلود — معالج التثبيت</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="hero">
+      <div class="logo">🤖</div>
+      <h1>مرافق كلود</h1>
+      <p>معالج التثبيت الذكي — بضع ثواني ونكون جاهزين</p>
+    </header>
+
+    <!-- Progress rail -->
+    <div class="rail" id="rail">
+      <div class="rail-fill" id="railFill"></div>
+      <div class="rail-steps">
+        <div class="dot" data-step="node">1</div>
+        <div class="dot" data-step="claude">2</div>
+        <div class="dot" data-step="login">3</div>
+        <div class="dot" data-step="extension">4</div>
+        <div class="dot" data-step="register">5</div>
+        <div class="dot" data-step="done">✓</div>
+      </div>
+    </div>
+
+    <!-- Steps -->
+    <section class="step" data-step="node">
+      <div class="step-head">
+        <div class="step-ic">📦</div>
+        <div>
+          <h2>الخطوة 1: Node.js</h2>
+          <div class="status" id="st-node">جارٍ الفحص...</div>
+        </div>
+      </div>
+      <div class="step-body">
+        <p>Node.js مطلوب لتشغيل المعالج والجسر مع Claude Code.</p>
+        <div class="actions">
+          <a class="btn btn-ghost" href="https://nodejs.org" target="_blank">تحميل Node.js</a>
+          <button class="btn" id="recheck-node">إعادة الفحص</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="step" data-step="claude">
+      <div class="step-head">
+        <div class="step-ic">🤖</div>
+        <div>
+          <h2>الخطوة 2: Claude Code CLI</h2>
+          <div class="status" id="st-claude">—</div>
+        </div>
+      </div>
+      <div class="step-body">
+        <p>أداة سطر الأوامر الخاصة بـ Claude. سنُثبّتها تلقائياً عبر npm.</p>
+        <div class="actions">
+          <button class="btn btn-primary" id="install-claude">تثبيت تلقائي</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="step" data-step="login">
+      <div class="step-head">
+        <div class="step-ic">🔐</div>
+        <div>
+          <h2>الخطوة 3: ربط اشتراك Claude Max</h2>
+          <div class="status" id="st-login">—</div>
+        </div>
+      </div>
+      <div class="step-body">
+        <p>سنفتح المتصفح لتسجيل الدخول. اختر حساب <b>Claude Max</b>.</p>
+        <div class="actions">
+          <button class="btn btn-primary" id="do-login">تسجيل الدخول</button>
+          <button class="btn btn-ghost" id="skip-login">تخطّي (إن كنت مسجّلاً مسبقاً)</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="step" data-step="extension">
+      <div class="step-head">
+        <div class="step-ic">🧩</div>
+        <div>
+          <h2>الخطوة 4: تحميل الإضافة</h2>
+          <div class="status" id="st-ext">—</div>
+        </div>
+      </div>
+      <div class="step-body">
+        <p>سنفتح صفحة الإضافات. اتبع الخطوتين:</p>
+        <ol class="guide">
+          <li>فعّل <b>وضع المطوّر</b> (Developer Mode) أعلى اليمين</li>
+          <li>انقر <b>"تحميل إضافة تم فك حزمتها"</b> (Load unpacked) واختر مجلد <code>extension/</code></li>
+        </ol>
+        <p class="hint">سنكتشفها تلقائياً حالما تُحمَّل.</p>
+        <div class="actions">
+          <button class="btn btn-primary" id="open-ext">فتح صفحة الإضافات</button>
+          <button class="btn btn-ghost" id="recheck-ext">إعادة الفحص</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="step" data-step="register">
+      <div class="step-head">
+        <div class="step-ic">⚙️</div>
+        <div>
+          <h2>الخطوة 5: ربط الجسر</h2>
+          <div class="status" id="st-register">—</div>
+        </div>
+      </div>
+      <div class="step-body">
+        <p>تسجيل Native Messaging Host + ربط MCP بـ Claude Code.</p>
+        <div class="actions">
+          <button class="btn btn-primary" id="do-register">إتمام الربط</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="step" data-step="done">
+      <div class="step-head">
+        <div class="step-ic">🎉</div>
+        <div>
+          <h2>انتهى!</h2>
+          <div class="status ok">جاهز للاستخدام</div>
+        </div>
+      </div>
+      <div class="step-body">
+        <p>أغلق كل نوافذ المتصفح وأعد فتحها (مرة واحدة فقط)، ثم انقر أيقونة الإضافة.</p>
+        <div class="actions">
+          <button class="btn btn-primary" id="restart-browser">إعادة تشغيل المتصفح</button>
+          <button class="btn btn-ghost" id="close-wizard">إغلاق المعالج</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Live log -->
+    <details class="log-wrap">
+      <summary>📋 السجل المباشر</summary>
+      <div class="log" id="log"></div>
+    </details>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

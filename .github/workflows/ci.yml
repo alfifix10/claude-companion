@@ -1,0 +1,96 @@
+name: CI
+
+# Cheap, fast, and useful: syntax-check every .js file, validate
+# manifest.json, and make sure the docs we publish actually exist.
+# Runs in under a minute on a fresh runner.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Syntax + structure
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Match what we declare in README. If someone removes v18 support
+        # here we want CI to shout about it.
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install host deps
+        working-directory: host
+        run: npm ci --no-audit --no-fund
+
+      - name: Syntax check every .js in the repo
+        shell: bash
+        run: |
+          set -eo pipefail
+          # node_modules is excluded — we only own our code.
+          failures=0
+          while IFS= read -r file; do
+            if ! node --check "$file" 2>/dev/null; then
+              echo "::error file=$file::Syntax error"
+              failures=$((failures + 1))
+            fi
+          done < <(find extension host -type f -name '*.js' -not -path '*/node_modules/*')
+          if [ "$failures" -gt 0 ]; then
+            echo "$failures syntax error(s)"
+            exit 1
+          fi
+
+      - name: Validate manifest.json is valid JSON + MV3
+        shell: bash
+        run: |
+          node -e "
+            const m = require('./extension/manifest.json');
+            if (m.manifest_version !== 3) {
+              console.error('manifest_version must be 3');
+              process.exit(1);
+            }
+            if (!m.key || m.key.length < 100) {
+              console.error('stable key missing or implausibly short');
+              process.exit(1);
+            }
+            if (!Array.isArray(m.permissions) || !m.permissions.includes('nativeMessaging')) {
+              console.error('nativeMessaging permission missing');
+              process.exit(1);
+            }
+            console.log('manifest ok — extension id is stable across loads');
+          "
+
+      - name: Required docs exist
+        shell: bash
+        run: |
+          # A missing README/LICENSE/PRIVACY is a release blocker.
+          for f in README.md README.ar.md LICENSE PRIVACY.md MIGRATE.md CLAUDE.md; do
+            if [ ! -f "$f" ]; then
+              echo "::error file=$f::Required file missing"
+              exit 1
+            fi
+          done
+
+      - name: No private key checked in
+        shell: bash
+        run: |
+          # Last-line defense. .gitignore protects this but CI is the
+          # authoritative check — a leaked signing key lets anyone ship
+          # an impersonating extension with our stable ID.
+          if git ls-files | grep -qE '\.extension-private-key\.pem$|\.pem$'; then
+            echo "::error::A .pem file was committed — DO NOT MERGE"
+            git ls-files | grep -E '\.pem$'
+            exit 1
+          fi

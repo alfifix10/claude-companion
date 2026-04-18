@@ -1,0 +1,455 @@
+#!/usr/bin/env node
+
+/**
+ * Native messaging host for Claude Companion.
+ *
+ * Bridges three things:
+ *   • the extension (stdin/stdout, length-prefixed JSON)
+ *   • the MCP server (TCP on localhost, shared with Claude Code)
+ *   • the `claude` CLI subprocess (Max-subscription agent)
+ *
+ * Design principles (learned the hard way):
+ *   • Never pass user prompts as CLI args — pipe them via stdin to avoid
+ *     every shell-quoting nightmare on Windows.
+ *   • Resolve `claude` by absolute path — the browser launches us with a
+ *     stripped PATH that often excludes %APPDATA%\npm.
+ *   • Announce readiness proactively (`ready` banner) so the extension can
+ *     distinguish "alive host" from "port-but-no-host".
+ *   • Answer pings synchronously and cheaply.
+ *   • Expose a `diag` endpoint so the UI can show a real setup checklist.
+ */
+
+import net from "node:net";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
+
+// ──────────────────────────────────────────────────────────────────────────
+// Config
+// ──────────────────────────────────────────────────────────────────────────
+
+const DEFAULT_TCP_PORT = 18799; // distinct from old project's 18765
+const CONFIG_DIR = path.join(os.homedir(), ".config", "claude-companion");
+const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
+
+// Read config; generate a fresh shared secret on first run so native-host
+// and mcp-server can authenticate each other over the localhost TCP port.
+// Even on a personal machine, this blocks other processes on the box from
+// injecting tool_requests into the browser.
+function loadConfig() {
+  let cfg = {};
+  try { cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8")); } catch {}
+  let changed = false;
+  if (!cfg.port) { cfg.port = DEFAULT_TCP_PORT; changed = true; }
+  if (typeof cfg.secret !== "string" || cfg.secret.length < 32) {
+    cfg.secret = randomBytes(32).toString("hex");
+    changed = true;
+  }
+  if (changed) {
+    try {
+      fs.mkdirSync(CONFIG_DIR, { recursive: true });
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+    } catch {}
+    // Re-read in case another process wrote first — converge on that value.
+    try {
+      const cfg2 = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
+      if (cfg2.secret) cfg = cfg2;
+    } catch {}
+  }
+  return cfg;
+}
+const CONFIG = loadConfig();
+const TCP_PORT = CONFIG.port;
+const SHARED_SECRET = CONFIG.secret;
+
+// Unique session id — used by the primary mcp-server to route tool requests
+// back to THIS browser (not just whichever one was active most recently).
+const SESSION_ID = `sess_${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+// ──────────────────────────────────────────────────────────────────────────
+// Native messaging protocol (4-byte LE length prefix + JSON)
+// ──────────────────────────────────────────────────────────────────────────
+
+// Hard cap so a malformed length prefix (e.g. 0xFFFFFFFF) can't OOM us.
+// 16MB is huge for extension messages — legitimate inputs (even base64 images)
+// stay well below this.
+const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
+
+function readMessages(buffer) {
+  const messages = [];
+  let offset = 0;
+  while (offset + 4 <= buffer.length) {
+    const len = buffer.readUInt32LE(offset);
+    if (len > MAX_MESSAGE_BYTES) {
+      // Corrupted frame. Discard everything — we can't recover a valid boundary.
+      return { messages, remainder: Buffer.alloc(0) };
+    }
+    if (offset + 4 + len > buffer.length) break;
+    const json = buffer.subarray(offset + 4, offset + 4 + len).toString("utf-8");
+    try { messages.push(JSON.parse(json)); } catch {}
+    offset += 4 + len;
+  }
+  return { messages, remainder: buffer.subarray(offset) };
+}
+
+function write(obj) {
+  const body = Buffer.from(JSON.stringify(obj), "utf-8");
+  const header = Buffer.alloc(4);
+  header.writeUInt32LE(body.length, 0);
+  process.stdout.write(Buffer.concat([header, body]));
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Find the claude CLI
+// ──────────────────────────────────────────────────────────────────────────
+
+function findClaudeBin() {
+  const candidates = [];
+  if (process.platform === "win32") {
+    const appData = process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming");
+    candidates.push(path.join(appData, "npm", "claude.cmd"));
+    candidates.push(path.join(appData, "npm", "claude.exe"));
+    const localApp = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+    candidates.push(path.join(localApp, "Programs", "claude-code", "claude.exe"));
+  } else if (process.platform === "darwin") {
+    candidates.push("/opt/homebrew/bin/claude");
+    candidates.push("/usr/local/bin/claude");
+    candidates.push(path.join(os.homedir(), ".local", "bin", "claude"));
+    candidates.push(path.join(os.homedir(), ".npm-global", "bin", "claude"));
+  } else {
+    candidates.push("/usr/local/bin/claude");
+    candidates.push(path.join(os.homedir(), ".local", "bin", "claude"));
+    candidates.push(path.join(os.homedir(), ".npm-global", "bin", "claude"));
+  }
+  for (const c of candidates) {
+    try { if (fs.existsSync(c)) return c; } catch {}
+  }
+  return null;
+}
+const CLAUDE_BIN = findClaudeBin();
+
+// ──────────────────────────────────────────────────────────────────────────
+// TCP bridge to MCP server (Claude Code side)
+// ──────────────────────────────────────────────────────────────────────────
+
+let tcpSocket = null;
+let tcpBuffer = Buffer.alloc(0);
+let reconnectTimer = null;
+
+// IMPORTANT: the MCP server (TCP side) is OPTIONAL — it's only running when
+// Claude Code has a session open. The native host must stay alive for the
+// extension regardless, so we keep retrying TCP in the background without
+// ever exiting the process. Exit only when stdin (extension) closes.
+function connectTcp() {
+  if (tcpSocket) return;
+  tcpSocket = new net.Socket();
+  tcpSocket.connect(TCP_PORT, "127.0.0.1", () => {
+    if (reconnectTimer) { clearInterval(reconnectTimer); reconnectTimer = null; }
+    // Announce who we are + prove we know the shared secret. The primary
+    // drops the connection silently if the secret is wrong, so a rogue
+    // process on 127.0.0.1 can't impersonate a browser.
+    try {
+      tcpSocket.write(JSON.stringify({
+        type: "host_hello",
+        sessionId: SESSION_ID,
+        secret: SHARED_SECRET,
+      }) + "\n");
+    } catch {}
+  });
+  tcpSocket.on("data", (chunk) => {
+    tcpBuffer = Buffer.concat([tcpBuffer, chunk]);
+    // Protect against runaway lines (no newline ever arrives) that would
+    // slowly exhaust memory.
+    if (tcpBuffer.length > MAX_MESSAGE_BYTES) {
+      tcpBuffer = Buffer.alloc(0);
+      return;
+    }
+    let idx;
+    while ((idx = tcpBuffer.indexOf(10)) !== -1) {
+      const line = tcpBuffer.subarray(0, idx).toString("utf-8").trim();
+      tcpBuffer = tcpBuffer.subarray(idx + 1);
+      if (!line) continue;
+      try { write(JSON.parse(line)); } catch {}
+    }
+  });
+  tcpSocket.on("error", () => { tcpSocket = null; });
+  tcpSocket.on("close", () => {
+    tcpSocket = null;
+    // Retry in the background forever. Cheap — 1 connect attempt every 2s,
+    // no data sent until the port accepts.
+    if (!reconnectTimer) {
+      reconnectTimer = setInterval(() => {
+        if (!tcpSocket) connectTcp();
+      }, 2000);
+    }
+  });
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Claude Max spawner — stream JSON events back to the extension
+// ──────────────────────────────────────────────────────────────────────────
+
+const activeProcs = new Map();
+
+function streamClaude(id, proc) {
+  let buf = "";
+  proc.stdout.on("data", (chunk) => {
+    buf += chunk.toString("utf-8");
+    let idx;
+    while ((idx = buf.indexOf("\n")) !== -1) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      if (!line) continue;
+      try {
+        const event = JSON.parse(line);
+        write({ id, type: "max_event", event });
+      } catch {
+        write({ id, type: "max_text", text: line });
+      }
+    }
+  });
+  let err = "";
+  proc.stderr.on("data", (c) => { err += c.toString("utf-8"); });
+  proc.on("error", (e) => {
+    activeProcs.delete(id);
+    write({ id, type: "max_error", error: e.message });
+  });
+  proc.on("close", (code) => {
+    activeProcs.delete(id);
+    if (buf.trim()) write({ id, type: "max_text", text: buf.trim() });
+    write({ id, type: "max_done", exitCode: code, stderr: err.slice(-500) });
+  });
+}
+
+function handleMaxQuery(msg) {
+  if (!CLAUDE_BIN) {
+    write({ id: msg.id, type: "max_error", error: "NO_CLAUDE_CLI" });
+    return;
+  }
+  const prompt = String(msg.prompt || "");
+  const images = Array.isArray(msg.images) ? msg.images : [];
+  if (!prompt && images.length === 0) {
+    write({ id: msg.id, type: "max_error", error: "EMPTY_PROMPT" });
+    return;
+  }
+
+  const args = ["-p", "--output-format", "stream-json", "--verbose"];
+  if (msg.model) args.push("--model", msg.model);
+
+  // SECURITY: hard-coded allowlist. Any tool NOT in this list will prompt
+  // for permission — and since we run headless (-p), prompts block forever.
+  // That's the intended behavior: an out-of-policy tool call dies, instead
+  // of silently running on the user's machine.
+  //
+  // We previously paired this with --dangerously-skip-permissions as a
+  // belt-and-suspenders measure. That flag was REMOVED before public
+  // release because it defeats the allowlist if a tool name ever slips
+  // through. Allowlist alone is the correct primitive.
+  //
+  // msg.allowedTools from the caller is IGNORED by design — a compromised
+  // panel.js must not be able to widen the blast radius.
+  const HARD_ALLOWLIST = [
+    "mcp__claude-companion__*",
+    "Read", "Grep", "Glob", "WebFetch", "WebSearch",
+  ];
+  for (const t of HARD_ALLOWLIST) args.push("--allowedTools", t);
+
+  // Belt-and-suspenders — explicitly deny anything that could touch the FS
+  // or spawn shells, even if a future CLI version changes allowlist semantics.
+  const HARD_DISALLOW = ["Bash", "Write", "Edit", "NotebookEdit"];
+  for (const t of HARD_DISALLOW) args.push("--disallowedTools", t);
+
+  // If the user pasted images, switch to stream-json input so we can attach
+  // them as proper image content blocks instead of text.
+  if (images.length > 0) {
+    args.push("--input-format", "stream-json");
+  }
+
+  try {
+    const isWin = process.platform === "win32";
+    const proc = spawn(CLAUDE_BIN, args, {
+      shell: isWin,
+      windowsHide: true,
+      env: { ...process.env, CLAUDE_COMPANION_SESSION: SESSION_ID },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    activeProcs.set(msg.id, proc);
+    streamClaude(msg.id, proc);
+    try {
+      if (images.length > 0) {
+        // stream-json user message with text + image content blocks
+        const content = [];
+        if (prompt) content.push({ type: "text", text: prompt });
+        for (const img of images) {
+          content.push({
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: img.mediaType || "image/png",
+              data: img.base64 || "",
+            },
+          });
+        }
+        const userMsg = {
+          type: "user",
+          message: { role: "user", content },
+        };
+        proc.stdin.write(JSON.stringify(userMsg) + "\n");
+        proc.stdin.end();
+      } else {
+        proc.stdin.write(prompt);
+        proc.stdin.end();
+      }
+    } catch (e) {
+      write({ id: msg.id, type: "max_error", error: "stdin: " + e.message });
+    }
+  } catch (e) {
+    write({ id: msg.id, type: "max_error", error: `spawn: ${e.message}` });
+  }
+}
+
+// Kill a process AND all its children. On Windows, SIGTERM doesn't propagate
+// to the process tree — we need `taskkill /T` to nuke the whole branch,
+// otherwise claude's child mcp-server keeps emitting tool requests.
+function killTree(proc) {
+  if (!proc || proc.killed) return;
+  if (process.platform === "win32" && proc.pid) {
+    try {
+      spawn("taskkill", ["/F", "/T", "/PID", String(proc.pid)], { windowsHide: true })
+        .on("error", () => { try { proc.kill("SIGKILL"); } catch {} });
+    } catch { try { proc.kill("SIGKILL"); } catch {} }
+  } else {
+    try { proc.kill("SIGTERM"); } catch {}
+    // Escalate if still alive after 1s
+    setTimeout(() => { try { if (!proc.killed) proc.kill("SIGKILL"); } catch {} }, 1000);
+  }
+}
+
+function handleMaxCancel(msg) {
+  const p = activeProcs.get(msg.id);
+  if (p) killTree(p);
+  activeProcs.delete(msg.id);
+}
+
+// Cancel ALL active claude processes — used when we want a hard stop
+// regardless of which specific run the user meant.
+function cancelAllActive() {
+  for (const [id, p] of activeProcs) {
+    killTree(p);
+    activeProcs.delete(id);
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// User data persistence — survives extension uninstall
+//   chrome.storage.local dies with the extension, so we mirror memories/tasks
+//   to a file in the user's home. Read on startup, written on every save.
+// ──────────────────────────────────────────────────────────────────────────
+
+const USER_DATA_PATH = path.join(CONFIG_DIR, "user-data.json");
+
+function handleLoadUserData(msg) {
+  let data = null;
+  try {
+    const raw = fs.readFileSync(USER_DATA_PATH, "utf-8");
+    data = JSON.parse(raw);
+  } catch {
+    // Missing or corrupt — treat as empty. A fresh install on a fresh machine
+    // lands here and will populate the file on first save.
+    data = null;
+  }
+  write({ id: msg.id, type: "user_data_result", data });
+}
+
+function handleSaveUserData(msg) {
+  try {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    // Atomic: write to tmp then rename. If we crash mid-write, the original
+    // stays intact instead of becoming a half-written JSON blob.
+    const tmp = USER_DATA_PATH + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(msg.data || {}, null, 2), "utf-8");
+    fs.renameSync(tmp, USER_DATA_PATH);
+    write({ id: msg.id, type: "user_data_saved", ok: true });
+  } catch (e) {
+    write({ id: msg.id, type: "user_data_saved", ok: false, error: e.message });
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Diagnostic — answers "what's actually wrong with my setup?"
+// ──────────────────────────────────────────────────────────────────────────
+
+function handleDiag(msg) {
+  // native-host.js lives in <project>/host/, so go up one level to get project root.
+  const hostDir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1"));
+  const projectRoot = path.resolve(hostDir, "..");
+  write({
+    id: msg.id,
+    type: "diag_result",
+    checks: {
+      platform: process.platform,
+      arch: process.arch,
+      nodeVersion: process.version,
+      claudeCli: { found: !!CLAUDE_BIN, path: CLAUDE_BIN },
+      mcpReachable: !!(tcpSocket && !tcpSocket.destroyed),
+      hostPid: process.pid,
+      tcpPort: TCP_PORT,
+      projectRoot,
+    },
+  });
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Main dispatch loop
+// ──────────────────────────────────────────────────────────────────────────
+
+let stdinBuf = Buffer.alloc(0);
+process.stdin.on("data", (chunk) => {
+  stdinBuf = Buffer.concat([stdinBuf, chunk]);
+  const { messages, remainder } = readMessages(stdinBuf);
+  stdinBuf = remainder;
+
+  for (const m of messages) {
+    switch (m.type) {
+      case "ping":
+        write({ type: "pong", id: m.id, ts: Date.now(), claudeBin: CLAUDE_BIN });
+        break;
+      case "diag":
+        handleDiag(m);
+        break;
+      case "max_query":
+        handleMaxQuery(m);
+        break;
+      case "max_cancel":
+        handleMaxCancel(m);
+        break;
+      case "cancel_all":
+        cancelAllActive();
+        break;
+      case "load_user_data":
+        handleLoadUserData(m);
+        break;
+      case "save_user_data":
+        handleSaveUserData(m);
+        break;
+      default:
+        // Forward unknown messages to MCP server (e.g. tool_request/tool_response)
+        if (tcpSocket && !tcpSocket.destroyed) {
+          tcpSocket.write(JSON.stringify(m) + "\n");
+        }
+    }
+  }
+});
+
+process.stdin.on("end", () => {
+  if (tcpSocket) tcpSocket.destroy();
+  for (const p of activeProcs.values()) { try { p.kill(); } catch {} }
+  process.exit(0);
+});
+
+// Announce readiness immediately.
+write({ type: "ready", claudeBin: CLAUDE_BIN, ts: Date.now(), tcpPort: TCP_PORT });
+
+connectTcp();

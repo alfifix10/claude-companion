@@ -1,0 +1,25 @@
+# Private extension signing key — NEVER commit.
+# Derives the stable extension ID. If leaked, a third party could publish
+# an impostor extension with the same ID into the Chrome Web Store.
+.extension-private-key.pem
+
+# Node
+host/node_modules/
+node_modules/
+npm-debug.log*
+
+# Generated at install time
+host/native-host-wrapper.bat
+host/com.anthropic.claude_companion.json
+
+# Shared secret / per-machine config
+# Contains a random auth token — also machine-specific, not useful to ship.
+# Lives in ~/.config/claude-companion/config.json (outside repo), but just in case.
+config.json
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
