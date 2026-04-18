@@ -13,10 +13,15 @@
 | `/red` | Adversarial Reviewer (`ADVERSARIAL_REVIEW.md`) | **يومياً** — قبل أي كود غير تافه |
 | `/security` | Security Engineer (`SECURITY_REVIEW.md`) | auth / IO / rendering paths |
 | `/perf` | Performance Engineer (`PERFORMANCE_REVIEW.md`) | feature كبير / شكوى بطء |
-| `/design` | Visual Designer + FE (`VISUAL_DESIGN_REVIEW.md`) | تغيير UI / قبل screenshots |
+| `/design` | Visual Designer (`VISUAL_DESIGN_REVIEW.md`) | جماليّات — ألوان، typography، hierarchy |
+| `/frontend` | Frontend Engineer (`FRONTEND_REVIEW.md`) | CSS health، a11y هيكليّ، compat |
+
+**الفرق بين `/design` و `/frontend`**:
+- `/design` يقول: *"الألوان مسطّحة"* — جماليّات
+- `/frontend` يقول: *"specificity battle في هذا الـ rule"* — تقنيّ
 
 **قاعدة الاستخدام**: 90% من الوقت `/red` كافٍ. 10% الباقية استدعِ المتخصّص حسب الحاجة.
-قبل release عامّ: **الأربعة مرّة واحدة**.
+قبل release عامّ: **الخمسة مرّة واحدة**.
 
 ## 🔴 القاعدة الأولى — قبل أي كود جديد
 
