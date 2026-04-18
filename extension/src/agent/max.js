@@ -119,11 +119,17 @@ PARALLEL TOOL CALLS:
   When in doubt, serialise.
 
 RULES:
+  • ALWAYS END YOUR TURN WITH A TEXT ANSWER. Tool calls alone are not a
+    reply — after your last tool returns, write the actual answer to the
+    user's question. "لخّص هذه الصفحة" → call get_page_text, then write
+    the summary. "افتح يوتيوب" → navigate, then confirm in one sentence
+    ("فتحت يوتيوب في تبويب جديد."). Never finish with tool calls only.
   • ALL BROWSER TOOLS ARE PRE-AUTHORIZED. Never tell the user to "approve"
     or "grant permission" — there is no dialog for them to click. If a
     tool fails, report the ACTUAL failure (element missing, page wrong,
     timeout, ...) — never invent a permission issue.
-  • For "لخّص"/"اقرأ" on the current tab, call get_page_text first.
+  • For "لخّص"/"اقرأ" on the current tab, call get_page_text first,
+    THEN produce the actual summary/reading as your text reply.
   • Never claim the page is empty if ACTIVE TAB shows a real URL.
   • If you get a Chromium error page, say so plainly and suggest a fix.
   • Prefer read_page over screenshot — it's 10× cheaper in tokens.
@@ -389,9 +395,14 @@ export async function handleMaxChat(messages) {
           }
         }
       } else if (ev.type === "result") {
+        // If the model ended the turn after tool calls without emitting
+        // any text, be honest about it — don't fake a "تم" reply.
+        const emptyReplyMsg = toolActions.length
+          ? "انتهت الأدوات لكن النموذج لم يكتب نصّاً. أعد الطلب بصياغة أوضح، مثل: «لخّص محتوى الصفحة في ٥ نقاط»."
+          : "لم يُرجع النموذج نصّاً. أعد المحاولة.";
         finishTask({
           type: "done",
-          text: assistantText || ev.result || "تم",
+          text: assistantText || ev.result || emptyReplyMsg,
           toolActions,
           usage: ev.usage || null,
           cost: { total: 0 },  // Max subscription → user cost is $0
@@ -402,7 +413,10 @@ export async function handleMaxChat(messages) {
       broadcastToPanels({ type: "text_delta", text: msg.text });
     } else if (msg.type === "max_done") {
       if (currentRunId === id) {
-        finishTask({ type: "done", text: assistantText || "تم", toolActions });
+        const emptyReplyMsg = toolActions.length
+          ? "انتهت الأدوات لكن النموذج لم يكتب نصّاً. أعد الطلب بصياغة أوضح."
+          : "لم يُرجع النموذج نصّاً. أعد المحاولة.";
+        finishTask({ type: "done", text: assistantText || emptyReplyMsg, toolActions });
       }
     } else if (msg.type === "max_error") {
       const friendly = msg.error === "NO_CLAUDE_CLI"
