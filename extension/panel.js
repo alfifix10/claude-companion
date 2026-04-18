@@ -479,7 +479,9 @@ function enterEditMode(wrap, msgIdx) {
   const save = () => {
     const newText = ta.value.trim();
     if (!newText) return;                        // empty = stay in edit mode
-    if (newText === originalText) { cancel(); return; }
+    // إرسال always resends — even with no text change. That way the
+    // button does exactly what its label says, and users who want a
+    // fresh attempt on the same prompt get "regenerate" for free.
     commitEdit(wrap, msgIdx, newText);
   };
 
