@@ -835,9 +835,67 @@ function updateSend() {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Settings + quick actions
+// Settings overlay
+//
+// Settings used to open as a separate options page (chrome://extensions
+// options entry + own tab). Consistency with the history overlay — and
+// the user's preference to stay inside the panel — means settings now
+// live as an in-panel overlay too. Same layout pattern, same keyboard
+// shortcut to close (Escape), same full-panel takeover.
 // ─────────────────────────────────────────────────────────────────────
-$settings.addEventListener("click", () => chrome.runtime.openOptionsPage());
+const $settingsOverlay = document.getElementById("settingsOverlay");
+const $closeSettingsBtn = document.getElementById("closeSettingsBtn");
+const $memoriesInput = document.getElementById("memoriesInput");
+const $tasksInput = document.getElementById("tasksInput");
+const $saveSettingsBtn = document.getElementById("saveSettingsBtn");
+const $settingsToast = document.getElementById("settingsToast");
+
+async function openSettings() {
+  // Pull the latest values at open time so edits made elsewhere (e.g. a
+  // restore from the native-host backup that ran while the panel was open)
+  // are reflected.
+  const { memories = "", tasks = "" } = await chrome.storage.local.get(["memories", "tasks"]);
+  $memoriesInput.value = memories;
+  $tasksInput.value = tasks;
+  $settingsToast.hidden = true;
+  $settingsOverlay.hidden = false;
+  // Focus the first textarea for keyboard-first users.
+  try { $memoriesInput.focus({ preventScroll: true }); } catch { $memoriesInput.focus(); }
+}
+
+function closeSettings() {
+  $settingsOverlay.hidden = true;
+}
+
+async function saveSettings() {
+  const memories = $memoriesInput.value.trim();
+  const tasks = $tasksInput.value.trim();
+  await chrome.storage.local.set({ memories, tasks });
+  // Mirror to native-host backup file so settings survive extension
+  // uninstall. Best-effort; a failure here is silent.
+  try { chrome.runtime.sendMessage({ type: "mirror_user_data", data: { memories, tasks } }); } catch {}
+  // Reload the task chips row since it's driven by `tasks`.
+  try { await loadTasks(); } catch {}
+  // Brief confirmation without closing — users often tweak twice.
+  $settingsToast.hidden = false;
+  setTimeout(() => { $settingsToast.hidden = true; }, 1800);
+}
+
+$settings.addEventListener("click", openSettings);
+$closeSettingsBtn?.addEventListener("click", closeSettings);
+$saveSettingsBtn?.addEventListener("click", saveSettings);
+
+// Escape closes whichever overlay is open. Scoped to the panel so it
+// doesn't hijack Escape elsewhere.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (!$settingsOverlay.hidden) { closeSettings(); return; }
+  if (!$historyOverlay.hidden) { closeHistory(); return; }
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Quick actions
+// ─────────────────────────────────────────────────────────────────────
 
 document.querySelectorAll(".chip").forEach((btn) => {
   btn.addEventListener("click", async () => {

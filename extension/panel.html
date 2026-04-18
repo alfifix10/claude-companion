@@ -114,6 +114,36 @@
     </div>
     </div><!-- /.chat-area -->
 
+    <!-- Settings overlay — opens from the gear icon. Same full-panel
+         pattern as the history overlay so the UX stays consistent. -->
+    <div class="history-overlay settings-overlay" id="settingsOverlay" hidden>
+      <div class="history-head">
+        <span class="history-title">الإعدادات</span>
+        <button id="closeSettingsBtn" class="ibtn" title="إغلاق" aria-label="إغلاق">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+            <path d="M6 6l12 12M6 18L18 6"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="settings-body">
+        <label class="settings-label" for="memoriesInput">🧠 ذاكرة مختصرة</label>
+        <textarea id="memoriesInput" class="settings-textarea" rows="5"
+          placeholder="اسمي: أحمد&#10;بريدي: ahmed@gmail.com&#10;أفضّل النتائج من الأرخص"></textarea>
+        <p class="settings-hint">تُرسَل مع كل محادثة.</p>
+
+        <label class="settings-label" for="tasksInput" style="margin-top:18px;">⚡ مهام مكررة</label>
+        <textarea id="tasksInput" class="settings-textarea" rows="6"
+          placeholder="صباح: افتح الإيميل ولخّص&#10;&#10;أخبار: افتح سبق ولخّص الأهم&#10;&#10;(افصل بين المهام بسطر فارغ)"></textarea>
+        <p class="settings-hint">أزرار ⚡ في الشريط الجانبي.</p>
+      </div>
+
+      <div class="settings-footer">
+        <button id="saveSettingsBtn" class="settings-save-btn">حفظ</button>
+        <span id="settingsToast" class="settings-toast" hidden>تم الحفظ ✓</span>
+      </div>
+    </div>
+
     <!-- History overlay — slides in from the top when the 🕐 button is
          clicked. Holds the list of saved conversations; clicking one loads
          it into the main chat view. -->

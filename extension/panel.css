@@ -246,6 +246,57 @@ body {
 .conv-item:hover .conv-delete { opacity: .7; }
 .conv-delete:hover { opacity: 1 !important; color: var(--red); background: rgba(239,68,68,.1); }
 
+/* Settings overlay — reuses history-overlay positioning + head layout,
+   adds its own body (scrollable) and sticky footer for the save CTA. */
+.settings-overlay .settings-body {
+  flex: 1; overflow-y: auto;
+  padding: 14px 14px 8px;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+.settings-overlay .settings-body::-webkit-scrollbar { width: 4px; }
+.settings-overlay .settings-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+.settings-label {
+  display: block; font-size: 12.5px; font-weight: 600;
+  color: var(--text); margin-bottom: 6px;
+}
+.settings-textarea {
+  width: 100%; padding: 10px 12px;
+  border: 1px solid var(--input-br); border-radius: 10px;
+  background: var(--input-bg); color: var(--text);
+  font-family: inherit; font-size: 12.5px; line-height: 1.7;
+  direction: rtl; outline: none; resize: vertical;
+  min-height: 80px;
+  transition: border-color .15s;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.settings-textarea:focus { border-color: var(--accent); }
+.settings-textarea::-webkit-scrollbar { width: 4px; }
+.settings-textarea::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+.settings-textarea::-webkit-scrollbar-button { display: none; height: 0; }
+.settings-hint {
+  font-size: 11px; color: var(--text2);
+  margin-top: 4px; line-height: 1.6;
+}
+.settings-footer {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px 14px;
+  border-top: 1px solid var(--border); background: var(--bg2);
+  flex-shrink: 0;
+}
+.settings-save-btn {
+  padding: 9px 22px; border-radius: 8px; border: none;
+  background: var(--accent); color: #fff;
+  font-size: 13px; font-family: inherit; font-weight: 600;
+  cursor: pointer; transition: background .15s, transform .08s;
+}
+.settings-save-btn:hover { background: var(--accent-br); }
+.settings-save-btn:active { transform: scale(.97); }
+.settings-toast {
+  font-size: 12px; color: var(--green);
+  animation: fadeIn .2s;
+}
+
 /* Messages — wrapper lets us position the floating scroll button relative
    to the scroll container without disturbing its layout. */
 .messages-wrap {
