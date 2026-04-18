@@ -9,7 +9,12 @@ import { sleep } from "./utils.js";
 // URL schemes where Chromium blocks chrome.debugger.attach and content
 // scripts. We preflight-check so the user sees a clear Arabic message
 // instead of the raw "Cannot access a chrome:// URL" from the browser.
-const RESTRICTED_SCHEME = /^(?:chrome|brave|edge|about|chrome-extension|devtools|view-source|chrome-search|chrome-untrusted):/i;
+//
+// Deliberately NOT included:
+//   • about:blank — attachable and common during tab transitions.
+//     Other about:* URLs (version, config, ...) get redirected to
+//     chrome:// by Chromium, so the chrome|brave arm catches them.
+const RESTRICTED_SCHEME = /^(?:chrome|brave|edge|chrome-extension|devtools|view-source|chrome-search|chrome-untrusted):/i;
 const RESTRICTED_HOST = /^https?:\/\/chrome\.google\.com\/webstore/i;
 function describeRestrictedUrl(url) {
   if (!url) return null;

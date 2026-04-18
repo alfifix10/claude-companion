@@ -517,12 +517,16 @@ function renderMarkdown(src) {
 
 // Map the most common English/technical error strings that leak up from
 // CDP / Chromium / the network stack into a short Arabic explanation.
-// Anything we don't recognise falls through so we don't hide real info.
+// Strategy (order matters):
+//   1. Try every pattern first, including on mixed-language strings —
+//      so "خطأ: ERR_NAME_NOT_RESOLVED" still translates the English code.
+//   2. If nothing matched AND the string already contains Arabic, trust
+//      it came from one of our own layers and pass it through.
+//   3. Otherwise it's an untranslated English leak — prefix "خطأ فنيّ:"
+//      so the user can't mistake it for the assistant's actual reply.
 function humanizeError(text) {
   const s = String(text ?? "").trim();
   if (!s) return "خطأ غير معروف";
-  // Keep already-Arabic messages as-is (our own layers).
-  if (/[\u0600-\u06FF]/.test(s)) return s;
 
   const map = [
     [/Cannot access a chrome:\/\/ URL|Cannot access contents of (?:url|the page)/i,
@@ -533,18 +537,22 @@ function humanizeError(text) {
                                                  "التبويب أُغلِق أثناء التنفيذ."],
     [/Cannot navigate to invalid URL/i,          "رابط غير صالح."],
     [/ERR_NAME_NOT_RESOLVED/i,                   "فشل حلّ عنوان الموقع."],
-    [/ERR_INTERNET_DISCONNECTED|Failed to fetch|NetworkError/i,
+    [/ERR_INTERNET_DISCONNECTED|Failed to (?:fetch|connect)|NetworkError|ERR_NETWORK/i,
                                                  "تعذّر الاتصال بالشبكة."],
     [/ERR_CONNECTION_REFUSED/i,                  "الخادم رفض الاتصال."],
     [/ERR_TIMED_OUT/i,                           "انتهت مهلة الاتصال."],
     [/ERR_CERT_|ERR_SSL_/i,                      "مشكلة في شهادة الموقع."],
     [/NO_NATIVE_HOST/i,                          "جسر الإضافة غير متّصل — أعد تحميل الإضافة."],
     [/POST_FAILED/i,                             "فشل إرسال الطلب للمضيف."],
-    [/TIMEOUT/i,                                 "انتهت المهلة دون ردّ."],
+    [/^TIMEOUT$|\bTIMEOUT\b/i,                   "انتهت المهلة دون ردّ."],
   ];
   for (const [re, ar] of map) if (re.test(s)) return ar;
-  // Unknown English error — flag it clearly as technical so the user
-  // doesn't confuse it with the assistant's actual reply.
+
+  // Nothing matched. If the message is already Arabic, one of our own
+  // layers produced it — trust and pass through.
+  if (/[\u0600-\u06FF]/.test(s)) return s;
+
+  // Untranslated English — flag it clearly as a technical leak.
   return "خطأ فنيّ: " + s;
 }
 
