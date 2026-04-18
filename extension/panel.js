@@ -263,13 +263,54 @@ function attachCopyButton(wrap, getText) {
 }
 
 function appendUser(text) {
+  appendUserMessage(text, []);
+}
+
+/**
+ * Unified user-message renderer. Produces a SINGLE bubble that can hold:
+ *   • text only                  (classic case)
+ *   • images only                (e.g. screenshot paste + send with no caption)
+ *   • text + images stacked      (most natural flow)
+ *
+ * Keeping images inside the bubble matches the WhatsApp/Telegram/ChatGPT
+ * pattern — a message is one visual unit, not a text bubble + floating
+ * images below it.
+ *
+ * Copy button still only copies the text; copying images is browser-clumsy
+ * and out of scope here.
+ */
+function appendUserMessage(text, images) {
+  if (!text && (!images || images.length === 0)) return;
   removeWelcome();
   const wrap = makeMessageWrap("user");
   const d = document.createElement("div");
   d.className = "msg user";
-  d.textContent = text;
+  // Image-only bubble uses a tighter padding via .has-media so the
+  // image can breathe without a fat padding frame around it.
+  if (images && images.length) d.classList.add("has-media");
+
+  if (text) {
+    const t = document.createElement("div");
+    t.className = "msg-text";
+    t.textContent = text;
+    d.appendChild(t);
+  }
+  if (images && images.length) {
+    const wrap2 = document.createElement("div");
+    wrap2.className = "msg-media";
+    for (const img of images) {
+      const el = document.createElement("img");
+      el.className = "msg-img";
+      el.src = `data:${img.mediaType};base64,${img.base64}`;
+      el.alt = "";
+      wrap2.appendChild(el);
+    }
+    d.appendChild(wrap2);
+  }
   wrap.appendChild(d);
-  attachCopyButton(wrap, () => text);
+  // Copy button for text portion only — image copy is browser-specific and
+  // adds complexity for marginal value.
+  if (text) attachCopyButton(wrap, () => text);
   $messages.appendChild(wrap);
   scrollToBottom();
 }
@@ -528,9 +569,9 @@ async function send() {
   pendingImages = [];
   renderAttachments();
 
-  // Only show a text bubble if there's actual text
-  if (text) appendUser(text);
-  if (images.length) appendUserImages(images);
+  // One unified bubble for text + attached images — matches mainstream
+  // chat UX (WhatsApp/Telegram/ChatGPT).
+  if (text || images.length) appendUserMessage(text, images);
 
   conversation.push({ role: "user", content: text });
   if (conversation.length > MAX_HISTORY) conversation = conversation.slice(-MAX_HISTORY);
@@ -562,17 +603,8 @@ async function send() {
   });
 }
 
-// Small helper: render pasted-image thumbnails after the user bubble
-function appendUserImages(images) {
-  for (const img of images) {
-    const el = document.createElement("img");
-    el.className = "tool-screenshot";
-    el.style.alignSelf = "flex-start";
-    el.src = `data:${img.mediaType};base64,${img.base64}`;
-    $messages.appendChild(el);
-  }
-  scrollToBottom();
-}
+// (appendUserImages removed — appendUserMessage now owns image rendering
+// inside the user bubble.)
 
 async function runLocal(hit, myCancel) {
   // Defensive: always have a valid cancel token.
