@@ -1299,21 +1299,17 @@ function initVoice() {
     // aren't part of the conversation, AND the chat area is hidden in
     // fresh-chat mode so appendError would land invisibly there.
     if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-      showNotice("إذن الميكروفون مرفوض. فعّله من إعدادات الموقع.");
+      showNotice("إذن الميكروفون مرفوض");
       disableMic("الإذن مرفوض — فعّله من إعدادات المتصفح");
       try { chrome.tabs.create({ url: chrome.runtime.getURL("mic-permission.html") }); } catch {}
     } else if (e.error === "network") {
       // Brave Shields / corporate firewall / offline / geo-blocked —
-      // the Google speech endpoint is unreachable. Retrying won't fix
-      // it, so we give one informative line and turn the mic off.
-      showNotice(
-        "التعرّف الصوتي لا يعمل — خدمة Google غير متاحة. "
-        + "في Brave: أوقِف Shields لهذه الصفحة. أو افتح الإضافة في Chrome.",
-        { ms: 9000 }
-      );
-      disableMic("التعرّف الصوتي غير متاح (Google service)");
+      // the Google speech endpoint is unreachable. Short notice, full
+      // explanation in the button's tooltip.
+      showNotice("التعرّف الصوتي معطَّل — جرّب Chrome أو أوقِف Shields");
+      disableMic("التعرّف الصوتي يحتاج خدمة Google — معطَّل في Brave Shields");
     } else if (e.error === "audio-capture") {
-      showNotice("لم يُعثر على ميكروفون. تأكد من توصيله ثم أعد تحميل الإضافة.");
+      showNotice("لا يوجد ميكروفون متَّصل");
       disableMic("لا يوجد ميكروفون");
     }
   };
