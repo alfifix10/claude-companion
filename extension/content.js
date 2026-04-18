@@ -32,8 +32,12 @@
     s.id = STYLE_ID;
     s.textContent = `
       @keyframes __cc_border_pulse {
-        0%, 100% { box-shadow: inset 0 0 14px rgba(194,99,47,.28), 0 0 0 2px rgba(194,99,47,.22); }
-        50%      { box-shadow: inset 0 0 24px rgba(194,99,47,.55), 0 0 0 3px rgba(194,99,47,.4); }
+        /* Outer-glow only — an inset shadow would eat up to 24 px of
+           page content along every edge during each pulse, which users
+           read as "part of the page is hidden" rather than "automation
+           active". The 3 px solid border is already a strong cue. */
+        0%, 100% { box-shadow: 0 0 0 2px rgba(194,99,47,.30); }
+        50%      { box-shadow: 0 0 0 4px rgba(194,99,47,.55); }
       }
       @keyframes __cc_ripple {
         0%   { width: 0;    height: 0;    opacity: 1;   border-width: 3px; }
@@ -62,7 +66,9 @@
       pointer-events: none;
       border: 3px solid ${CLAUDE_COLOR};
       border-radius: 4px;
-      box-shadow: inset 0 0 18px rgba(194,99,47,.35), 0 0 0 2px rgba(194,99,47,.25);
+      /* No inset shadow — see keyframes comment above. The pulse adds
+         the outer glow; the static border is just the 3 px line. */
+      box-shadow: 0 0 0 2px rgba(194,99,47,.25);
       animation: __cc_border_pulse 2s ease-in-out infinite;
     `;
     (document.body || document.documentElement).appendChild(el);
