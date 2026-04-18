@@ -54,24 +54,37 @@
     <!-- User-defined repeated tasks -->
     <div class="tasks-row" id="tasksRow"></div>
 
-    <!-- Messages -->
-    <div class="messages-wrap">
-      <div class="messages" id="messages">
-        <div class="welcome" id="welcome">
-          <div class="welcome-icon">🤖</div>
-          <h2>مرحباً!</h2>
-          <p>أنا مساعدك الذكي للتحكم بالمتصفح — يعمل باشتراك Claude Max بتكلفة $0 من الـ API.</p>
-          <p class="hint-sm">اكتب أمراً مثل "لخّص هذه الصفحة" أو "افتح يوتيوب"</p>
+    <!-- Chat-area wrapper holds everything that reflows between the
+         "fresh chat" layout (welcome + centered input) and the regular
+         "active chat" layout (scrolling messages + input pinned bottom). -->
+    <div class="chat-area" id="chatArea">
+      <!-- Welcome screen — shown in fresh-chat mode. Outside .messages so
+           it doesn't show in active conversations with history. -->
+      <div class="welcome" id="welcome">
+        <img src="icons/icon128.png" alt="" class="welcome-logo">
+        <h2 class="welcome-title">كيف أساعدك اليوم؟</h2>
+        <div class="starter-cards">
+          <button class="starter-card" data-starter="summarize">
+            <span>لخّص هذه الصفحة</span>
+          </button>
+          <button class="starter-card" data-starter="youtube">
+            <span>افتح يوتيوب</span>
+          </button>
+          <button class="starter-card" data-starter="compare">
+            <span>قارن بين التبويبات المفتوحة</span>
+          </button>
         </div>
       </div>
-      <!-- Floating scroll-to-bottom: hidden unless the user has scrolled up;
-           pulses briefly when a new assistant message arrives while hidden. -->
-      <button id="scrollBtn" class="scroll-btn" aria-label="الذهاب إلى الأسفل" title="الذهاب إلى الأسفل">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 5v14M5 12l7 7 7-7"/>
-        </svg>
-      </button>
-    </div>
+
+      <!-- Messages — scrollable list, only meaningful in active mode. -->
+      <div class="messages-wrap">
+        <div class="messages" id="messages"></div>
+        <button id="scrollBtn" class="scroll-btn" aria-label="الذهاب إلى الأسفل" title="الذهاب إلى الأسفل">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 5v14M5 12l7 7 7-7"/>
+          </svg>
+        </button>
+      </div>
 
     <!-- Typing indicator (no stop button — send button doubles as stop) -->
     <div class="typing" id="typing" style="display:none;">
@@ -101,6 +114,7 @@
         </svg>
       </button>
     </div>
+    </div><!-- /.chat-area -->
 
     <!-- History overlay — slides in from the top when the 🕐 button is
          clicked. Holds the list of saved conversations; clicking one loads

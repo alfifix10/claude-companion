@@ -21,6 +21,7 @@ const $attachments = document.getElementById("attachments");
 const $scrollBtn = document.getElementById("scrollBtn");
 const $newChatBtn = document.getElementById("newChatBtn");
 const $historyBtn = document.getElementById("historyBtn");
+const $app = document.querySelector(".app");
 const $historyOverlay = document.getElementById("historyOverlay");
 const $historyList = document.getElementById("historyList");
 const $closeHistoryBtn = document.getElementById("closeHistoryBtn");
@@ -141,10 +142,33 @@ function onBgMessage(msg) {
 // ─────────────────────────────────────────────────────────────────────
 async function init() {
   try { await loadHistory(); } catch (e) { console.error("loadHistory:", e); }
+  // loadHistory renders stored messages and flips off fresh mode; if it
+  // didn't find anything (brand-new user, deleted last conv, etc.) we
+  // land here with an empty conversation and no currentConvId → fresh.
+  if (!conversation.length && !currentConvId) setFreshChat(true);
   try { await updateTabInfo(); } catch (e) { console.error("updateTabInfo:", e); }
   try { await loadTasks(); } catch (e) { console.error("loadTasks:", e); }
   try { connectBg(); } catch (e) { console.error("connectBg:", e); }
 }
+
+// Starter cards inside the welcome block — each drops a ready-made
+// prompt into the input and sends, exactly as if the user had typed
+// it and hit Enter. send() handles the fresh→active transition.
+const STARTER_PROMPTS = {
+  summarize: "لخّص هذه الصفحة",
+  youtube:   "افتح يوتيوب",
+  compare:   "اعرض التبويبات المفتوحة ولخّص محتوى كلّ واحد بسطرَين",
+};
+document.querySelectorAll(".starter-card").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const kind = btn.dataset.starter;
+    const prompt = STARTER_PROMPTS[kind];
+    if (!prompt) return;
+    $input.value = prompt;
+    $input.dispatchEvent(new Event("input"));
+    send();
+  });
+});
 
 // ─────────────────────────────────────────────────────────────────────
 // User-defined repeated tasks
@@ -239,9 +263,31 @@ chrome.tabs?.onUpdated?.addListener((id, ch, tab) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────
+// Fresh-chat mode
+//
+// When the current conversation has no messages (either it's a brand-new
+// chat the user hasn't typed in yet, or they just clicked + / مسح), we
+// enter "fresh mode": the welcome block + starter cards become visible
+// and the input row floats up to the centre of the panel. Once the first
+// message lands, we switch to active mode and everything pins to its
+// normal positions.
+//
+// All visibility + layout is driven by toggling the single .fresh-chat
+// class on .app — the CSS handles the rest, which keeps JS simple and
+// avoids inline style leaks.
+// ─────────────────────────────────────────────────────────────────────
+function setFreshChat(fresh) {
+  if (!$app) return;
+  $app.classList.toggle("fresh-chat", !!fresh);
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Messages rendering
 // ─────────────────────────────────────────────────────────────────────
-function removeWelcome() { $welcome.style.display = "none"; }
+// Any bubble append lands us firmly in "active" mode. Keeping this as
+// the single choke-point means individual appenders don't need to
+// know about the mode system.
+function removeWelcome() { setFreshChat(false); }
 
 // Wrap the bubble in a container that can hold the copy button next to it.
 function makeMessageWrap(cls) {
@@ -945,7 +991,7 @@ async function loadHistory() {
 }
 
 function renderStoredConversation(messages) {
-  $welcome.style.display = "none";
+  setFreshChat(false);
   for (const m of messages) {
     if (m.role === "user") appendUser(m.content);
     else appendAssistantBubble(m.content);
@@ -1028,7 +1074,7 @@ async function openConversation(id) {
   await chrome.storage.local.set({ currentConvId: id });
   conversation = msgs;
   $messages.innerHTML = "";
-  $welcome.style.display = "none";
+  setFreshChat(false);
   renderStoredConversation(conversation);
   closeHistory();
 }
@@ -1045,8 +1091,7 @@ async function convDelete(id) {
     await chrome.storage.local.remove("currentConvId");
     conversation = [];
     $messages.innerHTML = "";
-    $welcome.style.display = "block";
-    $messages.appendChild($welcome);
+    setFreshChat(true);
     if (filtered.length) await openConversation(filtered[0].id);
   }
 }
@@ -1088,10 +1133,10 @@ async function startNewConversation() {
   conversation = [];
   streamingBubble = null;
 
-  // 3. DOM — empty message list, welcome panel back.
+  // 3. DOM — empty message list, welcome panel back (fresh-chat layout
+  //    centres the welcome + input block, handled by CSS).
   $messages.innerHTML = "";
-  $welcome.style.display = "block";
-  $messages.appendChild($welcome);
+  setFreshChat(true);
 
   // 4. Attachments belonged to the previous chat's context.
   if (pendingImages.length) {

@@ -98,15 +98,76 @@ body {
 .task-chip:active { transform: scale(.96); }
 
 
-/* Welcome */
-.welcome {
-  padding: 30px 20px; text-align: center; color: var(--text2);
-  animation: fadeIn .25s;
+/* ─────────────────────────────────────────────────────────────────
+   Chat area layout — wraps messages + input so they reflow together
+   between the "fresh chat" centered layout and the normal "active
+   chat" bottom-pinned layout. See .app.fresh-chat below.
+   ───────────────────────────────────────────────────────────────── */
+.chat-area {
+  flex: 1;
+  display: flex; flex-direction: column;
+  min-height: 0;  /* lets inner scroll container actually scroll */
 }
-.welcome-icon { font-size: 40px; margin-bottom: 12px; }
-.welcome h2 { font-size: 16px; color: var(--text); margin-bottom: 8px; }
-.welcome p { line-height: 1.7; margin-bottom: 8px; font-size: 13px; }
-.welcome .hint-sm { color: var(--accent-br); font-size: 11.5px; opacity: .9; }
+
+/* Welcome — shown ONLY in fresh-chat mode. Professional centered
+   layout: app icon, greeting headline, three starter cards. */
+.welcome {
+  display: none;            /* active mode hides the whole block */
+  flex-direction: column; align-items: center;
+  padding: 24px 28px; text-align: center;
+  animation: fadeIn .3s;
+}
+.welcome-logo {
+  width: 56px; height: 56px; border-radius: 14px;
+  margin-bottom: 18px;
+  box-shadow: 0 6px 20px rgba(194, 99, 47, .22);
+}
+.welcome-title {
+  font-size: 20px; font-weight: 600; color: var(--text);
+  margin-bottom: 22px; letter-spacing: -.2px;
+}
+.starter-cards {
+  display: flex; flex-direction: column; gap: 8px;
+  width: 100%; max-width: 320px;
+}
+.starter-card {
+  padding: 12px 16px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--bg2);
+  color: var(--text); font-family: inherit; font-size: 13px;
+  cursor: pointer; text-align: right; direction: rtl;
+  transition: border-color .15s, background .15s, transform .08s;
+}
+.starter-card:hover {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--accent-br);
+}
+.starter-card:active { transform: scale(.985); }
+
+/* ─── Fresh-chat mode ────────────────────────────────────────────
+   Before the user sends their first message in a new conversation,
+   we centre the welcome + input as a single vertical block, matching
+   the visual language users know from ChatGPT / Claude.ai. Once the
+   first message lands, the class is removed and everything returns
+   to the normal bottom-pinned layout.
+   ──────────────────────────────────────────────────────────────── */
+.app.fresh-chat .welcome {
+  display: flex;
+  margin-top: auto;  /* pushes welcome DOWN toward centre */
+}
+.app.fresh-chat .messages-wrap {
+  display: none;     /* no content to show; reclaim its space */
+}
+.app.fresh-chat .input-row {
+  margin-bottom: auto;   /* counterpart that centres the group */
+  margin-top: 18px;
+}
+/* In very short panels, skip centring — pinning to top is more usable
+   than squeezing content into nothing. */
+@media (max-height: 420px) {
+  .app.fresh-chat .welcome { margin-top: 0; }
+  .app.fresh-chat .input-row { margin-bottom: 0; }
+}
 
 /* History overlay — full-panel slide-down that lists saved conversations.
    Clicking an item loads it into the main chat view; the × per row
