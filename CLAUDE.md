@@ -4,6 +4,20 @@
 
 ---
 
+## 🎭 فريق المراجعة الافتراضيّ — استخدم العدسة المناسبة
+
+**المهندسون المُعتمدون** (ملفات persona + slash commands):
+
+| Slash | Persona | متى |
+|-------|---------|------|
+| `/red` | Adversarial Reviewer (`ADVERSARIAL_REVIEW.md`) | **يومياً** — قبل أي كود غير تافه |
+| `/security` | Security Engineer (`SECURITY_REVIEW.md`) | auth / IO / rendering paths |
+| `/perf` | Performance Engineer (`PERFORMANCE_REVIEW.md`) | feature كبير / شكوى بطء |
+| `/design` | Visual Designer + FE (`VISUAL_DESIGN_REVIEW.md`) | تغيير UI / قبل screenshots |
+
+**قاعدة الاستخدام**: 90% من الوقت `/red` كافٍ. 10% الباقية استدعِ المتخصّص حسب الحاجة.
+قبل release عامّ: **الأربعة مرّة واحدة**.
+
 ## 🔴 القاعدة الأولى — قبل أي كود جديد
 
 **إلزامي**: لأي ميزة/refactor/تغيير غير تافه، طبّق Adversarial Review **من تلقاء نفسك**
