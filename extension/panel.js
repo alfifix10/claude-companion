@@ -23,6 +23,11 @@ const $briefing = document.getElementById("briefing");
 const $briefingTitle = document.getElementById("briefingTitle");
 const $briefingPreview = document.getElementById("briefingPreview");
 const $briefingClose = document.getElementById("briefingClose");
+const $historyBtn = document.getElementById("historyBtn");
+const $historyOverlay = document.getElementById("historyOverlay");
+const $historyList = document.getElementById("historyList");
+const $closeHistoryBtn = document.getElementById("closeHistoryBtn");
+const $newConvBtn = document.getElementById("newConvBtn");
 
 // Pasted images waiting to be sent with the next message.
 // { mediaType: "image/png", base64: "iVBOR..." }
@@ -967,13 +972,10 @@ document.querySelectorAll(".chip").forEach((btn) => {
   btn.addEventListener("click", async () => {
     const action = btn.dataset.quick;
     if (action === "clear_all") {
-      // Full stop + clear
-      hardStop("");
-      conversation = [];
-      $messages.innerHTML = "";
-      $welcome.style.display = "block";
-      $messages.appendChild($welcome);
-      await chrome.storage.local.remove("chatHistory");
+      // "Clear" now means "start a fresh conversation" — the previous
+      // one stays in the history overlay so nothing is destroyed. If
+      // the user wants permanent deletion, the × in history does it.
+      await startNewConversation();
       return;
     }
     // scroll_up / scroll_down chips were removed; the floating ↓ button
@@ -1001,22 +1003,248 @@ document.querySelectorAll(".chip").forEach((btn) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────
-// History persistence
+// Conversation persistence
+//
+// Storage layout (chrome.storage.local):
+//   conv_index: [{ id, title, updatedAt, count }, ...]  // metadata list
+//   conv_<id>:  [...messages]                           // per-conversation
+//   currentConvId: "<id>"                               // for resume
+//
+// Design choices:
+//   • Lazy creation — a conversation is only written to storage once the
+//     user sends their first message. Opening the panel, clicking
+//     "new chat", and never typing leaves zero storage footprint.
+//   • 20-conversation cap with LRU eviction. ~1 MB typical total.
+//   • Migration from the old single chatHistory key runs on first load
+//     with new code: the history becomes conv_<new id>, old key removed.
 // ─────────────────────────────────────────────────────────────────────
-async function saveHistory() {
-  await chrome.storage.local.set({ chatHistory: conversation });
+const CONV_MAX = 20;
+let currentConvId = null;
+
+async function convLoadIndex() {
+  const { conv_index = [] } = await chrome.storage.local.get("conv_index");
+  return Array.isArray(conv_index) ? conv_index : [];
 }
-async function loadHistory() {
-  const { chatHistory } = await chrome.storage.local.get("chatHistory");
-  if (Array.isArray(chatHistory) && chatHistory.length) {
-    conversation = chatHistory;
-    $welcome.style.display = "none";
-    for (const m of conversation) {
-      if (m.role === "user") appendUser(m.content);
-      else appendAssistantBubble(m.content);
-    }
+
+async function convSaveIndex(index) {
+  await chrome.storage.local.set({ conv_index: index });
+}
+
+function newConvId() {
+  return `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+// Derive a display title from the first user message — first 40 chars,
+// collapsed whitespace, markdown stripped of emphasis markers.
+function deriveTitle(messages) {
+  const first = messages.find((m) => m.role === "user");
+  if (!first) return "محادثة جديدة";
+  const raw = typeof first.content === "string" ? first.content : "";
+  const cleaned = raw
+    .replace(/[*_`#>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return "محادثة بصور";
+  return cleaned.length > 40 ? cleaned.slice(0, 40) + "…" : cleaned;
+}
+
+// Lazy-create the current conversation id when the user is about to save
+// their first message. Called from saveHistory.
+async function ensureCurrentConv() {
+  if (currentConvId) return currentConvId;
+  const id = newConvId();
+  const index = await convLoadIndex();
+  index.unshift({
+    id, title: "محادثة جديدة", updatedAt: Date.now(), count: 0,
+  });
+  // LRU eviction of anything beyond the cap.
+  if (index.length > CONV_MAX) {
+    const evicted = index.splice(CONV_MAX);
+    const keys = evicted.map((e) => `conv_${e.id}`);
+    if (keys.length) await chrome.storage.local.remove(keys);
+  }
+  await convSaveIndex(index);
+  await chrome.storage.local.set({ currentConvId: id });
+  currentConvId = id;
+  return id;
+}
+
+async function saveHistory() {
+  if (!conversation.length) return;
+  const id = await ensureCurrentConv();
+  await chrome.storage.local.set({ [`conv_${id}`]: conversation });
+  // Update index entry (title + count + updatedAt).
+  const index = await convLoadIndex();
+  const entry = index.find((c) => c.id === id);
+  if (entry) {
+    entry.count = conversation.length;
+    entry.updatedAt = Date.now();
+    entry.title = deriveTitle(conversation);
+    await convSaveIndex(index);
   }
 }
+
+async function loadHistory() {
+  // Migration path: if the old single-bucket chatHistory key is present
+  // and no conversations have been set up yet, move it into the new
+  // scheme and drop the old key.
+  const { chatHistory, currentConvId: savedId } = await chrome.storage.local.get(["chatHistory", "currentConvId"]);
+  if (Array.isArray(chatHistory) && chatHistory.length && !savedId) {
+    const id = newConvId();
+    await chrome.storage.local.set({
+      [`conv_${id}`]: chatHistory,
+      currentConvId: id,
+      conv_index: [{
+        id, title: deriveTitle(chatHistory),
+        updatedAt: Date.now(), count: chatHistory.length,
+      }],
+    });
+    await chrome.storage.local.remove("chatHistory");
+    currentConvId = id;
+    conversation = chatHistory;
+    renderStoredConversation(conversation);
+    return;
+  }
+
+  if (savedId) {
+    const stored = await chrome.storage.local.get(`conv_${savedId}`);
+    const msgs = stored[`conv_${savedId}`];
+    if (Array.isArray(msgs) && msgs.length) {
+      currentConvId = savedId;
+      conversation = msgs;
+      renderStoredConversation(conversation);
+      return;
+    }
+  }
+  // Nothing to show — welcome state stays.
+}
+
+function renderStoredConversation(messages) {
+  $welcome.style.display = "none";
+  for (const m of messages) {
+    if (m.role === "user") appendUser(m.content);
+    else appendAssistantBubble(m.content);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// History overlay — opens on 🕐, lists saved conversations
+// ─────────────────────────────────────────────────────────────────────
+function formatRelative(ts) {
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return "الآن";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `منذ ${m} دقيقة`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `منذ ${h} ساعة`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `منذ ${d} يوم`;
+  return new Date(ts).toLocaleDateString("ar");
+}
+
+async function renderHistoryList() {
+  const index = await convLoadIndex();
+  $historyList.innerHTML = "";
+  if (!index.length) {
+    const empty = document.createElement("div");
+    empty.className = "history-empty";
+    empty.textContent = "لا توجد محادثات سابقة. ابدأ بكتابة سؤال في الأسفل.";
+    $historyList.appendChild(empty);
+    return;
+  }
+  for (const meta of index) {
+    const item = document.createElement("div");
+    item.className = "conv-item";
+    if (meta.id === currentConvId) item.classList.add("active");
+    item.dataset.id = meta.id;
+
+    const body = document.createElement("div");
+    body.className = "conv-item-body";
+    const title = document.createElement("div");
+    title.className = "conv-title";
+    title.textContent = meta.title || "محادثة";
+    const info = document.createElement("div");
+    info.className = "conv-meta";
+    info.textContent = `${formatRelative(meta.updatedAt)} • ${meta.count} رسالة`;
+    body.appendChild(title);
+    body.appendChild(info);
+    item.appendChild(body);
+
+    const del = document.createElement("button");
+    del.className = "conv-delete";
+    del.textContent = "×";
+    del.title = "حذف";
+    del.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await convDelete(meta.id);
+      await renderHistoryList();
+    });
+    item.appendChild(del);
+
+    item.addEventListener("click", () => openConversation(meta.id));
+    $historyList.appendChild(item);
+  }
+}
+
+async function openConversation(id) {
+  if (id === currentConvId) { closeHistory(); return; }
+  // Don't race with an in-flight task.
+  if (isLoading) {
+    hardStop("");
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  const stored = await chrome.storage.local.get(`conv_${id}`);
+  const msgs = stored[`conv_${id}`];
+  if (!Array.isArray(msgs)) { closeHistory(); return; }
+  currentConvId = id;
+  await chrome.storage.local.set({ currentConvId: id });
+  conversation = msgs;
+  $messages.innerHTML = "";
+  $welcome.style.display = "none";
+  renderStoredConversation(conversation);
+  closeHistory();
+}
+
+async function convDelete(id) {
+  const index = await convLoadIndex();
+  const filtered = index.filter((c) => c.id !== id);
+  await convSaveIndex(filtered);
+  await chrome.storage.local.remove(`conv_${id}`);
+  if (currentConvId === id) {
+    // The currently-open conversation was deleted. Switch to the most
+    // recent remaining one, or drop back to the welcome screen.
+    currentConvId = null;
+    await chrome.storage.local.remove("currentConvId");
+    conversation = [];
+    $messages.innerHTML = "";
+    $welcome.style.display = "block";
+    $messages.appendChild($welcome);
+    if (filtered.length) await openConversation(filtered[0].id);
+  }
+}
+
+async function startNewConversation() {
+  if (isLoading) {
+    hardStop("");
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  // Don't orphan an empty conv in storage — just reset local state.
+  // ensureCurrentConv will mint a new id on the first save.
+  currentConvId = null;
+  await chrome.storage.local.remove("currentConvId");
+  conversation = [];
+  $messages.innerHTML = "";
+  $welcome.style.display = "block";
+  $messages.appendChild($welcome);
+  closeHistory();
+}
+
+function openHistory() { renderHistoryList(); $historyOverlay.hidden = false; }
+function closeHistory() { $historyOverlay.hidden = true; }
+
+$historyBtn?.addEventListener("click", openHistory);
+$closeHistoryBtn?.addEventListener("click", closeHistory);
+$newConvBtn?.addEventListener("click", startNewConversation);
 
 // ─────────────────────────────────────────────────────────────────────
 // Voice (Web Speech API, Arabic)

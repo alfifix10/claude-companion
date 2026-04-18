@@ -14,7 +14,10 @@
         <img src="icons/icon48.png" alt="" class="hdr-icon">
         <span class="hdr-name">Claude Companion</span>
       </div>
-      <button id="settingsBtn" class="ibtn" title="الإعدادات">⚙</button>
+      <div class="hdr-actions">
+        <button id="historyBtn" class="ibtn" title="سجلّ المحادثات" aria-label="سجلّ المحادثات">🕐</button>
+        <button id="settingsBtn" class="ibtn" title="الإعدادات" aria-label="الإعدادات">⚙</button>
+      </div>
     </header>
 
     <!-- Active tab indicator -->
@@ -97,6 +100,18 @@
           <rect x="6" y="6" width="12" height="12" rx="2"/>
         </svg>
       </button>
+    </div>
+
+    <!-- History overlay — slides in from the top when the 🕐 button is
+         clicked. Holds the list of saved conversations; clicking one loads
+         it into the main chat view. -->
+    <div class="history-overlay" id="historyOverlay" hidden>
+      <div class="history-head">
+        <span class="history-title">سجلّ المحادثات</span>
+        <button id="closeHistoryBtn" class="ibtn" title="إغلاق" aria-label="إغلاق">×</button>
+      </div>
+      <button id="newConvBtn" class="new-conv-btn">＋ محادثة جديدة</button>
+      <div class="history-list" id="historyList"></div>
     </div>
   </div>
 
