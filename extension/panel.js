@@ -1172,8 +1172,11 @@ async function renderHistoryList() {
 
     const del = document.createElement("button");
     del.className = "conv-delete";
-    del.textContent = "×";
     del.title = "حذف";
+    del.setAttribute("aria-label", "حذف");
+    // Inline SVG × — matches the rest of the UI instead of a text glyph
+    // that varies by font.
+    del.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M6 18L18 6"/></svg>';
     del.addEventListener("click", async (e) => {
       e.stopPropagation();
       await convDelete(meta.id);
