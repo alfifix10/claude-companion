@@ -137,11 +137,19 @@ RULES:
   • Fall back to mcp__claude-companion__* browser tools only when no
     service-specific MCP exists.
 
+  BUDGET:
+  • You have a large budget for READS (read_page, get_page_text, find,
+    screenshot, list_tabs, tabs_context, tabs_overview, wait_for, scroll).
+    Use them freely to understand the page before acting.
+  • You have a tighter budget for ACTIONS (click, type_text, press_key,
+    form_input, drag, navigate, tabs_create, switch_tab, select_option,
+    hover, run_javascript) — about 40 per task. Plan before you click.
+
   STOP CONDITIONS (do NOT keep burning tokens):
   • If the SAME tool call fails twice with the same input, STOP retrying.
     Explain the blocker in plain Arabic, propose ONE alternative, and wait.
-  • If you've called 15+ tools on the same sub-goal without progress, STOP
-    and ask the user to narrow the task.
+  • If you've made 20+ actions on the same sub-goal without visible
+    progress, STOP and ask the user to narrow the task.
   • When you change approach (e.g. click → find → keyboard shortcut), that
     is EXPECTED. Keep going. Only stop when you've exhausted plausible
     alternatives, not at the first failure.
@@ -200,24 +208,42 @@ export async function handleMaxChat(messages) {
 
   // Anti-stuck guardrails so a wandering task doesn't silently burn the
   // Max quota for minutes on end. Tuned to tolerate legitimate exploration
-  // of messy sites (Gmail, Twitter, dynamic SPAs) without capping Claude
+  // of messy sites (Gmail, GitHub, dynamic SPAs) without capping Claude
   // at the first sign of turbulence.
-  //   • toolCallCount:     hard cap per task (catches endless exploration)
+  //
+  // Key insight (learned from real usage): reads and actions are not
+  // equivalent. A task that clicks twice and reads fifteen times is
+  // making disciplined progress, not spinning. We now cap only the
+  // MUTATING tools; exploration (read_page, find, screenshot, tabs_*,
+  // get_page_text, wait_for, scroll) is uncapped. A MAX_TOTAL ceiling
+  // stays as an absolute backstop against catastrophic loops.
+  //
+  //   • actionCount:       mutating-tool budget (catches endless
+  //                        click/type/navigate storms)
+  //   • totalCount:        absolute cap, very high — only for runaway
+  //                        models that would otherwise never stop
   //   • consecutiveErrors: stops only after MANY same-tool failures; we
-  //                        reset when Claude switches to a different tool,
-  //                        because "the click failed, now I'll try find"
-  //                        is exactly the adaptive behaviour we want.
-  //   • recentCalls:       stops if the same (tool, input) repeats — the
-  //                        classic "Claude keeps clicking a ref that no
-  //                        longer exists" loop.
-  let toolCallCount = 0;
+  //                        reset when Claude switches to a different
+  //                        tool, because "the click failed, let me try
+  //                        find" is exactly the adaptive behaviour we want.
+  //   • recentCalls:       stops if the same (tool, input) repeats —
+  //                        the classic "Claude keeps clicking a ref
+  //                        that no longer exists" loop.
+  const MUTATING_TOOLS = new Set([
+    "click", "type_text", "press_key", "form_input",
+    "drag", "navigate", "tabs_create", "switch_tab",
+    "select_option", "hover", "run_javascript",
+  ]);
+  let actionCount = 0;
+  let totalCount = 0;
   let consecutiveErrors = 0;
   let lastErrorTool = null;
   const recentCalls = []; // { name, inputKey }
-  const MAX_TOOL_CALLS = 50;
+  const MAX_ACTIONS = 40;
+  const MAX_TOTAL = 150;       // absolute ceiling — reads + actions combined
   const LOOP_WINDOW = 4;
   const LOOP_REPEATS = 3;      // 3 identical (tool, input) inside the window = loop
-  const MAX_CONSECUTIVE_ERRORS = 6;  // was 3, too eager — Gmail etc. fail 4+ times casually
+  const MAX_CONSECUTIVE_ERRORS = 6;
 
   // Three safety nets so a misbehaving task can't run forever:
   //   1. No-first-event (20s):  the host never emitted a single event.
@@ -282,11 +308,20 @@ export async function handleMaxChat(messages) {
             }
 
             // ── Anti-stuck: budget + loop detection ──
-            toolCallCount++;
-            if (toolCallCount > MAX_TOOL_CALLS) {
+            totalCount++;
+            if (MUTATING_TOOLS.has(name)) actionCount++;
+            if (actionCount > MAX_ACTIONS) {
               timeoutCancel(
-                `توقّفت: تجاوزت ${MAX_TOOL_CALLS} خطوة أداة دون إنجاز واضح. `
-                + `قسّم المهمّة إلى خطوات أصغر وحدّد الهدف بدقّة.`
+                `بلغتُ حدّ ${MAX_ACTIONS} إجراء (نقر/كتابة/تنقّل) في هذه المهمّة. `
+                + `لو تريد الاستمرار، أعد الطلب بخطوات أوضح أو حدّد الجزء المتبقّي.`
+              );
+              return;
+            }
+            if (totalCount > MAX_TOTAL) {
+              // Belt-and-suspenders: Claude is mostly reading but still
+              // hasn't finished. Unusual — stop just in case.
+              timeoutCancel(
+                `بلغتُ ${MAX_TOTAL} استدعاء أداة دون انتهاء. المهمّة أوسع من المتوقّع — قسّمها.`
               );
               return;
             }
