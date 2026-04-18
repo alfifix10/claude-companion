@@ -18,6 +18,7 @@
 
 import { nativePort, setNativePort } from "../core/state.js";
 import { nativeToolHandlers } from "../tools/native-tool-handlers.js";
+import { scheduleDetachAll } from "../core/cdp.js";
 
 const HOST_NAME = "com.anthropic.claude_companion";
 
@@ -55,6 +56,13 @@ async function handleToolRequest(id, tool, args) {
     sendResponse(id, result);
   } catch (err) {
     sendToolError(id, `${tool} failed: ${err?.message || err}`);
+  } finally {
+    // After every claude-companion tool completes, schedule a detach of
+    // the debugger. ensureAttached cancels the schedule when the next
+    // tool call arrives, so back-to-back calls won't flicker the banner.
+    // This is what actually removes Chromium's debug banner during
+    // multi-MCP tasks (where finishTask may not fire for minutes).
+    scheduleDetachAll();
   }
 }
 
