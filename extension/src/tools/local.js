@@ -53,10 +53,18 @@ const SHORTCUTS = [
   { pattern: /^(?:zoom\s+reset|حجم\s+أصلي|حجم\s+اصلي)$/i,
     action: "zoom", extract: () => ({ reset: true }) },
 
-  // Find in page — uses find-as-you-type focus trick (triggers Ctrl+F).
-  // We can't actually open Chrome's native Find bar from an extension
-  // reliably, so we use content-script findElements + scroll-into-view.
-  { pattern: /^(?:ابحث\s+عن|ابحث|find|search\s+in\s+page)\s+(.+)$/i,
+  // Find in page — uses content-script findElements + scroll-into-view
+  // (Chrome's native Find bar isn't reachable from an extension reliably).
+  //
+  // The old pattern accepted bare "ابحث X" which swallowed conversational
+  // replies like "ابحث بنفسك" (= "go ahead with your research") as a
+  // literal find-in-page request for the word "بنفسك", producing the
+  // useless error bubble "لا يوجد 'بنفسك' في الصفحة". Tightened to
+  // require an explicit "في الصفحة" (or English "on page"), so only
+  // deliberate find-in-page commands trigger this shortcut. Everything
+  // else falls through to Claude — who can still call the `find` tool
+  // when that's what the user actually meant.
+  { pattern: /^(?:ابحث\s+في\s+(?:الصفحة|هذه\s+الصفحة)\s+عن|find\s+on\s+page|search\s+on\s+page)\s+(.+)$/i,
     action: "find_in_page", extract: (m) => ({ query: m[1].trim() }) },
 
   // Clipboard copies — straight to the panel, no Claude, no CDP.
