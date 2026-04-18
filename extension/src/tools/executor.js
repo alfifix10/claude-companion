@@ -5,9 +5,9 @@
  */
 
 import {
-  cdp, ensureAttached, mouseClick, dispatchMouse, waitForDomStable,
+  cdp, ensureAttached, mouseClick, mouseDrag, dispatchMouse, waitForDomStable,
   takeScreenshot, sendContentMessage, resolveRefCoords, resolveClickTarget,
-  dialogNote, getActiveTab,
+  dialogNote, getActiveTab, modifiersBitmask,
 } from "../core/cdp.js";
 import { sleep, parseKeyCombo } from "../core/utils.js";
 import { activeTask, broadcastToPanels } from "../core/state.js";
@@ -130,15 +130,40 @@ export async function executeTool(name, input, tabId) {
       const [x, y] = await resolveClickTarget(tabId, input);
       if (x == null) return "Element not found (ref may have expired — call read_page again)";
       await ensureAttached(tabId);
+      const button = input.button || "left";
+      const modifiers = modifiersBitmask(input.modifiers);
       const urlBefore = (await cdp(tabId, "Runtime.evaluate", { expression: "location.href", returnByValue: true }))?.result?.value;
       rippleAt(tabId, x, y);
-      await mouseClick(tabId, x, y);
+      await mouseClick(tabId, x, y, { button, modifiers });
       await waitForDomStable(tabId);
       try {
         const urlAfter = (await cdp(tabId, "Runtime.evaluate", { expression: "location.href", returnByValue: true }))?.result?.value;
         if (urlAfter && urlAfter !== urlBefore) return `Clicked → navigated to ${urlAfter}.${dialogNote(tabId)}`;
       } catch {}
-      return `Clicked at (${x}, ${y}).${dialogNote(tabId)}`;
+      const modNote = input.modifiers?.length ? ` with ${input.modifiers.join("+")}` : "";
+      const btnNote = button !== "left" ? ` (${button} button)` : "";
+      return `Clicked${btnNote}${modNote} at (${x}, ${y}).${dialogNote(tabId)}`;
+    }
+    case "drag": {
+      // Resolve source + destination independently — either can be a ref
+      // or a raw coordinate pair. Reuses resolveClickTarget which knows
+      // how to translate refs via the content script.
+      const src = await resolveClickTarget(tabId, {
+        ref: input.from_ref,
+        coordinate: input.from_coordinate,
+      });
+      const dst = await resolveClickTarget(tabId, {
+        ref: input.to_ref,
+        coordinate: input.to_coordinate,
+      });
+      if (src[0] == null) return "Drag source not found (ref expired?)";
+      if (dst[0] == null) return "Drag destination not found (ref expired?)";
+      await ensureAttached(tabId);
+      rippleAt(tabId, src[0], src[1]);
+      await mouseDrag(tabId, src[0], src[1], dst[0], dst[1]);
+      await waitForDomStable(tabId);
+      rippleAt(tabId, dst[0], dst[1]);
+      return `Dragged from (${src[0]}, ${src[1]}) to (${dst[0]}, ${dst[1]}).${dialogNote(tabId)}`;
     }
     case "type_text": {
       await ensureAttached(tabId);

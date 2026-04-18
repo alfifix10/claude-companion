@@ -46,6 +46,7 @@ export const nativeToolHandlers = {
   get_page_text: (a) => pass("get_page_text", a),
   find: (a) => pass("find", a),
   click: (a) => pass("click", a),
+  drag: (a) => pass("drag", a),
   type_text: (a) => pass("type_text", a),
   press_key: (a) => pass("press_key", a),
   form_input: (a) => pass("form_input", a),

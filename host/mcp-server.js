@@ -381,10 +381,19 @@ server.tool("find", "Find elements by text or CSS selector.", {
   query: z.string(),
 }, async (a) => ({ content: [{ type: "text", text: String(await request("find", a)) }] }));
 
-server.tool("click", "Click an element by ref or coordinates.", {
+server.tool("click", "Click an element by ref or coordinates. Set button to 'right' for context menu, 'middle' to open link in new tab. Use modifiers like ['ctrl'] for Ctrl+click (open in new tab on links).", {
   ref: z.string().optional(),
   coordinate: coord.optional(),
+  button: z.enum(["left", "right", "middle"]).optional(),
+  modifiers: z.array(z.enum(["ctrl", "shift", "alt", "meta"])).optional(),
 }, async (a) => ({ content: [{ type: "text", text: String(await request("click", a)) }] }));
+
+server.tool("drag", "Drag from a source to a destination. Works for sortable lists (Trello, Notion), canvas apps (Figma, Miro), file-drop zones, and slider handles. Source and destination can each be given as ref OR coordinate.", {
+  from_ref: z.string().optional(),
+  from_coordinate: coord.optional(),
+  to_ref: z.string().optional(),
+  to_coordinate: coord.optional(),
+}, async (a) => ({ content: [{ type: "text", text: String(await request("drag", a)) }] }));
 
 server.tool("type_text", "Type text at the current keyboard focus.", {
   text: z.string(),

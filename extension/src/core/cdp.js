@@ -22,6 +22,19 @@ export async function ensureAttached(tabId) {
       width: win.width, height: win.height, deviceScaleFactor: 1, mobile: false,
     });
   } catch {}
+  // Pretend the tab has focus even when it doesn't.
+  //   Many sites pause video/animations/analytics when the tab is
+  //   backgrounded (`document.hasFocus() === false` or Page Visibility
+  //   API says hidden). While the user interacts with our side panel
+  //   they technically "leave" the tab, which breaks automation that
+  //   depends on visible rendering. Emulation.setFocusEmulationEnabled
+  //   makes `document.hasFocus()` return true without actually stealing
+  //   the user's focus from the side panel.
+  try {
+    await chrome.debugger.sendCommand({ tabId }, "Emulation.setFocusEmulationEnabled", {
+      enabled: true,
+    });
+  } catch {}
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -163,6 +176,77 @@ export async function mouseClick(tabId, x, y, opts = {}) {
   // Hold duration — real clicks are 40–110 ms between down and up.
   await sleep(40 + Math.random() * 70);
   await dispatchMouse(tabId, "mouseReleased", x, y, base);
+}
+
+/**
+ * Human-like drag gesture.
+ *
+ * Mouse events (not HTML5 Drag Events) are what most JS drag libraries
+ * rely on today — react-beautiful-dnd, SortableJS, drag-plugin of
+ * jQuery-UI, most canvas apps (Figma, Miro, tldraw). Browsers fire
+ * `dragstart` automatically once mousedown is followed by a mousemove
+ * that crosses the drag threshold, so the mouse-event sequence we emit
+ * covers both worlds in the same call.
+ *
+ * Sequence (roughly what a hand actually does):
+ *   1. Approach the source with a curved path
+ *   2. Settle, press
+ *   3. Nudge a few pixels to cross the drag threshold and trigger dragstart
+ *   4. Slow curve to the target (more waypoints than a plain click —
+ *      dragging is deliberate)
+ *   5. Hover briefly at the drop point (users hesitate before releasing)
+ *   6. Release
+ */
+export async function mouseDrag(tabId, fromX, fromY, toX, toY, opts = {}) {
+  const mods = opts.modifiers || 0;
+  const base = { button: "left", clickCount: 1, modifiers: mods };
+
+  const startFrom = lastMousePos.get(tabId) || {
+    x: fromX - 30 - Math.random() * 40,
+    y: fromY - 30 - Math.random() * 40,
+  };
+  await humanMouseMove(tabId, startFrom, { x: fromX, y: fromY }, mods);
+  await sleep(80 + Math.random() * 80);
+
+  await dispatchMouse(tabId, "mousePressed", fromX, fromY, base);
+  // Threshold-crossing nudge so HTML5 dragstart fires.
+  await sleep(40 + Math.random() * 40);
+  await dispatchMouse(tabId, "mouseMoved", fromX + 4, fromY + 4, { modifiers: mods, button: "left" });
+  await sleep(30);
+
+  // Deliberate curve to the target — more waypoints, slower.
+  const cp = curveControlPoint({ x: fromX, y: fromY }, { x: toX, y: toY });
+  const steps = 12 + Math.floor(Math.random() * 6);
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const p = bezier(t, { x: fromX, y: fromY }, cp, { x: toX, y: toY });
+    await dispatchMouse(tabId, "mouseMoved", Math.round(p.x), Math.round(p.y), {
+      modifiers: mods, button: "left",
+    });
+    await sleep(12 + Math.random() * 18);
+  }
+
+  lastMousePos.set(tabId, { x: toX, y: toY });
+  // Drop hesitation — real users pause before releasing.
+  await sleep(100 + Math.random() * 150);
+  await dispatchMouse(tabId, "mouseReleased", toX, toY, base);
+}
+
+/**
+ * Parse a list like ["ctrl","shift"] into the bitmask CDP expects.
+ * Bits: alt=1, ctrl=2, meta=4, shift=8.
+ */
+export function modifiersBitmask(list) {
+  if (!Array.isArray(list)) return 0;
+  let n = 0;
+  for (const m of list) {
+    const lc = String(m).toLowerCase();
+    if (lc === "alt") n |= 1;
+    else if (lc === "ctrl" || lc === "control") n |= 2;
+    else if (lc === "meta" || lc === "cmd" || lc === "command") n |= 4;
+    else if (lc === "shift") n |= 8;
+  }
+  return n;
 }
 
 // Public accessor so other modules can know where we last moved the
