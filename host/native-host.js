@@ -239,18 +239,17 @@ function handleMaxQuery(msg) {
   if (msg.model) args.push("--model", msg.model);
 
   // SECURITY: a layered authorisation model.
-  //   Allow:    every user-configured MCP server (mcp__*), plus safe
-  //             read-only built-ins.
+  //   Allow:    every user-configured MCP server, plus safe read-only
+  //             built-ins.
   //   Disallow: built-ins that touch the filesystem or spawn shells.
   //
-  // Why `mcp__*` (all MCP tools) instead of only our own:
-  //   The user explicitly ran `claude mcp add <server>` for every MCP
-  //   server on their machine. Those servers are part of their trusted
-  //   computing base already. Restricting to only our server breaks
-  //   legitimate workflows (Gmail, Slack, GitHub MCPs, etc.) — Claude
-  //   either hangs on permission prompts (which cannot be answered in
-  //   `-p` mode) or falls back to fragile UI automation and burns the
-  //   Max quota.
+  // Why multiple MCP patterns:
+  //   The Claude CLI's wildcard glob treats `__` as a segment separator,
+  //   so `mcp__*` does NOT match `mcp__server__tool`. We therefore pass
+  //   several patterns — the explicit one for our server (always works)
+  //   plus a double-wildcard that matches every MCP server the user has
+  //   registered. Without this, user-configured MCPs (Gmail, GitHub, etc.)
+  //   hang on permission prompts, which cannot be answered in -p mode.
   //
   // We still block Bash / Write / Edit / NotebookEdit on the built-in
   // side — a compromised prompt cannot get code execution or mutate the
@@ -259,7 +258,8 @@ function handleMaxQuery(msg) {
   // msg.allowedTools from the caller is IGNORED by design — a compromised
   // panel.js must not be able to widen the blast radius.
   const HARD_ALLOWLIST = [
-    "mcp__*",    // every MCP server the user has configured
+    "mcp__claude-companion__*",   // our own server — explicit, always works
+    "mcp__*__*",                   // any other MCP server the user registered
     "Read", "Grep", "Glob", "WebFetch", "WebSearch",
   ];
   for (const t of HARD_ALLOWLIST) args.push("--allowedTools", t);
