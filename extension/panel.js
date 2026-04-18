@@ -19,6 +19,7 @@ const $welcome = document.getElementById("welcome");
 const $tasksRow = document.getElementById("tasksRow");
 const $attachments = document.getElementById("attachments");
 const $scrollBtn = document.getElementById("scrollBtn");
+const $newChatBtn = document.getElementById("newChatBtn");
 const $historyBtn = document.getElementById("historyBtn");
 const $historyOverlay = document.getElementById("historyOverlay");
 const $historyList = document.getElementById("historyList");
@@ -1073,6 +1074,8 @@ function closeHistory() { $historyOverlay.hidden = true; }
 $historyBtn?.addEventListener("click", openHistory);
 $closeHistoryBtn?.addEventListener("click", closeHistory);
 $newConvBtn?.addEventListener("click", startNewConversation);
+// Header shortcut that matches the button inside the history overlay.
+$newChatBtn?.addEventListener("click", startNewConversation);
 
 // ─────────────────────────────────────────────────────────────────────
 // Voice (Web Speech API, Arabic)
