@@ -58,10 +58,29 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   invalidatePageTextCache(tabId);
 });
 
-// URL change in an existing tab is a navigation — invalidate the cache
-// so Claude sees the fresh content on the next get_page_text.
+// Invalidate per-tab caches on ANY reload or navigation. Two triggers:
+//   • changeInfo.url  — a genuine cross-URL navigation
+//   • changeInfo.status === "loading" — a reload (F5 / Ctrl+R) keeps the
+//     URL identical, so the url-only check used to miss it and Claude
+//     would re-use stale Readability text + accessibility refs.
+// status === "loading" also fires for the very first load of a new tab,
+// where all these Maps are already empty — the invalidates are no-ops
+// and safe.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.url) invalidatePageTextCache(tabId);
+  const reloadOrNav = !!changeInfo.url || changeInfo.status === "loading";
+  if (!reloadOrNav) return;
+  invalidatePageTextCache(tabId);
+  // Same navigation event wipes the page's DOM, so console/network
+  // histories are about content the user can no longer reach. Keeping
+  // them around misleads Claude into thinking old errors are still
+  // relevant.
+  consoleMessages.delete(tabId);
+  networkRequests.delete(tabId);
+  // Any open dialog belonged to the unloading page.
+  pendingDialogs.delete(tabId);
+  // Cursor path for the human-click model belonged to a DOM that no
+  // longer exists.
+  clearLastMousePos(tabId);
 });
 
 chrome.debugger.onDetach.addListener((source) => {

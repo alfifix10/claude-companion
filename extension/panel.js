@@ -867,20 +867,45 @@ $input.addEventListener("keydown", (e) => {
 // ─────────────────────────────────────────────────────────────────────
 // Paste images from clipboard
 // Works with Win+Shift+S snips, screenshots, any copied image.
+//
+// Caps protect the panel and Claude from pathological pastes:
+//   • MAX_PER_IMAGE_BYTES: refuse a single huge image before we even
+//     base64-encode it (encoding a 50 MB blob locks the UI for seconds)
+//   • MAX_IMAGE_COUNT: keep the total attachment set small so we don't
+//     ship a 100 MB prompt to the CLI
 // ─────────────────────────────────────────────────────────────────────
+const MAX_PER_IMAGE_BYTES = 10 * 1024 * 1024;   // 10 MB
+const MAX_IMAGE_COUNT = 8;
+
 $input.addEventListener("paste", async (e) => {
   const items = e.clipboardData?.items || [];
+  let rejectedBig = 0;
+  let rejectedFull = 0;
   for (const it of items) {
     if (it.kind === "file" && it.type.startsWith("image/")) {
       e.preventDefault();
       const blob = it.getAsFile();
       if (!blob) continue;
+      if (pendingImages.length >= MAX_IMAGE_COUNT) {
+        rejectedFull++;
+        continue;
+      }
+      if (blob.size > MAX_PER_IMAGE_BYTES) {
+        rejectedBig++;
+        continue;
+      }
       try {
         const base64 = await blobToBase64(blob);
         pendingImages.push({ mediaType: it.type, base64 });
         renderAttachments();
       } catch {}
     }
+  }
+  if (rejectedBig) {
+    appendError(`تم تجاهل ${rejectedBig} صورة أكبر من 10MB — جرّب ضغطها أوّلاً.`);
+  }
+  if (rejectedFull) {
+    appendError(`الحد الأقصى ${MAX_IMAGE_COUNT} صور في الرسالة — أرسل الحالية ثم ألصق الباقي.`);
   }
 });
 
