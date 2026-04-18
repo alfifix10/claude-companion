@@ -439,6 +439,9 @@ function enterEditMode(wrap, msgIdx) {
   editor.appendChild(actions);
 
   // Swap bubble for editor — keep the edit/copy icons out of the way.
+  // .editing on the wrap makes it take the full panel width so the
+  // editor isn't squeezed into the original bubble's silhouette.
+  wrap.classList.add("editing");
   msgEl.style.display = "none";
   const editIco = wrap.querySelector(".edit-ico");
   const copyIco = wrap.querySelector(".copy-ico");
@@ -459,12 +462,16 @@ function enterEditMode(wrap, msgIdx) {
   ta.focus();
   ta.setSelectionRange(ta.value.length, ta.value.length);
   // Measure AFTER appending to DOM, otherwise scrollHeight is 0.
+  // Cap raised from 280 to 480 after dogfood feedback — users want
+  // to see the whole message at once when editing, not scroll inside
+  // a peephole searching for the word they came to fix.
   ta.style.height = "auto";
-  const measured = Math.max(80, Math.min(ta.scrollHeight + 2, 280));
+  const measured = Math.max(80, Math.min(ta.scrollHeight + 2, 480));
   ta.style.height = measured + "px";
 
   const cancel = () => {
     editor.remove();
+    wrap.classList.remove("editing");
     msgEl.style.display = "";
     if (editIco) editIco.style.display = "";
     if (copyIco) copyIco.style.display = "";

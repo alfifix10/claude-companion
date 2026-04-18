@@ -538,6 +538,16 @@ body {
 }
 .msg-wrap.user { padding-inline-start: 30px; }
 
+/* Edit mode: let the editor breathe — full available width, no
+   action-column padding (buttons are hidden anyway). Without this,
+   a narrow original bubble (e.g. short prompt) produces a cramped
+   editor where long edits wrap into 5+ lines of scrolling misery. */
+.msg-wrap.editing {
+  max-width: 100%;
+  width: 100%;
+  padding-inline-start: 0;
+}
+
 /* Copy button — visible on hover, subtle always */
 .copy-ico {
   background: transparent; border: 1px solid transparent;
