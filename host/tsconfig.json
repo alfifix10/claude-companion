@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023"],
+    "types": ["node"],
+
+    // Host stays JS at runtime — we only want the type-checker to
+    // read and validate it. No emit, no conversion.
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+
+    // Start relaxed so the existing ~1000 lines of JS don't erupt.
+    // Tighten later once individual modules are clean.
+    "strict": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
+
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+    "verbatimModuleSyntax": false
+  },
+  "include": ["*.js", "src/**/*.ts"],
+  "exclude": ["node_modules", "native-host-wrapper.bat", "com.anthropic.claude_companion.json"]
+}

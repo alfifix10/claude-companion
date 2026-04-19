@@ -235,7 +235,9 @@ const tcpServer = net.createServer((socket) => {
       // Register the session immediately from the hello so the first
       // tool_request after connect routes correctly.
       if (first.sessionId) {
-        socket._sessionId = first.sessionId;
+        // Custom property on Socket — tolerated by Node but not in Socket's
+        // type. Cast keeps checkJs happy.
+        /** @type {any} */ (socket)._sessionId = first.sessionId;
         hostsBySession.set(first.sessionId, socket);
       }
       setupAsNativeHost(socket, rest);
@@ -280,7 +282,7 @@ function setupAsSiblingClient(socket, initial) {
 // Primary/client mode
 // ──────────────────────────────────────────────────────────────────────────
 
-tcpServer.on("error", async (err) => {
+tcpServer.on("error", async (/** @type {NodeJS.ErrnoException} */ err) => {
   if (err.code !== "EADDRINUSE") throw err;
   // Another mcp-server is already primary — become a client of it.
   mode = "client";

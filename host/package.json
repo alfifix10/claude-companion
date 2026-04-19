@@ -4,7 +4,14 @@
   "private": true,
   "description": "Native messaging host + MCP server bridging the Claude Companion extension with Claude Code.",
   "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
   }
 }

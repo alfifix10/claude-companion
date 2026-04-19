@@ -99,6 +99,11 @@ function readMessages(buffer) {
   return { messages, remainder: buffer.subarray(offset) };
 }
 
+/**
+ * Write a framed JSON message to stdout (4-byte LE length prefix +
+ * UTF-8 body). See host/src/types.ts for the full message union.
+ * @param {import("./src/types").OutboundMessage | Record<string, unknown>} obj
+ */
 function write(obj) {
   const body = Buffer.from(JSON.stringify(obj), "utf-8");
   const header = Buffer.alloc(4);
@@ -482,7 +487,9 @@ process.stdin.on("data", (chunk) => {
   const { messages, remainder } = readMessages(stdinBuf);
   stdinBuf = remainder;
 
-  for (const m of messages) {
+  /** @type {import("./src/types").InboundMessage[]} */
+  const typed = messages;
+  for (const m of typed) {
     switch (m.type) {
       case "ping":
         write({ type: "pong", id: m.id, ts: Date.now(), claudeBin: CLAUDE_BIN });
