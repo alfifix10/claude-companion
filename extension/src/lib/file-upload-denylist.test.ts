@@ -1,33 +1,37 @@
 import { describe, expect, it } from "vitest";
 import { SENSITIVE_PATTERNS, checkPath, refusalMessage } from "./file-upload-denylist.js";
 
+// Test paths use a generic `USERNAME` placeholder — the SENSITIVE_PATTERNS
+// regexes match on structural markers (.ssh, User Data, AppData, ...) and
+// don't care which account owns the home directory.
+
 describe("file-upload-denylist — must BLOCK", () => {
   const attackPaths: string[] = [
     // SSH keys — both separator styles
-    String.raw`C:\Users\fix\.ssh\id_rsa`,
-    "C:/Users/fix/.ssh/id_rsa",
+    String.raw`C:\Users\USERNAME\.ssh\id_rsa`,
+    "C:/Users/USERNAME/.ssh/id_rsa",
     "id_rsa.bak",
-    "/home/fix/id_ed25519",
+    "/home/USERNAME/id_ed25519",
 
     // Chromium-family profile stores (Cookies, Login Data, History...)
-    "C:/Users/fix/AppData/Local/BraveSoftware/Brave-Browser/User Data/Default/Cookies",
-    "C:/Users/fix/AppData/Local/Google/Chrome/User Data/Default/Login Data",
-    "C:/Users/fix/AppData/Local/Microsoft/Edge/User Data/Default/History",
+    "C:/Users/USERNAME/AppData/Local/BraveSoftware/Brave-Browser/User Data/Default/Cookies",
+    "C:/Users/USERNAME/AppData/Local/Google/Chrome/User Data/Default/Login Data",
+    "C:/Users/USERNAME/AppData/Local/Microsoft/Edge/User Data/Default/History",
 
     // Unix password files
     "/etc/passwd.bak",
 
     // macOS credential / vault stores
-    "/Users/fix/Library/Keychains/login.keychain-db",
-    "/Users/fix/Library/Application Support/1Password/Data/vault.sqlite",
+    "/Users/USERNAME/Library/Keychains/login.keychain-db",
+    "/Users/USERNAME/Library/Application Support/1Password/Data/vault.sqlite",
 
     // Firefox / Thunderbird
-    "/home/fix/.mozilla/firefox/abc.default/cookies.sqlite",
-    "/home/fix/.mozilla/firefox/abc.default/logins.json",
+    "/home/USERNAME/.mozilla/firefox/abc.default/cookies.sqlite",
+    "/home/USERNAME/.mozilla/firefox/abc.default/logins.json",
 
     // AWS / Cloud SDKs
-    "/home/fix/.aws/credentials",
-    "/home/fix/.config/gcloud/access_tokens.db",
+    "/home/USERNAME/.aws/credentials",
+    "/home/USERNAME/.config/gcloud/access_tokens.db",
 
     // Credential-keyword filenames
     "my_passwords.txt",
@@ -41,11 +45,11 @@ describe("file-upload-denylist — must BLOCK", () => {
     "wallet.dat",
 
     // UNC / WSL paths
-    String.raw`\\wsl$\Ubuntu\home\fix\.ssh\id_rsa`,
+    String.raw`\\wsl$\Ubuntu\home\USERNAME\.ssh\id_rsa`,
     "//server/share/secrets.txt",
 
     // This extension's own config
-    "C:/Users/fix/.claude-companion/config.json",
+    "C:/Users/USERNAME/.claude-companion/config.json",
   ];
 
   it.each(attackPaths)("blocks: %s", (path) => {
@@ -57,16 +61,16 @@ describe("file-upload-denylist — must BLOCK", () => {
 
 describe("file-upload-denylist — must ALLOW", () => {
   const benignPaths: string[] = [
-    "C:/Users/fix/Downloads/resume.pdf",
-    "C:/Users/fix/Documents/report.docx",
+    "C:/Users/USERNAME/Downloads/resume.pdf",
+    "C:/Users/USERNAME/Documents/report.docx",
     "/tmp/image.png",
-    String.raw`C:\Users\fix\Pictures\photo.jpg`,
-    "/Users/fix/Desktop/notes.md",
-    "C:/Users/fix/Documents/my notes.txt",
+    String.raw`C:\Users\USERNAME\Pictures\photo.jpg`,
+    "/Users/USERNAME/Desktop/notes.md",
+    "C:/Users/USERNAME/Documents/my notes.txt",
     "proposal-v2.pdf",
     "logo.svg",
     // User landing a Word recovery doc into an upload is legit
-    "C:/Users/fix/AppData/Local/Microsoft/Word/Recover/draft.docx",
+    "C:/Users/USERNAME/AppData/Local/Microsoft/Word/Recover/draft.docx",
   ];
 
   it.each(benignPaths)("allows: %s", (path) => {
@@ -82,10 +86,10 @@ describe("refusalMessage", () => {
   });
 
   it("returns a descriptive message for blocked paths", () => {
-    const msg = refusalMessage(String.raw`C:\Users\fix\.ssh\id_rsa`);
+    const msg = refusalMessage(String.raw`C:\Users\USERNAME\.ssh\id_rsa`);
     expect(msg).not.toBeNull();
     expect(msg).toContain("refused to upload");
-    expect(msg).toContain(String.raw`C:\Users\fix\.ssh\id_rsa`);
+    expect(msg).toContain(String.raw`C:\Users\USERNAME\.ssh\id_rsa`);
     expect(msg).toContain("rename or move");
   });
 });
