@@ -12,7 +12,7 @@
 import { humanizeError } from "./src/lib/humanize-error.js";
 // renderMarkdown: hand-rolled MD → HTML with XSS-hardened links.
 // 39 unit tests. src/lib/markdown.ts.
-import { renderMarkdown } from "./src/lib/markdown.js";
+import { renderMarkdown, escapeHtml } from "./src/lib/markdown.js";
 // Phase-5 leaf harvests: small pure functions lifted out of panel.js.
 import { parseTasks } from "./src/lib/parse-tasks.js";
 import { formatRelative } from "./src/lib/format-relative.js";
@@ -1109,7 +1109,7 @@ document.querySelectorAll(".chip").forEach((btn) => {
         // is preserved literally.
         const bodyHtml = m.role === "assistant" && typeof m.content === "string"
           ? renderMarkdown(m.content)
-          : escapeHTML(raw).replace(/\n/g, "<br>");
+          : escapeHtml(raw).replace(/\n/g, "<br>");
         htmlParts.push(
           `<div style="margin:0 0 6px 0;font-weight:600">${role}:</div>` +
           `<div style="margin:0 0 14px 0">${bodyHtml}</div>`
