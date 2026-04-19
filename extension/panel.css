@@ -423,10 +423,10 @@ body {
 .messages::-webkit-scrollbar { width: 3px; }
 .messages::-webkit-scrollbar-track { background: transparent; }
 .messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-.messages::-webkit-scrollbar-thumb:hover { background: var(--text2); }
-/* Kill the legacy up/down arrow buttons Chromium still renders at the
-   ends of the scrollbar — they show as small light rectangles above
-   the input row in a dark side panel. */
+/* No :hover rule on the thumb — streaming auto-scroll repeatedly
+   brings the cursor in/out of the scrollbar's hit area, and the
+   resulting colour toggle reads as a flicker. Keep the thumb a
+   single stable colour. */
 .messages::-webkit-scrollbar-button { display: none; height: 0; }
 .messages::-webkit-scrollbar-corner { background: transparent; }
 
