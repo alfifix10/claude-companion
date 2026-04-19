@@ -13,6 +13,9 @@ import { humanizeError } from "./src/lib/humanize-error.js";
 // renderMarkdown: hand-rolled MD → HTML with XSS-hardened links.
 // 39 unit tests. src/lib/markdown.ts.
 import { renderMarkdown } from "./src/lib/markdown.js";
+// Phase-5 leaf harvests: small pure functions lifted out of panel.js.
+import { parseTasks } from "./src/lib/parse-tasks.js";
+import { formatRelative } from "./src/lib/format-relative.js";
 
 // ─────────────────────────────────────────────────────────────────────
 // DOM refs
@@ -244,42 +247,8 @@ document.querySelectorAll(".starter-chip").forEach((btn) => {
 // Clicking a chip fires the prompt as a normal user message (goes through
 // the usual local-shortcut → Max pipeline, same as typing it manually).
 // ─────────────────────────────────────────────────────────────────────
-// Parser supports two shapes:
-//   (a) single-line task:    name: the full prompt text on one line
-//   (b) multi-line task:     name:
-//                            the full prompt
-//                            across multiple lines
-// Tasks are separated by blank line(s). Lines starting with `#` are comments.
-// Legacy `=` separator is still accepted for backward compatibility.
-function parseTasks(raw) {
-  const out = [];
-  if (!raw) return out;
-
-  // Split into blocks by blank line
-  const blocks = raw.split(/\r?\n\s*\r?\n/);
-  for (const block of blocks) {
-    const lines = block.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
-    if (!lines.length) continue;
-
-    const first = lines[0];
-    // Detect separator: colon or legacy `=`
-    let idx = first.indexOf(":");
-    let sep = ":";
-    const eqIdx = first.indexOf("=");
-    if ((idx === -1) || (eqIdx !== -1 && eqIdx < idx)) {
-      idx = eqIdx;
-      sep = "=";
-    }
-    if (idx <= 0) continue;
-
-    const name = first.slice(0, idx).trim();
-    const inlineRest = first.slice(idx + 1).trim();
-    const restLines = lines.slice(1);
-    const prompt = [inlineRest, ...restLines].filter(Boolean).join("\n").trim();
-    if (name && prompt) out.push({ name, prompt });
-  }
-  return out;
-}
+// parseTasks lives in src/lib/parse-tasks.ts — 27 unit tests cover
+// both shapes, `:` vs `=`, comments, \r\n, malformed-input handling.
 
 async function loadTasks() {
   const { tasks } = await chrome.storage.local.get("tasks");
@@ -1329,17 +1298,8 @@ function renderStoredConversation(messages) {
 // ─────────────────────────────────────────────────────────────────────
 // History overlay — opens on 🕐, lists saved conversations
 // ─────────────────────────────────────────────────────────────────────
-function formatRelative(ts) {
-  const s = Math.floor((Date.now() - ts) / 1000);
-  if (s < 60) return "الآن";
-  const m = Math.floor(s / 60);
-  if (m < 60) return `منذ ${m} دقيقة`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `منذ ${h} ساعة`;
-  const d = Math.floor(h / 24);
-  if (d < 7) return `منذ ${d} يوم`;
-  return new Date(ts).toLocaleDateString("ar");
-}
+// formatRelative lives in src/lib/format-relative.ts — 15 unit tests
+// pin `now` to verify every bucket boundary (الآن / دقيقة / ساعة / يوم).
 
 // Escape the five HTML-sensitive characters so snippet text can be
 // safely injected with innerHTML (the only markup we add is our own

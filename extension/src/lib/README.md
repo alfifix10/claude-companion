@@ -18,6 +18,9 @@ Current inhabitants:
 | `loop-detector.ts` | inline `recentCalls` loop check in `max.js` | 19 cases |
 | `file-upload-denylist.ts` | inline `SENSITIVE_PATTERNS` in `executor.js` | 35 cases |
 | `markdown.ts` | inline `renderMarkdown()` in `panel.js` | 39 cases |
+| `parse-tasks.ts` | inline `parseTasks()` in `panel.js` | 27 cases |
+| `safe-input-key.ts` | inline `safeInputKey()` in `max.js` | 16 cases |
+| `format-relative.ts` | inline `formatRelative()` in `panel.js` | 15 cases |
 
 The registry (`tool-registry.ts`) is the canonical source for every MCP
 tool's name, mutating flag, category, and description. `native-tool-

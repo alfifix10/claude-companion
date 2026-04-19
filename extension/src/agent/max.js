@@ -20,22 +20,11 @@ import { getActiveTab, sendContentMessage, scheduleDetachAll } from "../core/cdp
 import { rejectToolsFor, clearToolRejection } from "../tools/native-tool-handlers.js";
 import { isMutating } from "../lib/tool-registry.js";
 import { LoopDetector } from "../lib/loop-detector.js";
+import { safeInputKey } from "../lib/safe-input-key.js";
 
 // Stable key for a tool-call input so we can detect exact repeats. Uses
-// JSON with sorted keys; falls back to String() if the input is weird
-// (circular references etc.).
-function safeInputKey(input) {
-  try {
-    if (input === null || input === undefined) return "";
-    if (typeof input !== "object") return String(input);
-    const keys = Object.keys(input).sort();
-    const obj = {};
-    for (const k of keys) obj[k] = input[k];
-    return JSON.stringify(obj);
-  } catch {
-    return String(input);
-  }
-}
+// safeInputKey lives in src/lib/safe-input-key.ts — 16 unit tests
+// cover determinism across key orders, circular refs, empty objects.
 
 // Toggle the task-level sticky border. Individual tool calls pulse it
 // separately so there's always a visual even if this fails to reach the tab.
