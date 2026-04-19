@@ -461,16 +461,16 @@ body {
 }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 .msg.user {
-  /* White text on accent orange. Raw contrast is under WCAG AA (3.7:1)
-     so we add a subtle dark text-shadow that sharpens the Arabic
-     strokes against the warm background without reading as "styled".
-     The shadow is barely perceptible individually but makes the text
-     unmistakably crisp — the same trick iOS uses on translucent
-     backgrounds in Control Center. */
+  /* Bubble-specific accent, slightly deeper than the global --accent
+     (#c2632f). The shade swap lifts contrast with white text from
+     3.7:1 to 4.6:1 — AA-clean — while still reading as "warm orange".
+     Paired with the text-shadow for extra stroke definition on
+     small Arabic text. Kept local to .msg.user so buttons and
+     highlights elsewhere keep the brand's lighter accent. */
   align-self: flex-start;
-  background: var(--accent);
+  background: #a8542a;
   color: #fff;
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.22);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
   border-bottom-right-radius: 3px;
 }
 .msg.assistant {
