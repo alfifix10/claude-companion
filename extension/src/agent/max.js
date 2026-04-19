@@ -18,6 +18,8 @@ import {
 } from "../messaging/native.js";
 import { getActiveTab, sendContentMessage, scheduleDetachAll } from "../core/cdp.js";
 import { rejectToolsFor, clearToolRejection } from "../tools/native-tool-handlers.js";
+import { isMutating } from "../lib/tool-taxonomy.js";
+import { LoopDetector } from "../lib/loop-detector.js";
 
 // Stable key for a tool-call input so we can detect exact repeats. Uses
 // JSON with sorted keys; falls back to String() if the input is weird
@@ -251,34 +253,16 @@ export async function handleMaxChat(messages) {
   //   • recentCalls:       stops if the same (tool, input) repeats —
   //                        the classic "Claude keeps clicking a ref
   //                        that no longer exists" loop.
-  // Single source of truth for "does this tool change state?". Used by
-  // BOTH the action-budget counter and the loop detector so the two
-  // can never drift out of sync. Every time a new MCP tool is added
-  // you ask this question ONCE, here. Previously we maintained two
-  // separate lists and of course they drifted — tabs_close and
-  // file_upload landed in neither, so the loop detector treated them
-  // as read-only when they clearly aren't.
-  const MUTATING_TOOLS = new Set([
-    "click", "type_text", "press_key", "form_input",
-    "drag", "navigate", "tabs_create", "switch_tab",
-    "select_option", "hover", "run_javascript",
-    "tabs_close", "file_upload",
-  ]);
+  // MUTATING_TOOLS + LoopDetector live in src/lib/ now — see their
+  // source files for full rationale (single-source-of-truth, per-class
+  // thresholds) plus 38 unit tests guarding the behaviour.
   let actionCount = 0;
   let totalCount = 0;
   let consecutiveErrors = 0;
   let lastErrorTool = null;
-  const recentCalls = []; // { name, inputKey }
+  const loopDetector = new LoopDetector();
   const MAX_ACTIONS = 40;
   const MAX_TOTAL = 150;       // absolute ceiling — reads + actions combined
-  const LOOP_WINDOW = 8;       // widened so read-only repeats still have room
-  // Per-class loop thresholds: mutating tools catch dead-ref clicks
-  // fast (3 identical), read-only tools get more slack because paginated
-  // scanning, re-checks, and visual verification legitimately repeat.
-  // Still bounded — 6+ identical read-only calls in a row means Claude
-  // is genuinely stuck re-inspecting the same state hoping for change.
-  const MUTATING_LOOP_REPEATS = 3;
-  const READONLY_LOOP_REPEATS = 6;
   const MAX_CONSECUTIVE_ERRORS = 6;
 
   // Three safety nets so a misbehaving task can't run forever:
@@ -352,7 +336,7 @@ export async function handleMaxChat(messages) {
 
             // ── Anti-stuck: budget + loop detection ──
             totalCount++;
-            if (MUTATING_TOOLS.has(name)) actionCount++;
+            if (isMutating(name)) actionCount++;
             if (actionCount > MAX_ACTIONS) {
               timeoutCancel(
                 `بلغتُ حدّ ${MAX_ACTIONS} إجراء (نقر/كتابة/تنقّل) في هذه المهمّة. `
@@ -368,31 +352,13 @@ export async function handleMaxChat(messages) {
               );
               return;
             }
-            // Loop detection driven by MUTATING_TOOLS (single source
-            // of truth, defined above). Two class-specific thresholds:
-            //
-            //   • Mutating tool, 3 identical (tool, input) in the
-            //     window → dead-ref click / failed-submit kind of
-            //     loop. Stop early.
-            //
-            //   • Read-only tool, 6 identical in the window → not a
-            //     legitimate paginated read; Claude is stuck staring
-            //     at the same state. Stop, just later.
-            //
-            // Previous attempts oscillated between "fire too eagerly
-            // on scroll/screenshot" and "never fire at all". Class-
-            // based threshold gets both right.
+            // Loop detection delegated to src/lib/loop-detector.ts —
+            // per-class thresholds, 19 unit tests guarding behaviour.
             const inputKey = safeInputKey(block.input);
-            recentCalls.push({ name, inputKey });
-            if (recentCalls.length > LOOP_WINDOW) recentCalls.shift();
-            const identical = recentCalls.filter(
-              (c) => c.name === name && c.inputKey === inputKey
-            ).length;
-            const isMutating = MUTATING_TOOLS.has(name);
-            const threshold = isMutating ? MUTATING_LOOP_REPEATS : READONLY_LOOP_REPEATS;
-            if (identical >= threshold) {
+            const loopResult = loopDetector.record(name, inputKey);
+            if (loopResult.loop) {
               timeoutCancel(
-                `توقّفت: تكرّرت الأداة "${name}" بنفس المُدخلات ${identical} مرّات — `
+                `توقّفت: تكرّرت الأداة "${name}" بنفس المُدخلات ${loopResult.identical} مرّات — `
                 + `حلقة واضحة. جرّب مقاربة مختلفة.`
               );
               return;

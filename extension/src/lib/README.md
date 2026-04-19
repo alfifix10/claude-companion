@@ -14,6 +14,9 @@ Current inhabitants:
 | Module | Migrated from | Tests |
 |---|---|---|
 | `humanize-error.ts` | inline `humanizeError()` in `panel.js` | 37 cases |
+| `tool-taxonomy.ts` | inline `MUTATING_TOOLS` set in `max.js` | 27 cases |
+| `loop-detector.ts` | inline `recentCalls` loop check in `max.js` | 19 cases |
+| `file-upload-denylist.ts` | inline `SENSITIVE_PATTERNS` in `executor.js` | 35 cases |
 
 ## Adding a new lib module
 
