@@ -613,7 +613,12 @@ body {
 }
 .edit-textarea:focus { border-color: var(--accent); }
 .edit-actions {
-  display: flex; gap: 8px; justify-content: flex-end;
+  /* In RTL, `flex-end` resolves to the LEFT side of the container —
+     which pushed the action buttons away from where the eye naturally
+     tracks after the user's last keystroke in the textarea. Using
+     `flex-start` puts them on the RIGHT (the RTL leading edge),
+     anchored under the text they act on. */
+  display: flex; gap: 8px; justify-content: flex-start;
 }
 .edit-save, .edit-cancel {
   font: inherit; font-size: 12.5px; font-weight: 600;

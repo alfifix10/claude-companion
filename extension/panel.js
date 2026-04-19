@@ -416,12 +416,8 @@ function enterEditMode(wrap, msgIdx) {
   cancelBtn.className = "edit-cancel";
   cancelBtn.textContent = "إلغاء";
   cancelBtn.title = "Escape";
-  // DOM order: cancel first, save second. In this RTL layout with
-  // actions flowing toward the end, that puts إلغاء on the right and
-  // إرسال on the left — matches the common "primary action on the
-  // leading side" convention.
-  actions.appendChild(cancelBtn);
   actions.appendChild(saveBtn);
+  actions.appendChild(cancelBtn);
   editor.appendChild(ta);
   editor.appendChild(actions);
 
