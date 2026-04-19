@@ -5,8 +5,15 @@
 
 # Node
 host/node_modules/
+extension/node_modules/
 node_modules/
 npm-debug.log*
+
+# TypeScript build artefacts — we stay in noEmit mode during the
+# Strangler migration, but the compiler still caches build info.
+extension/dist/
+extension/*.tsbuildinfo
+extension/.vite/
 
 # Generated at install time
 host/native-host-wrapper.bat
