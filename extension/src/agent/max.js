@@ -358,14 +358,21 @@ export async function handleMaxChat(messages) {
             // 4-call window = real stuck loop (e.g. clicking a ref that
             // doesn't exist anymore).
             //
-            // EXEMPT: tools whose semantics MEAN "do the same thing
-            // again" — scrolling through long content, waiting for a
-            // dynamic change, re-reading the page after an action.
-            // These routinely repeat with identical input and that's
-            // healthy progress, not a loop. The older version fired
-            // "توقّفت: تكرّرت الأداة scroll" on pages long enough to
-            // need 3 page-downs, which is the wrong signal.
-            const REPEAT_SAFE = new Set(["scroll", "wait_for", "read_page"]);
+            // EXEMPT: every READ-ONLY tool. Repeating any of them is
+            // legitimate progress — scanning long content (scroll,
+            // screenshot), waiting for a dynamic change (wait_for),
+            // re-reading after an action (read_page, get_page_text),
+            // searching (find), or enumerating tabs (list_tabs,
+            // tabs_context, tabs_overview). Only MUTATING tools
+            // (click, type_text, navigate, ...) remain under loop
+            // detection — repeating those with identical input is the
+            // real stuck-on-dead-ref pattern this check was designed
+            // for.
+            const REPEAT_SAFE = new Set([
+              "scroll", "wait_for", "read_page",
+              "screenshot", "get_page_text", "find",
+              "list_tabs", "tabs_context", "tabs_overview",
+            ]);
             if (!REPEAT_SAFE.has(name)) {
               const inputKey = safeInputKey(block.input);
               recentCalls.push({ name, inputKey });
