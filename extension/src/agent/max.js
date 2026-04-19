@@ -18,7 +18,7 @@ import {
 } from "../messaging/native.js";
 import { getActiveTab, sendContentMessage, scheduleDetachAll } from "../core/cdp.js";
 import { rejectToolsFor, clearToolRejection } from "../tools/native-tool-handlers.js";
-import { isMutating } from "../lib/tool-taxonomy.js";
+import { isMutating } from "../lib/tool-registry.js";
 import { LoopDetector } from "../lib/loop-detector.js";
 
 // Stable key for a tool-call input so we can detect exact repeats. Uses

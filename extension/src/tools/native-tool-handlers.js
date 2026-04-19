@@ -13,6 +13,7 @@
 
 import { executeTool } from "./executor.js";
 import { activeTask } from "../core/state.js";
+import { getAllToolNames } from "../lib/tool-registry.js";
 
 let rejectUntil = 0;
 export function rejectToolsFor(ms = 3000) {
@@ -46,27 +47,10 @@ async function pass(name, args) {
   return await executeTool(name, args || {}, tabId);
 }
 
-export const nativeToolHandlers = {
-  tabs_context: (a) => pass("tabs_context", a),
-  tabs_create: (a) => pass("tabs_create", a),
-  navigate: (a) => pass("navigate", a),
-  read_page: (a) => pass("read_page", a),
-  get_page_text: (a) => pass("get_page_text", a),
-  find: (a) => pass("find", a),
-  click: (a) => pass("click", a),
-  drag: (a) => pass("drag", a),
-  type_text: (a) => pass("type_text", a),
-  press_key: (a) => pass("press_key", a),
-  form_input: (a) => pass("form_input", a),
-  screenshot: (a) => pass("screenshot", a),
-  scroll: (a) => pass("scroll", a),
-  run_javascript: (a) => pass("run_javascript", a),
-  wait_for: (a) => pass("wait_for", a),
-  hover: (a) => pass("hover", a),
-  select_option: (a) => pass("select_option", a),
-  list_tabs: (a) => pass("list_tabs", a),
-  tabs_overview: (a) => pass("tabs_overview", a),
-  switch_tab: (a) => pass("switch_tab", a),
-  tabs_close: (a) => pass("tabs_close", a),
-  file_upload: (a) => pass("file_upload", a),
-};
+// Derived from src/lib/tool-registry.ts — one declaration per tool,
+// one handler map, zero drift. Adding a tool = update the registry,
+// and this map updates itself on next load. Previously 22 lines of
+// copy-paste `name: (a) => pass(name, a)`.
+export const nativeToolHandlers = Object.fromEntries(
+  getAllToolNames().map((name) => [name, (a) => pass(name, a)]),
+);

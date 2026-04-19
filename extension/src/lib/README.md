@@ -14,9 +14,15 @@ Current inhabitants:
 | Module | Migrated from | Tests |
 |---|---|---|
 | `humanize-error.ts` | inline `humanizeError()` in `panel.js` | 37 cases |
-| `tool-taxonomy.ts` | inline `MUTATING_TOOLS` set in `max.js` | 27 cases |
+| `tool-registry.ts` | scattered tool knowledge across 3 files | 32 cases |
 | `loop-detector.ts` | inline `recentCalls` loop check in `max.js` | 19 cases |
 | `file-upload-denylist.ts` | inline `SENSITIVE_PATTERNS` in `executor.js` | 35 cases |
+
+The registry (`tool-registry.ts`) is the canonical source for every MCP
+tool's name, mutating flag, category, and description. `native-tool-
+handlers.js` derives its pass() dispatch from it. `max.js` imports
+`isMutating` from it. Future phases will unify `host/mcp-server.js`
+with it as well.
 
 ## Adding a new lib module
 

@@ -15,7 +15,7 @@
  * Stateful — one detector per task. Caller should construct a fresh
  * one when handleMaxChat starts a new run.
  */
-import { isMutating } from "./tool-taxonomy";
+import { isMutating } from "./tool-registry";
 export const DEFAULT_LOOP_CONFIG = {
     window: 8,
     mutatingRepeats: 3,
