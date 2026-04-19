@@ -18,6 +18,14 @@ let rejectUntil = 0;
 export function rejectToolsFor(ms = 3000) {
   rejectUntil = Date.now() + ms;
 }
+// Call this when a NEW task deliberately starts after a stop — edit-
+// and-resend, send-while-streaming, quick-action-while-loading. Without
+// it, the previous hardStop's 10 s blackout rejects the new task's
+// first tool calls, Claude retries them, hits the loop detector, and
+// bails. The adversarial reviewer called this finding #1.
+export function clearToolRejection() {
+  rejectUntil = 0;
+}
 
 async function resolveTabId(preferred) {
   if (preferred) {

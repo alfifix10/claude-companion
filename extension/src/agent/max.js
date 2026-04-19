@@ -17,7 +17,7 @@ import {
   registerResponseHandler, unregisterResponseHandler,
 } from "../messaging/native.js";
 import { getActiveTab, sendContentMessage, scheduleDetachAll } from "../core/cdp.js";
-import { rejectToolsFor } from "../tools/native-tool-handlers.js";
+import { rejectToolsFor, clearToolRejection } from "../tools/native-tool-handlers.js";
 
 // Stable key for a tool-call input so we can detect exact repeats. Uses
 // JSON with sorted keys; falls back to String() if the input is weird
@@ -180,6 +180,12 @@ function buildDynamicUser({ history, tab, memories }) {
 }
 
 export async function handleMaxChat(messages) {
+  // A new task begins. Clear any lingering tool-rejection blackout
+  // from a previous hardStop so edit-and-resend / send-while-streaming
+  // patterns don't lose their first 10 s of tool calls to the dying
+  // subprocess's window.
+  clearToolRejection();
+
   const lastUser = messages[messages.length - 1]?.content || "";
 
   // Load user-saved memories (a freeform notes field in settings)
