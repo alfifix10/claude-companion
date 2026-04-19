@@ -130,11 +130,11 @@ Side Panel (UI) ─ Service Worker ─ Native Host (Node) ─┬── claude CL
 - **DOM diff** على read_page (إرسال changes فقط بعد أول قراءة)
 - **Selective refs** (interactive-only) في accessibility tree
 
-## إعدادات المستخدم الحالية
-- اشتراك: **Claude Max (5x)** · حساب `alfifix10@gmail.com`
-- Node.js: v24.14.0
-- Claude Code: v2.1.112
-- Brave كمتصفح أساسي
+## بيئة التطوير المستهدَفة
+- اشتراك: **Claude Max** (أيّ خطّة تدعم الـ CLI)
+- Node.js 18+
+- Claude Code CLI latest
+- Brave / Chrome / Edge / Opera / Vivaldi / Arc — كلّها Chromium-based
 
 ## المشاكل المعروفة / للمستقبل
 - الإضافة لا تعمل إذا Brave مغلق كلياً
