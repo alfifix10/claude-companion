@@ -251,10 +251,18 @@ export async function handleMaxChat(messages) {
   //   • recentCalls:       stops if the same (tool, input) repeats —
   //                        the classic "Claude keeps clicking a ref
   //                        that no longer exists" loop.
+  // Single source of truth for "does this tool change state?". Used by
+  // BOTH the action-budget counter and the loop detector so the two
+  // can never drift out of sync. Every time a new MCP tool is added
+  // you ask this question ONCE, here. Previously we maintained two
+  // separate lists and of course they drifted — tabs_close and
+  // file_upload landed in neither, so the loop detector treated them
+  // as read-only when they clearly aren't.
   const MUTATING_TOOLS = new Set([
     "click", "type_text", "press_key", "form_input",
     "drag", "navigate", "tabs_create", "switch_tab",
     "select_option", "hover", "run_javascript",
+    "tabs_close", "file_upload",
   ]);
   let actionCount = 0;
   let totalCount = 0;
@@ -263,8 +271,14 @@ export async function handleMaxChat(messages) {
   const recentCalls = []; // { name, inputKey }
   const MAX_ACTIONS = 40;
   const MAX_TOTAL = 150;       // absolute ceiling — reads + actions combined
-  const LOOP_WINDOW = 4;
-  const LOOP_REPEATS = 3;      // 3 identical (tool, input) inside the window = loop
+  const LOOP_WINDOW = 8;       // widened so read-only repeats still have room
+  // Per-class loop thresholds: mutating tools catch dead-ref clicks
+  // fast (3 identical), read-only tools get more slack because paginated
+  // scanning, re-checks, and visual verification legitimately repeat.
+  // Still bounded — 6+ identical read-only calls in a row means Claude
+  // is genuinely stuck re-inspecting the same state hoping for change.
+  const MUTATING_LOOP_REPEATS = 3;
+  const READONLY_LOOP_REPEATS = 6;
   const MAX_CONSECUTIVE_ERRORS = 6;
 
   // Three safety nets so a misbehaving task can't run forever:
@@ -354,39 +368,34 @@ export async function handleMaxChat(messages) {
               );
               return;
             }
-            // Loop detection: 3 identical (tool, input) calls inside a
-            // 4-call window = real stuck loop (e.g. clicking a ref that
-            // doesn't exist anymore).
+            // Loop detection driven by MUTATING_TOOLS (single source
+            // of truth, defined above). Two class-specific thresholds:
             //
-            // EXEMPT: every READ-ONLY tool. Repeating any of them is
-            // legitimate progress — scanning long content (scroll,
-            // screenshot), waiting for a dynamic change (wait_for),
-            // re-reading after an action (read_page, get_page_text),
-            // searching (find), or enumerating tabs (list_tabs,
-            // tabs_context, tabs_overview). Only MUTATING tools
-            // (click, type_text, navigate, ...) remain under loop
-            // detection — repeating those with identical input is the
-            // real stuck-on-dead-ref pattern this check was designed
-            // for.
-            const REPEAT_SAFE = new Set([
-              "scroll", "wait_for", "read_page",
-              "screenshot", "get_page_text", "find",
-              "list_tabs", "tabs_context", "tabs_overview",
-            ]);
-            if (!REPEAT_SAFE.has(name)) {
-              const inputKey = safeInputKey(block.input);
-              recentCalls.push({ name, inputKey });
-              if (recentCalls.length > LOOP_WINDOW) recentCalls.shift();
-              const identical = recentCalls.filter(
-                (c) => c.name === name && c.inputKey === inputKey
-              ).length;
-              if (identical >= LOOP_REPEATS) {
-                timeoutCancel(
-                  `توقّفت: تكرّرت الأداة "${name}" بنفس المُدخلات ${identical} مرّات — `
-                  + `حلقة واضحة. جرّب مقاربة مختلفة.`
-                );
-                return;
-              }
+            //   • Mutating tool, 3 identical (tool, input) in the
+            //     window → dead-ref click / failed-submit kind of
+            //     loop. Stop early.
+            //
+            //   • Read-only tool, 6 identical in the window → not a
+            //     legitimate paginated read; Claude is stuck staring
+            //     at the same state. Stop, just later.
+            //
+            // Previous attempts oscillated between "fire too eagerly
+            // on scroll/screenshot" and "never fire at all". Class-
+            // based threshold gets both right.
+            const inputKey = safeInputKey(block.input);
+            recentCalls.push({ name, inputKey });
+            if (recentCalls.length > LOOP_WINDOW) recentCalls.shift();
+            const identical = recentCalls.filter(
+              (c) => c.name === name && c.inputKey === inputKey
+            ).length;
+            const isMutating = MUTATING_TOOLS.has(name);
+            const threshold = isMutating ? MUTATING_LOOP_REPEATS : READONLY_LOOP_REPEATS;
+            if (identical >= threshold) {
+              timeoutCancel(
+                `توقّفت: تكرّرت الأداة "${name}" بنفس المُدخلات ${identical} مرّات — `
+                + `حلقة واضحة. جرّب مقاربة مختلفة.`
+              );
+              return;
             }
           }
         }
