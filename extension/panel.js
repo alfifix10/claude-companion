@@ -16,6 +16,9 @@ import { renderMarkdown } from "./src/lib/markdown.js";
 // Phase-5 leaf harvests: small pure functions lifted out of panel.js.
 import { parseTasks } from "./src/lib/parse-tasks.js";
 import { formatRelative } from "./src/lib/format-relative.js";
+// Phase-6 leaf harvests: derive-title + search-snippet.
+import { deriveTitle } from "./src/lib/derive-title.js";
+import { buildSnippet } from "./src/lib/search-snippet.js";
 
 // ─────────────────────────────────────────────────────────────────────
 // DOM refs
@@ -1199,19 +1202,9 @@ function newConvId() {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
-// Derive a display title from the first user message — first 40 chars,
-// collapsed whitespace, markdown stripped of emphasis markers.
-function deriveTitle(messages) {
-  const first = messages.find((m) => m.role === "user");
-  if (!first) return "محادثة جديدة";
-  const raw = typeof first.content === "string" ? first.content : "";
-  const cleaned = raw
-    .replace(/[*_`#>]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!cleaned) return "محادثة بصور";
-  return cleaned.length > 40 ? cleaned.slice(0, 40) + "…" : cleaned;
-}
+// deriveTitle lives in src/lib/derive-title.ts — 21 unit tests cover
+// every fallback branch, markdown noise stripping, whitespace
+// collapsing, and the 40-char cap.
 
 // Lazy-create the current conversation id when the user is about to save
 // their first message. Called from saveHistory.
@@ -1301,31 +1294,9 @@ function renderStoredConversation(messages) {
 // formatRelative lives in src/lib/format-relative.ts — 15 unit tests
 // pin `now` to verify every bucket boundary (الآن / دقيقة / ساعة / يوم).
 
-// Escape the five HTML-sensitive characters so snippet text can be
-// safely injected with innerHTML (the only markup we add is our own
-// trusted <mark>).
-function escapeHTML(s) {
-  return String(s).replace(/[&<>"']/g, (c) => (
-    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
-  ));
-}
-
-// Build the highlighted snippet around the first case-insensitive
-// occurrence of `q` in `text`. Returns escaped HTML with <mark> around
-// the hit, or null if no match. ±40 chars of context on each side,
-// with "…" elision markers when we're clipping.
-function buildSnippet(text, q, windowChars = 40) {
-  if (!text || !q) return null;
-  const lower = text.toLowerCase();
-  const i = lower.indexOf(q.toLowerCase());
-  if (i === -1) return null;
-  const start = Math.max(0, i - windowChars);
-  const end = Math.min(text.length, i + q.length + windowChars);
-  const before = (start > 0 ? "…" : "") + text.slice(start, i);
-  const hit = text.slice(i, i + q.length);
-  const after = text.slice(i + q.length, end) + (end < text.length ? "…" : "");
-  return escapeHTML(before) + "<mark>" + escapeHTML(hit) + "</mark>" + escapeHTML(after);
-}
+// buildSnippet lives in src/lib/search-snippet.ts — 21 unit tests
+// cover fallbacks, context windowing, ellipsis rules, case-insensitive
+// matching, and HTML-escaping edge cases including Arabic text.
 
 // Track the live search term so re-renders (e.g. after delete) keep
 // the user's filter applied.

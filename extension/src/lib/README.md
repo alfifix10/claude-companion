@@ -21,6 +21,8 @@ Current inhabitants:
 | `parse-tasks.ts` | inline `parseTasks()` in `panel.js` | 27 cases |
 | `safe-input-key.ts` | inline `safeInputKey()` in `max.js` | 16 cases |
 | `format-relative.ts` | inline `formatRelative()` in `panel.js` | 15 cases |
+| `search-snippet.ts` | inline `buildSnippet()` in `panel.js` | 21 cases |
+| `derive-title.ts` | inline `deriveTitle()` in `panel.js` | 21 cases |
 
 The registry (`tool-registry.ts`) is the canonical source for every MCP
 tool's name, mutating flag, category, and description. `native-tool-
