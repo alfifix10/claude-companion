@@ -11,8 +11,9 @@ Each file should be:
 
 Current inhabitants:
 
-<!-- update this list as files land -->
-(empty — Phase 0 just landed the infrastructure)
+| Module | Migrated from | Tests |
+|---|---|---|
+| `humanize-error.ts` | inline `humanizeError()` in `panel.js` | 37 cases |
 
 ## Adding a new lib module
 

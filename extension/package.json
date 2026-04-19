@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
     "test": "vitest",
     "test:run": "vitest run",
     "lint": "biome check src",

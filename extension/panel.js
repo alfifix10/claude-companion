@@ -4,6 +4,14 @@
  */
 
 // ─────────────────────────────────────────────────────────────────────
+// Typed modules (Strangler migration — see src/lib/)
+// ─────────────────────────────────────────────────────────────────────
+// humanizeError: pure error→Arabic translator. 13 regex patterns with
+// 37 unit tests living next to the source in src/lib/humanize-error.ts.
+// Extension runtime consumes the compiled .js emitted by `npm run build`.
+import { humanizeError } from "./src/lib/humanize-error.js";
+
+// ─────────────────────────────────────────────────────────────────────
 // DOM refs
 // ─────────────────────────────────────────────────────────────────────
 const $messages = document.getElementById("messages");
@@ -720,47 +728,6 @@ function renderMarkdown(src) {
   // Restore code blocks
   text = text.replace(/\x00CODEBLOCK(\d+)\x00/g, (_, i) => codeBlocks[Number(i)]);
   return text;
-}
-
-// Map the most common English/technical error strings that leak up from
-// CDP / Chromium / the network stack into a short Arabic explanation.
-// Strategy (order matters):
-//   1. Try every pattern first, including on mixed-language strings —
-//      so "خطأ: ERR_NAME_NOT_RESOLVED" still translates the English code.
-//   2. If nothing matched AND the string already contains Arabic, trust
-//      it came from one of our own layers and pass it through.
-//   3. Otherwise it's an untranslated English leak — prefix "خطأ فنيّ:"
-//      so the user can't mistake it for the assistant's actual reply.
-function humanizeError(text) {
-  const s = String(text ?? "").trim();
-  if (!s) return "خطأ غير معروف";
-
-  const map = [
-    [/Cannot access a chrome:\/\/ URL|Cannot access contents of (?:url|the page)/i,
-     "صفحة داخليّة — افتح موقعاً عادياً ثم حاول."],
-    [/No tab with id/i,                          "التبويب أُغلِق — أعد فتحه."],
-    [/Debugger is already attached/i,            "المتصفّح متّصل بالفعل — أعد المحاولة."],
-    [/Detached while handling command|Target closed/i,
-                                                 "التبويب أُغلِق أثناء التنفيذ."],
-    [/Cannot navigate to invalid URL/i,          "رابط غير صالح."],
-    [/ERR_NAME_NOT_RESOLVED/i,                   "فشل حلّ عنوان الموقع."],
-    [/ERR_INTERNET_DISCONNECTED|Failed to (?:fetch|connect)|NetworkError|ERR_NETWORK/i,
-                                                 "تعذّر الاتصال بالشبكة."],
-    [/ERR_CONNECTION_REFUSED/i,                  "الخادم رفض الاتصال."],
-    [/ERR_TIMED_OUT/i,                           "انتهت مهلة الاتصال."],
-    [/ERR_CERT_|ERR_SSL_/i,                      "مشكلة في شهادة الموقع."],
-    [/NO_NATIVE_HOST/i,                          "جسر الإضافة غير متّصل — أعد تحميل الإضافة."],
-    [/POST_FAILED/i,                             "فشل إرسال الطلب للمضيف."],
-    [/^TIMEOUT$|\bTIMEOUT\b/i,                   "انتهت المهلة دون ردّ."],
-  ];
-  for (const [re, ar] of map) if (re.test(s)) return ar;
-
-  // Nothing matched. If the message is already Arabic, one of our own
-  // layers produced it — trust and pass through.
-  if (/[\u0600-\u06FF]/.test(s)) return s;
-
-  // Untranslated English — flag it clearly as a technical leak.
-  return "خطأ فنيّ: " + s;
 }
 
 function appendError(text) {
