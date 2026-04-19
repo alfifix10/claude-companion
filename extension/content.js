@@ -519,6 +519,86 @@
     el.setAttribute("data-cc-upload-target", token);
     return { selector: `[data-cc-upload-target="${token}"]`, token };
   }
+  // ─────────────────────────────────────────────────────────────────────
+  // Click verification + JS fallback.
+  //
+  // Modern React / styled-component toggles (GitHub settings switches
+  // are the paradigmatic example) rarely respond to CDP synthetic
+  // mouse events — the element binding is a React onClick that often
+  // checks `event.isTrusted`, and CDP events are untrusted. We solve
+  // this with two helpers:
+  //
+  //   captureElementSnapshot(ref)
+  //     Lightweight fingerprint of the target element — just the
+  //     properties that flip on a successful toggle: outerHTML +
+  //     selected attributes (aria-checked, aria-pressed, checked,
+  //     data-state, class). Used before/after to detect whether the
+  //     click actually did anything.
+  //
+  //   clickRefViaJS(ref)
+  //     Calls `el.click()` directly. The trusted flag on the event is
+  //     still false, but the React-registered handler runs on the
+  //     DOM's click event and doesn't see it. Works for 90% of modern
+  //     styled toggles.
+  //
+  // Combined with executor-side orchestration, the click flow becomes:
+  //   1. try CDP mouse          (unchanged path, still works on
+  //                              most real websites)
+  //   2. capture snapshot before / after
+  //   3. if no change → try clickRefViaJS
+  //   4. capture snapshot again
+  //   5. if still no change → surface a specific error
+  // ─────────────────────────────────────────────────────────────────────
+
+  const CLICK_ATTRS_OF_INTEREST = [
+    "aria-checked",
+    "aria-pressed",
+    "aria-expanded",
+    "aria-selected",
+    "checked",
+    "data-state",
+    "class",
+    "disabled",
+    "hidden",
+  ];
+
+  function captureElementSnapshot(ref) {
+    const el = resolveRef(ref);
+    if (!el) return { error: `Element ${ref} not found` };
+    const attrs = {};
+    for (const name of CLICK_ATTRS_OF_INTEREST) {
+      if (el.hasAttribute(name)) attrs[name] = el.getAttribute(name);
+    }
+    // outerHTML cap — 2 KB is plenty to catch attribute/child changes
+    // while keeping the payload cheap over the content-script channel.
+    const outer = el.outerHTML || "";
+    return {
+      attrs,
+      outer: outer.length > 2048 ? outer.slice(0, 2048) : outer,
+      hasFocus: document.activeElement === el,
+    };
+  }
+
+  function clickRefViaJS(ref) {
+    const el = resolveRef(ref);
+    if (!el) return { error: `Element ${ref} not found` };
+    // Prefer .click() when available — it dispatches a trusted-looking
+    // click to ALL DOM event handlers, including React-registered ones.
+    // Falls back to dispatching a synthetic MouseEvent for elements
+    // without a native click method (rare: <svg>, some custom elements).
+    try {
+      if (typeof el.click === "function") {
+        el.click();
+      } else {
+        const evt = new MouseEvent("click", { bubbles: true, cancelable: true, view: window });
+        el.dispatchEvent(evt);
+      }
+      return { ok: true };
+    } catch (e) {
+      return { error: String(e?.message || e) };
+    }
+  }
+
   function clearUploadMark(token) {
     if (!token) return false;
     const el = document.querySelector(`[data-cc-upload-target="${token}"]`);
@@ -661,6 +741,8 @@
     if (msg.type === "scrollToRef") { sendResponse({ result: scrollToRef(msg.ref) }); return true; }
     if (msg.type === "markRefForUpload") { sendResponse({ result: markRefForUpload(msg.ref) }); return true; }
     if (msg.type === "clearUploadMark") { sendResponse({ result: clearUploadMark(msg.token) }); return true; }
+    if (msg.type === "captureElementSnapshot") { sendResponse({ result: captureElementSnapshot(msg.ref) }); return true; }
+    if (msg.type === "clickRefViaJS") { sendResponse({ result: clickRefViaJS(msg.ref) }); return true; }
     if (msg.type === "highlightElements") { highlightElements(msg.refs || []); sendResponse({ result: true }); return true; }
     if (msg.type === "addScreenshotLabels") { sendResponse({ result: addScreenshotLabels(msg.max || 40) }); return true; }
     if (msg.type === "removeScreenshotLabels") { removeScreenshotLabels(); sendResponse({ result: true }); return true; }

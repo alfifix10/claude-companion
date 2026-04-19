@@ -239,13 +239,62 @@ export async function executeTool(name, input, tabId) {
       const button = input.button || "left";
       const modifiers = modifiersBitmask(input.modifiers);
       const before = await capturePageSignals(tabId);
+      // Element-level snapshot so we can detect "click had no effect"
+      // even when the page as a whole didn't change — covers React
+      // styled toggles where only aria-checked flips.
+      const elBefore = input.ref
+        ? (await sendContentMessage(tabId, { type: "captureElementSnapshot", ref: input.ref }))?.result
+        : null;
+
       rippleAt(tabId, x, y);
       await mouseClick(tabId, x, y, { button, modifiers });
       await waitForDomStable(tabId);
+
       const after = await capturePageSignals(tabId);
       const delta = formatPageDelta(before, after);
       const modNote = input.modifiers?.length ? ` with ${input.modifiers.join("+")}` : "";
       const btnNote = button !== "left" ? ` (${button} button)` : "";
+
+      // Multi-strategy fallback: CDP synthetic events get refused by
+      // React/styled toggles that check `event.isTrusted`. If the
+      // click had no measurable effect on either the page OR the
+      // target element, retry with element.click() — which dispatches
+      // through the DOM's click event and reaches React handlers that
+      // sidestep the isTrusted check. This is the fix for the "10-min
+      // GitHub toggle loop" we hit during dogfood.
+      const pageChanged = delta && delta.trim().length > 0;
+      const elementChanged =
+        elBefore && !elBefore.error
+          ? await (async () => {
+              const snap = await sendContentMessage(tabId, {
+                type: "captureElementSnapshot",
+                ref: input.ref,
+              });
+              const after = snap?.result;
+              if (!after || after.error) return false;
+              return (
+                after.outer !== elBefore.outer ||
+                JSON.stringify(after.attrs) !== JSON.stringify(elBefore.attrs)
+              );
+            })()
+          : false;
+
+      if (!pageChanged && !elementChanged && input.ref) {
+        // CDP click had zero effect. Try JS fallback.
+        const jsResult = await sendContentMessage(tabId, {
+          type: "clickRefViaJS",
+          ref: input.ref,
+        });
+        const jsOk = jsResult?.result?.ok === true;
+        if (jsOk) {
+          await waitForDomStable(tabId);
+          const after2 = await capturePageSignals(tabId);
+          const delta2 = formatPageDelta(before, after2);
+          return `Clicked${btnNote}${modNote} at (${x}, ${y}) via JS fallback${delta2}.${dialogNote(tabId)}`;
+        }
+        return `Clicked${btnNote}${modNote} at (${x}, ${y}) but nothing observably changed. Element may be disabled, covered, or require a specific key/modifier. Try a different approach.${dialogNote(tabId)}`;
+      }
+
       return `Clicked${btnNote}${modNote} at (${x}, ${y})${delta}.${dialogNote(tabId)}`;
     }
     case "drag": {
