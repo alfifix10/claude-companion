@@ -121,13 +121,7 @@ describe("getAllToolNames", () => {
 describe("toolsByCategory", () => {
   it("reading → 5 tools (scroll belongs here: read more of the page)", () => {
     const names = toolsByCategory("reading").map((t) => t.name);
-    expect(names.sort()).toEqual([
-      "find",
-      "get_page_text",
-      "read_page",
-      "screenshot",
-      "scroll",
-    ]);
+    expect(names.sort()).toEqual(["find", "get_page_text", "read_page", "screenshot", "scroll"]);
   });
 
   it("tabs → 6 tools", () => {

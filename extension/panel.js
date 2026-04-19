@@ -10,6 +10,9 @@
 // 37 unit tests living next to the source in src/lib/humanize-error.ts.
 // Extension runtime consumes the compiled .js emitted by `npm run build`.
 import { humanizeError } from "./src/lib/humanize-error.js";
+// renderMarkdown: hand-rolled MD → HTML with XSS-hardened links.
+// 39 unit tests. src/lib/markdown.ts.
+import { renderMarkdown } from "./src/lib/markdown.js";
 
 // ─────────────────────────────────────────────────────────────────────
 // DOM refs
@@ -627,109 +630,6 @@ function appendAssistantBubble(text = "") {
 // Minimal Markdown renderer — no dependencies, safe (HTML-escapes first).
 // Handles: headings, bold, italic, inline+block code, lists, tables, links.
 // ─────────────────────────────────────────────────────────────────────
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function renderMarkdown(src) {
-  if (!src) return "";
-  let text = String(src);
-
-  // Extract fenced code blocks so their contents aren't touched by other rules.
-  const codeBlocks = [];
-  text = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
-    codeBlocks.push(`<pre><code>${escapeHtml(code.replace(/\n$/, ""))}</code></pre>`);
-    return `\x00CODEBLOCK${codeBlocks.length - 1}\x00`;
-  });
-
-  // Escape everything else
-  text = escapeHtml(text);
-
-  // Headings (###, ##, #)
-  text = text.replace(/^#### (.*)$/gm, "<h5>$1</h5>")
-             .replace(/^### (.*)$/gm, "<h4>$1</h4>")
-             .replace(/^## (.*)$/gm, "<h3>$1</h3>")
-             .replace(/^# (.*)$/gm, "<h2>$1</h2>");
-
-  // Tables: | col1 | col2 | with ---|---| separator
-  text = text.replace(
-    /^(\|[^\n]+\|\n\|[\s|:-]+\|\n(?:\|[^\n]+\|\n?)+)/gm,
-    (block) => {
-      const lines = block.trim().split(/\n/);
-      const head = lines[0].split("|").slice(1, -1).map((c) => c.trim());
-      const rows = lines.slice(2).map((l) =>
-        l.split("|").slice(1, -1).map((c) => c.trim())
-      );
-      let html = "<table><thead><tr>";
-      for (const h of head) html += `<th>${h}</th>`;
-      html += "</tr></thead><tbody>";
-      for (const r of rows) {
-        html += "<tr>";
-        for (const c of r) html += `<td>${c}</td>`;
-        html += "</tr>";
-      }
-      return html + "</tbody></table>";
-    }
-  );
-
-  // Unordered lists (- item / * item)
-  text = text.replace(/(?:^[-*] .*(?:\n|$))+/gm, (m) => {
-    const items = m.trim().split(/\n/).map((l) => l.replace(/^[-*] /, "").trim());
-    return "<ul>" + items.map((i) => `<li>${i}</li>`).join("") + "</ul>";
-  });
-  // Ordered lists (1. item)
-  text = text.replace(/(?:^\d+\. .*(?:\n|$))+/gm, (m) => {
-    const items = m.trim().split(/\n/).map((l) => l.replace(/^\d+\. /, "").trim());
-    return "<ol>" + items.map((i) => `<li>${i}</li>`).join("") + "</ol>";
-  });
-
-  // Bold / italic / inline code
-  text = text
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
-    .replace(/`([^`\n]+)`/g, "<code>$1</code>");
-
-  // Links [text](url) — harden against prompt-injected XSS.
-  //   1. Reject any whitespace/control chars in the URL: a URL like
-  //      `https://x\n onmouseover=alert(1)` survived the old scheme
-  //      check because only the `"` was escaped.
-  //   2. Only relative/anchor/simple schemes are kept as-is.
-  //   3. For absolute http(s) URLs we round-trip through `new URL()`
-  //      so the browser's own parser normalises the value — anything
-  //      that can't be parsed is dropped.
-  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, t, u) => {
-    const raw = String(u).trim();
-    // Fail closed on any control / whitespace inside the URL
-    if (/[\u0000-\u001f\u007f <>"`\\]/.test(raw)) return t;
-    const relOrAnchor = /^(?:#|\/|\.\.?\/|mailto:|tel:)/i.test(raw);
-    let safe = null;
-    if (relOrAnchor) {
-      safe = raw;
-    } else if (/^https?:/i.test(raw)) {
-      try { safe = new URL(raw).href; } catch { safe = null; }
-    }
-    if (!safe) return t;
-    const url = safe.replace(/"/g, "&quot;");
-    return `<a href="${url}" target="_blank" rel="noopener noreferrer">${t}</a>`;
-  });
-
-  // Paragraph / line-break handling: double newline = paragraph, single = <br>
-  const parts = text.split(/\n{2,}/).map((p) => {
-    const trimmed = p.trim();
-    if (!trimmed) return "";
-    // Skip wrapping if it's already a block element
-    if (/^<(h[2-6]|ul|ol|pre|table)/i.test(trimmed)) return trimmed;
-    return `<p>${trimmed.replace(/\n/g, "<br>")}</p>`;
-  });
-  text = parts.join("");
-
-  // Restore code blocks
-  text = text.replace(/\x00CODEBLOCK(\d+)\x00/g, (_, i) => codeBlocks[Number(i)]);
-  return text;
-}
-
 function appendError(text) {
   removeWelcome();
   const d = document.createElement("div");
