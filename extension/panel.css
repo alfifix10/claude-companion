@@ -421,7 +421,14 @@ body {
   display: flex; flex-direction: column; gap: 10px; scroll-behavior: smooth;
 }
 .messages::-webkit-scrollbar { width: 3px; }
+.messages::-webkit-scrollbar-track { background: transparent; }
 .messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.messages::-webkit-scrollbar-thumb:hover { background: var(--text2); }
+/* Kill the legacy up/down arrow buttons Chromium still renders at the
+   ends of the scrollbar — they show as small light rectangles above
+   the input row in a dark side panel. */
+.messages::-webkit-scrollbar-button { display: none; height: 0; }
+.messages::-webkit-scrollbar-corner { background: transparent; }
 
 /* Floating scroll-to-bottom button.
    • Hidden by default; .visible class toggles it on when the user has
