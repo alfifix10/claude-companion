@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ERROR_PATTERNS, humanizeError } from "./humanize-error";
+import { ERROR_PATTERNS, humanizeError } from "./humanize-error.js";
 
 describe("humanizeError — fallback branches", () => {
   it("null → 'خطأ غير معروف'", () => {

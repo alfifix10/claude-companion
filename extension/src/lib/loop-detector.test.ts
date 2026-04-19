@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_LOOP_CONFIG, LoopDetector, type LoopDetectorConfig } from "./loop-detector";
+import { DEFAULT_LOOP_CONFIG, LoopDetector, type LoopDetectorConfig } from "./loop-detector.js";
 
 describe("LoopDetector — default config sanity", () => {
   it("exports sensible defaults", () => {

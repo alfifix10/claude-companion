@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { safeInputKey } from "./safe-input-key";
+import { safeInputKey } from "./safe-input-key.js";
 
 describe("safeInputKey — primitives", () => {
   it("null → empty string", () => {

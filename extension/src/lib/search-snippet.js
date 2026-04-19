@@ -14,7 +14,7 @@
  * Returns `null` when the query is missing or doesn't appear in the
  * text. Caller decides whether to render the result or skip.
  */
-import { escapeHtml } from "./markdown";
+import { escapeHtml } from "./markdown.js";
 export function buildSnippet(text, query, windowChars = 40) {
     if (!text || !query)
         return null;

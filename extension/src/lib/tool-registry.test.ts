@@ -5,7 +5,7 @@ import {
   getAllToolNames,
   isMutating,
   toolsByCategory,
-} from "./tool-registry";
+} from "./tool-registry.js";
 
 describe("TOOL_REGISTRY — shape invariants", () => {
   it("exposes exactly the 22 tools we ship today", () => {

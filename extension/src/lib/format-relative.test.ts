@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatRelative } from "./format-relative";
+import { formatRelative } from "./format-relative.js";
 
 // All tests pin `now` to a known instant so they're deterministic.
 const NOW = new Date("2026-04-19T12:00:00Z").getTime();

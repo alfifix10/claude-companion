@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SENSITIVE_PATTERNS, checkPath, refusalMessage } from "./file-upload-denylist";
+import { SENSITIVE_PATTERNS, checkPath, refusalMessage } from "./file-upload-denylist.js";
 
 describe("file-upload-denylist — must BLOCK", () => {
   const attackPaths: string[] = [

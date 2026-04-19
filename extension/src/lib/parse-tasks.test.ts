@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseTasks } from "./parse-tasks";
+import { parseTasks } from "./parse-tasks.js";
 
 describe("parseTasks — fallback input", () => {
   it("null → []", () => {

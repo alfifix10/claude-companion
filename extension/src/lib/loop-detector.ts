@@ -16,7 +16,7 @@
  * one when handleMaxChat starts a new run.
  */
 
-import { isMutating } from "./tool-registry";
+import { isMutating } from "./tool-registry.js";
 
 export interface LoopDetectorConfig {
   /** Number of recent calls kept in the window. */

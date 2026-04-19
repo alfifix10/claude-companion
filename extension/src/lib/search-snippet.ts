@@ -15,7 +15,7 @@
  * text. Caller decides whether to render the result or skip.
  */
 
-import { escapeHtml } from "./markdown";
+import { escapeHtml } from "./markdown.js";
 
 export function buildSnippet(
   text: string | null | undefined,

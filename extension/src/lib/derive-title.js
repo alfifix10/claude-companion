@@ -23,7 +23,5 @@ export function deriveTitle(messages) {
     const cleaned = raw.replace(MARKDOWN_NOISE_RE, "").replace(WHITESPACE_RE, " ").trim();
     if (!cleaned)
         return "محادثة بصور";
-    return cleaned.length > MAX_TITLE_LENGTH
-        ? `${cleaned.slice(0, MAX_TITLE_LENGTH)}…`
-        : cleaned;
+    return cleaned.length > MAX_TITLE_LENGTH ? `${cleaned.slice(0, MAX_TITLE_LENGTH)}…` : cleaned;
 }

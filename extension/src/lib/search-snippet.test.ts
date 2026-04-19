@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSnippet } from "./search-snippet";
+import { buildSnippet } from "./search-snippet.js";
 
 describe("buildSnippet — fallback", () => {
   it("null text → null", () => {

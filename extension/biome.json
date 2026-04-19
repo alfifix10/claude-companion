@@ -32,7 +32,14 @@
     "rules": {
       "recommended": true,
       "style": {
-        "noNonNullAssertion": "off"
+        "noNonNullAssertion": "off",
+        "useNodejsImportProtocol": "off"
+      },
+      "correctness": {
+        "useImportExtensions": {
+          "level": "error",
+          "options": { "suggestedExtensions": { "ts": { "module": "js", "component": "js" } } }
+        }
       },
       "suspicious": {
         "noExplicitAny": "warn"

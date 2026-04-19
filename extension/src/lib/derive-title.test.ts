@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Message, deriveTitle } from "./derive-title";
+import { type Message, deriveTitle } from "./derive-title.js";
 
 describe("deriveTitle — fallback", () => {
   it("null messages → 'محادثة جديدة'", () => {
