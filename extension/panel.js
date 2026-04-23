@@ -411,8 +411,19 @@ async function persistPendingMedia(msgIdx, images) {
       }
     }
     const cleanIds = ids.filter(Boolean);
-    if (conversation[msgIdx]) conversation[msgIdx].mediaIds = cleanIds;
+    // Only back-patch if we're still in the same conv and the slot
+    // still belongs to this message. A fast user can send → switch
+    // conversation before IDB writes finish; bailing here keeps us
+    // from writing ids onto a foreign conversation's slot.
+    if (currentConvId !== convId) return;
+    const slot = conversation[msgIdx];
+    if (!slot || slot.role !== "user") return;
+    slot.mediaIds = cleanIds;
     attachLightboxToBubble(msgIdx, ids);
+    // Race with the "done" handler: saveHistory() there may have
+    // fired before we finished writing to IDB, saving an empty
+    // mediaIds array. Re-save now so the ids land on disk.
+    try { await saveHistory(); } catch (e) { console.warn("saveHistory post-media:", e); }
   } catch (e) {
     console.warn("persistPendingMedia:", e);
   }
