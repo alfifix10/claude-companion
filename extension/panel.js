@@ -389,9 +389,9 @@ function appendUser(text, msgIdx, mediaIds) {
 // prune aged records (30d) and retry THAT image once. If it still
 // fails we drop it silently — the rest of the batch still saves and
 // the message itself is never lost.
-async function persistPendingMedia(msgIdx, images) {
+async function persistPendingMedia(msgIdx, images, convIdPromise) {
   try {
-    const convId = await ensureCurrentConv();
+    const convId = await (convIdPromise || ensureCurrentConv());
     const ids = [];
     for (const img of images) {
       try {
@@ -965,6 +965,13 @@ async function send() {
   pendingImages = [];
   renderAttachments();
 
+  // Resolve the conversation id EAGERLY when the user is sending images.
+  // Both persistPendingMedia() and the "done" handler's saveHistory()
+  // need it; doing it here — once, awaited — means they each get the
+  // same id. The in-flight guard in ensureCurrentConv already dedupes
+  // concurrent calls, but pre-resolving removes the window entirely.
+  const convIdPromise = images.length ? ensureCurrentConv() : null;
+
   // Push first, slice second, THEN derive msgIdx — otherwise a
   // slice-on-overflow shifts the index and persistPendingMedia() would
   // back-patch the wrong slot.
@@ -978,7 +985,7 @@ async function send() {
 
   // mediaIds is populated asynchronously; saveHistory() runs only
   // after Claude's reply arrives, by which time IDB writes have settled.
-  if (images.length) persistPendingMedia(msgIdx, images);
+  if (images.length) persistPendingMedia(msgIdx, images, convIdPromise);
   $input.value = "";
   $input.style.height = "auto";
   updateSend();
@@ -1364,24 +1371,30 @@ function newConvId() {
 // collapsing, and the 40-char cap.
 
 // Lazy-create the current conversation id when the user is about to save
-// their first message. Called from saveHistory.
+// their first message. Called from saveHistory AND persistPendingMedia;
+// the in-flight guard below coalesces concurrent first-send calls so
+// they all see the same id instead of creating two rival conversations.
+let ensureCurrentConvInflight = null;
 async function ensureCurrentConv() {
   if (currentConvId) return currentConvId;
-  const id = newConvId();
-  const index = await convLoadIndex();
-  index.unshift({
-    id, title: "محادثة جديدة", updatedAt: Date.now(), count: 0,
-  });
-  // LRU eviction of anything beyond the cap.
-  if (index.length > CONV_MAX) {
-    const evicted = index.splice(CONV_MAX);
-    const keys = evicted.map((e) => `conv_${e.id}`);
-    if (keys.length) await chrome.storage.local.remove(keys);
-  }
-  await convSaveIndex(index);
-  await chrome.storage.local.set({ currentConvId: id });
-  currentConvId = id;
-  return id;
+  if (ensureCurrentConvInflight) return ensureCurrentConvInflight;
+  ensureCurrentConvInflight = (async () => {
+    const id = newConvId();
+    const index = await convLoadIndex();
+    index.unshift({
+      id, title: "محادثة جديدة", updatedAt: Date.now(), count: 0,
+    });
+    if (index.length > CONV_MAX) {
+      const evicted = index.splice(CONV_MAX);
+      const keys = evicted.map((e) => `conv_${e.id}`);
+      if (keys.length) await chrome.storage.local.remove(keys);
+    }
+    await convSaveIndex(index);
+    await chrome.storage.local.set({ currentConvId: id });
+    currentConvId = id;
+    return id;
+  })().finally(() => { ensureCurrentConvInflight = null; });
+  return ensureCurrentConvInflight;
 }
 
 async function saveHistory() {
