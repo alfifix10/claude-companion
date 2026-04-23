@@ -12,7 +12,7 @@
  *   and let it sleep cleanly when idle.
  */
 
-import { attachedTabs, consoleMessages, networkRequests, pendingDialogs, tabGroupTabs, nativePort } from "./src/core/state.js";
+import { attachedTabs, consoleMessages, networkRequests, pendingDialogs, tabGroupTabs, nativePort, broadcastToPanels } from "./src/core/state.js";
 import { cdp, clearLastMousePos } from "./src/core/cdp.js";
 import { invalidatePageTextCache } from "./src/tools/executor.js";
 import { recoverTabGroupState } from "./src/core/tabs.js";
@@ -54,11 +54,18 @@ chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true }).catch(() =>
 // the SW is free to sleep — that's correct MV3 behaviour.
 // ──────────────────────────────────────────────────────────────────────────
 chrome.alarms.create("keepalive", { periodInMinutes: 1 });
+// Monthly media prune — drops IndexedDB rows older than 90 days so a
+// heavy-image user doesn't silently accumulate gigabytes of history.
+// Runs in the panel context (IDB lives there) via a broadcast message.
+chrome.alarms.create("media_prune", { periodInMinutes: 60 * 24 * 30 });
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name !== "keepalive") return;
-  // Cold-restart hook: the alarm can fire even after the SW was
-  // fully unloaded. Re-establish the native port if it's dropped.
-  if (!nativePort) connectNativeHost();
+  if (alarm.name === "keepalive") {
+    // Cold-restart hook: the alarm can fire even after the SW was
+    // fully unloaded. Re-establish the native port if it's dropped.
+    if (!nativePort) connectNativeHost();
+  } else if (alarm.name === "media_prune") {
+    broadcastToPanels({ type: "media_prune" });
+  }
 });
 
 // Re-arm the cheap chrome.* call every 20 s. Wrapped in a try so a

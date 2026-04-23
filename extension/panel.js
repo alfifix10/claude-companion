@@ -19,6 +19,17 @@ import { formatRelative } from "./src/lib/format-relative.js";
 // Phase-6 leaf harvests: derive-title + search-snippet.
 import { deriveTitle } from "./src/lib/derive-title.js";
 import { buildSnippet } from "./src/lib/search-snippet.js";
+// IndexedDB-backed image store. Images live here keyed by mediaId and
+// referenced from conversation[]. See src/core/media-store.js header
+// for the why; short version: chrome.storage.local is 10MB-capped and
+// base64 bloats every byte by 33%.
+import {
+  saveMedia,
+  getThumb,
+  getFull,
+  deleteConvMedia,
+  pruneOld as pruneOldMedia,
+} from "./src/core/media-store.js";
 
 // ─────────────────────────────────────────────────────────────────────
 // DOM refs
@@ -199,6 +210,12 @@ function onBgMessage(msg) {
       break;
     case "no_task":
       break;
+    case "media_prune":
+      // Background fired the monthly alarm; drop aged IDB rows so a
+      // heavy user doesn't accumulate gigabytes silently. Failure here
+      // is non-fatal — next alarm will retry.
+      pruneOldMedia(90).catch((e) => console.warn("pruneOldMedia:", e));
+      break;
   }
 }
 
@@ -354,8 +371,95 @@ function attachCopyButton(wrap, getText) {
   wrap.appendChild(btn);
 }
 
-function appendUser(text, msgIdx) {
-  appendUserMessage(text, [], msgIdx);
+function appendUser(text, msgIdx, mediaIds) {
+  appendUserMessage(text, [], msgIdx, mediaIds);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Image persistence — IndexedDB-backed, non-blocking
+// ─────────────────────────────────────────────────────────────────────
+// Flow on send():
+//   1) bubble rendered instantly from base64 (no await)
+//   2) this function kicks off in the background, writes each image
+//      to IndexedDB, and back-patches conversation[msgIdx].mediaIds so
+//      the next saveHistory() picks them up
+//   3) lightbox handlers are bound once ids are known
+//
+// Failure policy: per-image. If one image trips QuotaExceededError we
+// prune aged records (30d) and retry THAT image once. If it still
+// fails we drop it silently — the rest of the batch still saves and
+// the message itself is never lost.
+async function persistPendingMedia(msgIdx, images) {
+  try {
+    const convId = await ensureCurrentConv();
+    const ids = [];
+    for (const img of images) {
+      try {
+        ids.push(await saveMedia(convId, img));
+      } catch (e) {
+        if (e?.name === "QuotaExceededError") {
+          try {
+            await pruneOldMedia(30);
+            ids.push(await saveMedia(convId, img));
+          } catch {
+            ids.push(null);
+          }
+        } else {
+          console.warn("saveMedia failed:", e);
+          ids.push(null);
+        }
+      }
+    }
+    const cleanIds = ids.filter(Boolean);
+    if (conversation[msgIdx]) conversation[msgIdx].mediaIds = cleanIds;
+    attachLightboxToBubble(msgIdx, ids);
+  } catch (e) {
+    console.warn("persistPendingMedia:", e);
+  }
+}
+
+// Once mediaIds are known, find the bubble by msgIdx and wire each
+// <img> to open the lightbox on click. `ids` may contain nulls for
+// failed saves; those images stay non-interactive (thumbnail only).
+function attachLightboxToBubble(msgIdx, ids) {
+  const bubble = document.querySelector(`.msg-wrap[data-msg-idx="${msgIdx}"]`);
+  if (!bubble) return;
+  const imgs = bubble.querySelectorAll("img.msg-img");
+  imgs.forEach((img, i) => {
+    const id = ids[i];
+    if (id) bindLightbox(img, id);
+  });
+}
+
+function bindLightbox(imgEl, mediaId) {
+  imgEl.dataset.mediaId = mediaId;
+  imgEl.style.cursor = "zoom-in";
+  imgEl.addEventListener("click", () => openLightbox(mediaId));
+}
+
+// Lightbox overlay — a single <div> appended to <body> on demand.
+// Escape or click outside closes; the full-size blob is fetched from
+// IDB and shown centered with object-fit: contain.
+async function openLightbox(mediaId) {
+  const blob = await getFull(mediaId);
+  if (!blob) return;
+  const url = URL.createObjectURL(blob);
+  const overlay = document.createElement("div");
+  overlay.className = "lightbox-overlay";
+  const img = document.createElement("img");
+  img.className = "lightbox-img";
+  img.src = url;
+  img.alt = "";
+  overlay.appendChild(img);
+  const close = () => {
+    URL.revokeObjectURL(url);
+    overlay.remove();
+    document.removeEventListener("keydown", onKey);
+  };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  overlay.addEventListener("click", close);
+  document.addEventListener("keydown", onKey);
+  document.body.appendChild(overlay);
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -533,8 +637,17 @@ function performEdit(wrap, msgIdx, newText) {
  * Copy button still only copies the text; copying images is browser-clumsy
  * and out of scope here.
  */
-function appendUserMessage(text, images, msgIdx) {
-  if (!text && (!images || images.length === 0)) return;
+function appendUserMessage(text, images, msgIdx, mediaIds) {
+  // Two media shapes are accepted:
+  //   • images    — {mediaType, base64}[] — freshly pasted this session;
+  //                 rendered instantly from base64 so the bubble appears
+  //                 with zero await.
+  //   • mediaIds  — string[] of IndexedDB ids — used when replaying
+  //                 saved conversations; thumbnails are fetched async.
+  // At most one is set in practice; if both, images wins (display) and
+  // mediaIds is applied as click-to-lightbox metadata.
+  const hasMedia = (images && images.length) || (mediaIds && mediaIds.length);
+  if (!text && !hasMedia) return;
   removeWelcome();
   const wrap = makeMessageWrap("user");
   // msgIdx links the DOM bubble back to its slot in conversation[] so
@@ -548,7 +661,7 @@ function appendUserMessage(text, images, msgIdx) {
   d.className = "msg user";
   // Image-only bubble uses a tighter padding via .has-media so the
   // image can breathe without a fat padding frame around it.
-  if (images && images.length) d.classList.add("has-media");
+  if (hasMedia) d.classList.add("has-media");
 
   if (text) {
     const t = document.createElement("div");
@@ -556,15 +669,40 @@ function appendUserMessage(text, images, msgIdx) {
     t.textContent = text;
     d.appendChild(t);
   }
-  if (images && images.length) {
+  if (hasMedia) {
     const wrap2 = document.createElement("div");
     wrap2.className = "msg-media";
-    for (const img of images) {
-      const el = document.createElement("img");
-      el.className = "msg-img";
-      el.src = `data:${img.mediaType};base64,${img.base64}`;
-      el.alt = "";
-      wrap2.appendChild(el);
+    if (images && images.length) {
+      for (let i = 0; i < images.length; i++) {
+        const img = images[i];
+        const el = document.createElement("img");
+        el.className = "msg-img";
+        el.src = `data:${img.mediaType};base64,${img.base64}`;
+        el.alt = "";
+        // If mediaIds were already resolved (rare: persistPendingMedia
+        // awaited before render), wire the lightbox now.
+        const id = mediaIds && mediaIds[i];
+        if (id) bindLightbox(el, id);
+        wrap2.appendChild(el);
+      }
+    } else {
+      // History path — lazy-load thumbs from IndexedDB.
+      for (const id of mediaIds) {
+        const el = document.createElement("img");
+        el.className = "msg-img";
+        el.alt = "";
+        bindLightbox(el, id);
+        getThumb(id).then((blob) => {
+          if (!blob) return;
+          const url = URL.createObjectURL(blob);
+          el.src = url;
+          // Revoke once the browser has decoded and cached the image —
+          // the <img> holds its own bitmap after load, so the URL is
+          // safe to free and we avoid leaking handles on long sessions.
+          el.onload = () => URL.revokeObjectURL(url);
+        });
+        wrap2.appendChild(el);
+      }
     }
     d.appendChild(wrap2);
   }
@@ -816,12 +954,20 @@ async function send() {
   pendingImages = [];
   renderAttachments();
 
+  // Push first, slice second, THEN derive msgIdx — otherwise a
+  // slice-on-overflow shifts the index and persistPendingMedia() would
+  // back-patch the wrong slot.
+  conversation.push({ role: "user", content: text, mediaIds: [] });
+  if (conversation.length > MAX_HISTORY) conversation = conversation.slice(-MAX_HISTORY);
+  const msgIdx = conversation.length - 1;
+
   // One unified bubble for text + attached images — matches mainstream
   // chat UX (WhatsApp/Telegram/ChatGPT).
-  if (text || images.length) appendUserMessage(text, images);
+  if (text || images.length) appendUserMessage(text, images, msgIdx);
 
-  conversation.push({ role: "user", content: text });
-  if (conversation.length > MAX_HISTORY) conversation = conversation.slice(-MAX_HISTORY);
+  // mediaIds is populated asynchronously; saveHistory() runs only
+  // after Claude's reply arrives, by which time IDB writes have settled.
+  if (images.length) persistPendingMedia(msgIdx, images);
   $input.value = "";
   $input.style.height = "auto";
   updateSend();
@@ -1283,7 +1429,7 @@ function renderStoredConversation(messages) {
   // its link back to conversation[] (used by the edit button).
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
-    if (m.role === "user") appendUser(m.content, i);
+    if (m.role === "user") appendUser(m.content, i, m.mediaIds);
     else appendAssistantBubble(m.content);
   }
 }
@@ -1427,6 +1573,10 @@ async function convDelete(id) {
   const filtered = index.filter((c) => c.id !== id);
   await convSaveIndex(filtered);
   await chrome.storage.local.remove(`conv_${id}`);
+  // Cascade: drop every image attached to this conversation. Failures
+  // are non-fatal — text deletion already succeeded, orphan blobs will
+  // be collected by the monthly prune.
+  try { await deleteConvMedia(id); } catch (e) { console.warn("deleteConvMedia:", e); }
   if (currentConvId === id) {
     // The currently-open conversation was deleted. Switch to the most
     // recent remaining one, or drop back to the welcome screen.
