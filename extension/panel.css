@@ -524,7 +524,7 @@ body {
   display: flex; flex-direction: column; gap: 3px;
 }
 .msg-img {
-  display: block; max-width: 100%; max-height: 260px;
+  display: block; max-width: 100%; max-height: 180px;
   width: auto; height: auto; object-fit: contain;
   border-radius: 12px; background: rgba(0,0,0,.2);
 }
