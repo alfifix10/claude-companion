@@ -512,21 +512,46 @@ body {
 /* Pasted-image support inside a user bubble.
    .has-media: bubble contains one or more <img> → tighter padding so the
    image doesn't look lost in white space.
-   .msg-media: vertical stack of images when the user sends more than one.
-   .msg-img:  clipped to fit inside the bubble, rounded corners matching
-              the bubble geometry. */
-/* Image-in-bubble: keep the orange frame thin. 3 px is enough to read
-   as "this is the user's message" without dominating the image. */
+   .msg-media: grid container. Single image keeps its natural aspect
+   ratio (fits the bubble width with a height cap). Two or more images
+   switch to a 2-column grid of uniform squares — same behaviour as
+   WhatsApp/Telegram/iMessage so mixed aspect ratios don't produce a
+   ragged, mismatched stack. Requires :has() (Chromium 105+; manifest
+   pins min 116 anyway). */
 .msg.user.has-media { padding: 3px; }
 .msg.user .msg-text { padding: 4px 8px 6px; }
 .msg.user.has-media .msg-text + .msg-media { margin-top: 3px; }
+
 .msg-media {
-  display: flex; flex-direction: column; gap: 3px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 3px;
+  max-width: 100%;
 }
+
+/* Single image: natural aspect, bounded height so a tall screenshot
+   can't eat the whole panel. object-fit: contain preserves content. */
 .msg-img {
-  display: block; max-width: 100%; max-height: 260px;
-  width: auto; height: auto; object-fit: contain;
-  border-radius: 12px; background: rgba(0,0,0,.2);
+  display: block;
+  width: 100%;
+  max-height: 280px;
+  height: auto;
+  object-fit: contain;
+  border-radius: 10px;
+  background: rgba(0,0,0,.2);
+}
+
+/* Two or more images: 2-column grid of equal squares. object-fit:
+   cover crops instead of letterboxing so the grid reads as uniform
+   tiles rather than a patchwork. */
+.msg-media:has(> .msg-img:nth-child(2)) {
+  grid-template-columns: 1fr 1fr;
+}
+.msg-media:has(> .msg-img:nth-child(2)) .msg-img {
+  aspect-ratio: 1;
+  max-height: none;
+  object-fit: cover;
+  border-radius: 8px;
 }
 
 /* Message wrapper (bubble + copy button) */
