@@ -985,6 +985,15 @@ $input.addEventListener("paste", async (e) => {
   for (const it of items) {
     if (it.kind === "file" && it.type.startsWith("image/")) {
       e.preventDefault();
+      // Capture mediaType + blob SYNCHRONOUSLY before any await.
+      // DataTransferItem objects are revoked the moment the paste
+      // event handler returns, so reading `it.type` after the
+      // `await blobToBase64` below silently yielded "" — the image
+      // arrived at the native host with an empty mediaType, tripped
+      // the /^image\/(png|jpeg|...)$/ filter, and got dropped.
+      // blob.type is a safer fallback because Blob objects are
+      // heap-allocated and survive the event.
+      const mediaType = it.type || "";
       const blob = it.getAsFile();
       if (!blob) continue;
       if (pendingImages.length >= MAX_IMAGE_COUNT) {
@@ -997,7 +1006,7 @@ $input.addEventListener("paste", async (e) => {
       }
       try {
         const base64 = await blobToBase64(blob);
-        pendingImages.push({ mediaType: it.type, base64 });
+        pendingImages.push({ mediaType: mediaType || blob.type || "image/png", base64 });
         renderAttachments();
       } catch {}
     }
