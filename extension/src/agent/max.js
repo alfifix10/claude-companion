@@ -166,15 +166,24 @@ function buildDynamicUser({ history, tab, memories, hasImages }) {
   const url = tab?.url || "";
   let ctx = "";
   // When the user attaches an image, bias Claude toward describing /
-  // acting on the image rather than the active tab. Without this
-  // hint, the strongly-worded "ACTIVE TAB: …" block below reads as
-  // the primary subject and the pasted image block gets ignored
-  // (observed: user pasted a screenshot of chrome://extensions while
-  // the active tab was Google — Claude described Google instead of
-  // the screenshot). This line appears first so it's the first thing
-  // Claude parses in the user message.
+  // acting on the image rather than the active tab, AND away from
+  // hallucinating content based on project memories / conversation
+  // history. Observed failure modes:
+  //   1. Image ignored → Claude describes ACTIVE TAB instead (fixed
+  //      by the first sentence below).
+  //   2. Image seen but low-content → Claude extrapolates from memory
+  //      / history (e.g. user pastes a screenshot of chrome://
+  //      extensions showing "Claude Companion" and Claude describes
+  //      the project's review personas because it recognised the name
+  //      — not anything actually in the pixels). Fixed by the second
+  //      and third sentences: bind Claude to the pixels + ask for an
+  //      honest "can't read this" when applicable.
   if (hasImages) {
-    ctx += "The user has attached one or more images. Treat the image(s) as the primary subject of this turn — analyze/describe the image content itself. Only reference the ACTIVE TAB context below if the user's text explicitly asks about the tab rather than the image.\n\n";
+    ctx +=
+      "The user has attached one or more images. Treat the image(s) as the primary subject of this turn. " +
+      "Describe ONLY what is visually present in the pixels — text you can actually read, layout you can actually see, colors, UI elements. " +
+      "Do NOT infer or add content based on the ACTIVE TAB, USER MEMORIES, or prior CONVERSATION. " +
+      "If parts of the image are too small, blurry, or cryptic to read, say so explicitly rather than guessing.\n\n";
   }
   ctx += `ACTIVE TAB:\n  title: ${title}\n  url:   ${url}`;
   if (memories) ctx += `\n\nUSER MEMORIES:\n${memories.slice(0, 500)}`;
