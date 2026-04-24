@@ -115,6 +115,13 @@ export function connectNativeHost() {
         responseHandlers.delete(msg.id);
       }
     }
+    // Temporary diagnostic channel for the image-handling bug. The
+    // native host uses this to tell us "I filtered out N images and
+    // here's why" — otherwise that failure is silent. Remove with
+    // the other [native-host] / [panel->bg] logs once closed.
+    if (msg.type === "max_debug" && msg.line) {
+      console.log("[host->native]", msg.line);
+    }
   });
 
   port.onDisconnect.addListener(() => {
@@ -229,13 +236,20 @@ export function unregisterResponseHandler(id) {
 export function sendMaxQuery(id, prompt, opts = {}) {
   if (!nativePort) return false;
   try {
+    const images = opts.images || [];
+    // Diagnostic: confirm images are still present right before we
+    // drop them into the native-messaging pipe. If this logs 0 while
+    // [bg<-panel] logged >0, the images were lost in activeTask
+    // storage. Temporary — remove after bug close.
+    console.log("[native->host] sendMaxQuery images:", images.length,
+      "totalBase64Bytes:", images.reduce((n, i) => n + (i?.base64?.length || 0), 0));
     nativePort.postMessage({
       type: "max_query",
       id,
       prompt,
       model: opts.model,
       allowedTools: opts.allowedTools,
-      images: opts.images || [],  // [{ mediaType, base64 }]
+      images,  // [{ mediaType, base64 }]
       system: opts.system || "",   // Static system prompt — cached server-side
     });
     return true;

@@ -252,15 +252,45 @@ function handleMaxQuery(msg) {
     write({ id: msg.id, type: "max_error", error: "prompt exceeds 256KB cap" });
     return;
   }
-  const images = (Array.isArray(msg.images) ? msg.images : [])
+  const incomingImages = Array.isArray(msg.images) ? msg.images : [];
+  const dropReasons = [];
+  const images = incomingImages
     .slice(0, MAX_IMAGE_COUNT)
-    .filter((img) => {
-      if (!img || typeof img !== "object") return false;
-      if (!IMAGE_MEDIA_OK.test(String(img.mediaType || ""))) return false;
+    .filter((img, idx) => {
+      if (!img || typeof img !== "object") {
+        dropReasons.push(`[${idx}] not-an-object`);
+        return false;
+      }
+      const mt = String(img.mediaType || "");
+      if (!IMAGE_MEDIA_OK.test(mt)) {
+        dropReasons.push(`[${idx}] bad-mediaType="${mt}"`);
+        return false;
+      }
       const b64 = String(img.base64 || "");
-      // base64 is ~4/3 the raw bytes; cap at the base64-encoded size.
-      return b64.length > 0 && b64.length <= MAX_IMAGE_BYTES;
+      if (b64.length === 0) {
+        dropReasons.push(`[${idx}] empty-base64`);
+        return false;
+      }
+      if (b64.length > MAX_IMAGE_BYTES) {
+        dropReasons.push(`[${idx}] too-big=${b64.length}B>${MAX_IMAGE_BYTES}B`);
+        return false;
+      }
+      return true;
     });
+  // Diagnostic: surface the silent-drop path. If the user pastes an
+  // image and it never reaches Claude, the log here tells us exactly
+  // why (wrong mediaType, size over cap, malformed entry). Writes to
+  // stderr for bin-run logs and emits max_debug so the extension's
+  // service-worker console can see it too.
+  if (incomingImages.length !== images.length) {
+    const line = `[native-host] images: ${incomingImages.length} in, ${images.length} kept. Dropped: ${dropReasons.join("; ")}`;
+    try { process.stderr.write(line + "\n"); } catch {}
+    write({ type: "max_debug", id: msg.id, line });
+  } else if (incomingImages.length > 0) {
+    try {
+      process.stderr.write(`[native-host] images: all ${images.length} accepted (types: ${images.map((i) => i.mediaType).join(",")})\n`);
+    } catch {}
+  }
   if (!prompt && images.length === 0) {
     write({ id: msg.id, type: "max_error", error: "EMPTY_PROMPT" });
     return;

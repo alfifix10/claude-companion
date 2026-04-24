@@ -33,10 +33,17 @@ export function setupPanelListener() {
           const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
           tabId = t?.id || null;
         } catch {}
+        // Diagnostic: confirm images survived the bgPort transfer.
+        // Temporary — remove once "Claude doesn't see pasted images"
+        // bug is resolved.
+        const imgs = msg.images || [];
+        console.log("[bg<-panel] chat_send received images:", imgs.length,
+          "mediaTypes:", imgs.map((i) => i?.mediaType).join(","),
+          "sizes(base64):", imgs.map((i) => i?.base64?.length || 0).join(","));
         setActiveTask({
           running: true, stopped: false, messages: [],
           finalResult: null, runId: null, tabId,
-          images: msg.images || [],
+          images: imgs,
         });
         handleMaxChat(msg.messages || []);
       }

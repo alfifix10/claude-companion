@@ -853,6 +853,14 @@ async function send() {
   streamingBubble = null;
 
   if (!bgPort) connectBg();
+  // Diagnostic: log image count + payload size at dispatch time.
+  // Lets us verify the images array actually made it through the
+  // async thumbnail-generation gap before hitting bgPort. Remove
+  // once the "Claude doesn't see pasted images" bug is closed.
+  try {
+    const payloadBytes = images.reduce((n, im) => n + (im.base64?.length || 0), 0);
+    console.log("[panel->bg] chat_send images:", images.length, "bytes(base64):", payloadBytes);
+  } catch {}
   bgPort.postMessage({
     type: "chat_send",
     // Strip the stored thumbnails from history before it goes to
