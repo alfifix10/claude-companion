@@ -450,6 +450,66 @@
   // ─────────────────────────────────────────────────────────────────────
   // Form value setter (input/textarea/select/checkbox)
   // ─────────────────────────────────────────────────────────────────────
+
+  // React 16+ wraps <input>.value and <textarea>.value with its own
+  // setter so it can track synthetic onChange. When we do `el.value = X`
+  // that setter short-circuits and React never learns the field changed
+  // — the UI keeps showing the React-tracked value, not ours. The fix
+  // is to reach past React to the *native* DOM setter stored on the
+  // prototype, then fire a bubbling "input" event so React picks it up
+  // through its synthetic event system.
+  //
+  // Same trick used by testing-library, Playwright's fill(), and
+  // react-dom's own value tracker reset path. Without it, typing into
+  // CapCut / Figma / any React-controlled search field produces
+  // concatenated ghost state (e.g. "bearbearsdoholic" observed in the
+  // wild) because React re-renders with the stale tracked value.
+  function setNativeValue(el, value) {
+    const tag = el.tagName?.toLowerCase();
+    const proto =
+      tag === "textarea" ? window.HTMLTextAreaElement.prototype :
+      tag === "input"    ? window.HTMLInputElement.prototype :
+      Object.getPrototypeOf(el);
+    const descriptor = proto && Object.getOwnPropertyDescriptor(proto, "value");
+    const nativeSetter = descriptor && descriptor.set;
+    if (nativeSetter) nativeSetter.call(el, value);
+    else el.value = value;
+  }
+
+  // Clear whatever field is currently focused. Called from the executor
+  // before every type_text so retries replace instead of append. We do
+  // the clear inside the page context (not via CDP Ctrl+A + Delete)
+  // because React-controlled inputs consume modifier+key events in
+  // their own synthetic-event layer and the selection path never runs
+  // — leaving the clear as a silent no-op.
+  function clearFocusedField() {
+    const el = document.activeElement;
+    if (!el || el === document.body) return { ok: false, reason: "no focus" };
+    const tag = el.tagName?.toLowerCase();
+    try {
+      if (tag === "input" || tag === "textarea") {
+        setNativeValue(el, "");
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        return { ok: true, kind: tag };
+      }
+      if (el.isContentEditable) {
+        // Select-all + delete via Selection + execCommand so the
+        // mutation goes through the undo stack (user can still Ctrl+Z).
+        const sel = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.execCommand("delete");
+        return { ok: true, kind: "contenteditable" };
+      }
+      return { ok: false, reason: `unsupported: ${tag}` };
+    } catch (e) {
+      return { ok: false, reason: e.message };
+    }
+  }
+
   function setFormValue(ref, value) {
     const el = resolveRef(ref);
     if (!el) return { error: `Element ${ref} not found` };
@@ -466,7 +526,10 @@
         }
       } else {
         el.focus();
-        el.value = String(value);
+        // Use the native setter so React's value tracker actually
+        // observes the change; a plain assignment is invisible to
+        // React's synthetic event system.
+        setNativeValue(el, String(value));
       }
       el.dispatchEvent(new Event("input", { bubbles: true }));
       el.dispatchEvent(new Event("change", { bubbles: true }));
@@ -737,6 +800,7 @@
     if (msg.type === "getPageText") { sendResponse({ result: getPageText() }); return true; }
     if (msg.type === "findElements") { sendResponse({ result: findElements(msg.query) }); return true; }
     if (msg.type === "setFormValue") { sendResponse({ result: setFormValue(msg.ref, msg.value) }); return true; }
+    if (msg.type === "clearFocusedField") { sendResponse({ result: clearFocusedField() }); return true; }
     if (msg.type === "getRefCoordinates") { sendResponse({ result: getRefCoordinates(msg.ref) }); return true; }
     if (msg.type === "scrollToRef") { sendResponse({ result: scrollToRef(msg.ref) }); return true; }
     if (msg.type === "markRefForUpload") { sendResponse({ result: markRefForUpload(msg.ref) }); return true; }
@@ -764,5 +828,5 @@
   });
 
   // Expose for executeScript fallback
-  window.__claudeCompanion = { generateAccessibilityTree, generateAccessibilityTreeDiff, getPageText, findElements, setFormValue, resolveRef, getRefCoordinates, scrollToRef, elementMap };
+  window.__claudeCompanion = { generateAccessibilityTree, generateAccessibilityTreeDiff, getPageText, findElements, setFormValue, clearFocusedField, resolveRef, getRefCoordinates, scrollToRef, elementMap };
 })();

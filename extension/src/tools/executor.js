@@ -121,29 +121,75 @@ function formatPageDelta(before, after) {
 //   • Variable delay (60–140 ms) + occasional "thinking pause" (200–
 //     450 ms every 8–14 chars) reproduces the irregular rhythm of a
 //     human typist.
-// For very long text (>300 chars) we fall back to instant insertText —
-// Claude typically means "paste this" for long content, and a 300-char
-// string at 90 ms average is already ~27 s of waiting.
+//
+// Three guards learned from real usage:
+//   1. Always clear the focused field first. Without this, a retry
+//      after an uncertain observation (common LLM behavior) appends
+//      to the previous attempt, producing garbled output like
+//      "beardobearsbearsholi" from three sequential goals. Clearing
+//      runs via the content script — CDP Ctrl+A + Delete fails
+//      silently on React-controlled inputs (CapCut, Figma, …) because
+//      React consumes modifier+key events through its own synthetic
+//      event layer and never runs the selection path. See
+//      clearFocusedField in content.js.
+//   2. Serialise humanType calls with a module-level mutex. An LLM
+//      that calls type_text twice before the first finishes would
+//      otherwise interleave the two loops and scramble both strings.
+//   3. Fast path for short text (<20 chars). Human pacing exists to
+//      fool keystroke listeners on rich composers; for a 5-char
+//      search box, 2–4 s of character-by-character typing just makes
+//      Claude think nothing happened and retry — re-introducing #1.
+// Long-form (>300) still uses atomic insertText as before (~27 s
+// otherwise).
+
+// Serialise all typing so concurrent type_text calls can't interleave.
+let typingInFlight = Promise.resolve();
+
+async function clearFocusedField(tabId) {
+  try {
+    await sendContentMessage(tabId, { type: "clearFocusedField" });
+  } catch { /* best-effort; worst case is one stale append */ }
+}
+
 async function humanType(tabId, text) {
   if (!text) return;
-  if (text.length > 300) {
-    await cdp(tabId, "Input.insertText", { text });
-    return;
-  }
-  let untilPause = 8 + Math.floor(Math.random() * 7); // next pause in 8–14 chars
-  for (let i = 0; i < text.length; i++) {
-    // Honour user-initiated stop between characters. Before this guard,
-    // a 200-char typing session was ~18 s of uncancellable work — user
-    // would hit Stop and still watch text appear character-by-character.
-    if (activeTask?.stopped) return;
-    await cdp(tabId, "Input.insertText", { text: text[i] });
-    const base = 60 + Math.random() * 80;
-    let extra = 0;
-    if (--untilPause <= 0) {
-      extra = 200 + Math.random() * 250;
-      untilPause = 8 + Math.floor(Math.random() * 7);
+  // Wait for any prior humanType on any tab to finish before starting.
+  // Global (not per-tab) is fine here: the active task types into one
+  // tab at a time, and serialising across tabs adds a ~ms hiccup at
+  // worst while eliminating a whole class of race bugs.
+  const prev = typingInFlight;
+  let release;
+  typingInFlight = new Promise((r) => { release = r; });
+  try {
+    await prev;
+
+    // Replace, don't append.
+    await clearFocusedField(tabId);
+
+    // Fast paths: very short (search queries, short form values) and
+    // very long (pasted content). The human-paced middle band is for
+    // composing messages, tweets, docs — places where keystroke
+    // cadence actually matters.
+    if (text.length < 20 || text.length > 300) {
+      await cdp(tabId, "Input.insertText", { text });
+      return;
     }
-    await sleep(base + extra);
+
+    let untilPause = 8 + Math.floor(Math.random() * 7); // next pause in 8–14 chars
+    for (let i = 0; i < text.length; i++) {
+      // Honour user-initiated stop between characters.
+      if (activeTask?.stopped) return;
+      await cdp(tabId, "Input.insertText", { text: text[i] });
+      const base = 60 + Math.random() * 80;
+      let extra = 0;
+      if (--untilPause <= 0) {
+        extra = 200 + Math.random() * 250;
+        untilPause = 8 + Math.floor(Math.random() * 7);
+      }
+      await sleep(base + extra);
+    }
+  } finally {
+    release();
   }
 }
 
