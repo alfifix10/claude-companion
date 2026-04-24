@@ -52,6 +52,41 @@ export function invalidatePageTextCache(tabId) {
   pageTextCache.delete(tabId);
 }
 
+// Fire-and-forget page-text extraction. Scheduled after any state-
+// changing tool so the next get_page_text call (which Claude issues
+// after almost every click/nav/enter to "see what happened") hits a
+// warm cache instead of paying the 200–400 ms Readability cost inline.
+//
+// Contract:
+//   • Never throws — silent failure is fine, normal get_page_text will
+//     just re-run the extraction on miss.
+//   • Never awaited by the caller — runs in the background while the
+//     agent sends its response back to Claude.
+//   • Skips if a fresh entry was written in the meantime.
+function schedulePageTextPrefetch(tabId) {
+  if (tabId == null) return;
+  // Defer one macrotask so the state-changing action's response goes
+  // out first; Claude starts thinking while this runs in parallel.
+  setTimeout(async () => {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      const cached = pageTextCache.get(tabId);
+      if (cached && cached.url === tab.url && Date.now() - cached.ts < PAGE_TEXT_TTL_MS) {
+        return; // someone else filled it
+      }
+      const resp = await sendContentMessage(tabId, { type: "getPageText" });
+      if (!resp?.result) return;
+      const d = JSON.parse(resp.result);
+      pageTextCache.set(tabId, {
+        url: d.url || tab.url,
+        title: d.title || tab.title,
+        text: d.text || "",
+        ts: Date.now(),
+      });
+    } catch { /* prefetch is best-effort */ }
+  }, 0);
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // Page-delta capture
 //
@@ -231,6 +266,7 @@ export async function executeTool(name, input, tabId) {
       if (!/^https?:\/\//i.test(url)) url = "https://" + url;
       await chrome.tabs.update(tabId, { url });
       await sleep(1200);
+      schedulePageTextPrefetch(tabId);
       return `Navigated to ${url}`;
     }
     case "read_page": {
@@ -295,6 +331,7 @@ export async function executeTool(name, input, tabId) {
       rippleAt(tabId, x, y);
       await mouseClick(tabId, x, y, { button, modifiers });
       await waitForDomStable(tabId);
+      schedulePageTextPrefetch(tabId);
 
       const after = await capturePageSignals(tabId);
       const delta = formatPageDelta(before, after);
@@ -334,6 +371,7 @@ export async function executeTool(name, input, tabId) {
         const jsOk = jsResult?.result?.ok === true;
         if (jsOk) {
           await waitForDomStable(tabId);
+          schedulePageTextPrefetch(tabId);
           const after2 = await capturePageSignals(tabId);
           const delta2 = formatPageDelta(before, after2);
           return `Clicked${btnNote}${modNote} at (${x}, ${y}) via JS fallback${delta2}.${dialogNote(tabId)}`;
@@ -363,6 +401,7 @@ export async function executeTool(name, input, tabId) {
       rippleAt(tabId, src[0], src[1]);
       await mouseDrag(tabId, src[0], src[1], dst[0], dst[1]);
       await waitForDomStable(tabId);
+      schedulePageTextPrefetch(tabId);
       rippleAt(tabId, dst[0], dst[1]);
       const afterDrag = await capturePageSignals(tabId);
       const dragDelta = formatPageDelta(beforeDrag, afterDrag);
@@ -387,6 +426,7 @@ export async function executeTool(name, input, tabId) {
       await cdp(tabId, "Input.dispatchKeyEvent", { type: "keyUp", key, code, modifiers });
       if (triggeringKey) {
         await waitForDomStable(tabId);
+        schedulePageTextPrefetch(tabId);
         const after = await capturePageSignals(tabId);
         return `Pressed ${input.key}${formatPageDelta(before, after)}`;
       }

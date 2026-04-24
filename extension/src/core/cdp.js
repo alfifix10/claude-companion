@@ -177,7 +177,10 @@ async function humanMouseMove(tabId, from, to, modifiers = 0) {
     const t = i / steps;
     const p = bezier(t, from, cp, to);
     await dispatchMouse(tabId, "mouseMoved", Math.round(p.x), Math.round(p.y), { modifiers });
-    await sleep(8 + Math.random() * 12);
+    // Per-step delay: keeps the curve's natural rhythm. Tightened from
+    // 8–20 ms to 5–12 ms — still variable enough to avoid linear-timer
+    // fingerprints, ~40% faster across a 6–9 step path.
+    await sleep(5 + Math.random() * 7);
   }
 }
 
@@ -198,11 +201,12 @@ export async function mouseClick(tabId, x, y, opts = {}) {
   lastMousePos.set(tabId, { x, y });
 
   // Brief hover before the press — real users don't click the instant
-  // the cursor arrives. Random 50–130 ms.
-  await sleep(50 + Math.random() * 80);
+  // the cursor arrives. Random 30–80 ms (tightened from 50–130).
+  await sleep(30 + Math.random() * 50);
   await dispatchMouse(tabId, "mousePressed", x, y, base);
-  // Hold duration — real clicks are 40–110 ms between down and up.
-  await sleep(40 + Math.random() * 70);
+  // Hold duration — real clicks are 25–65 ms between down and up
+  // (tightened from 40–110, still within observed human range).
+  await sleep(25 + Math.random() * 40);
   await dispatchMouse(tabId, "mouseReleased", x, y, base);
 }
 
@@ -234,15 +238,18 @@ export async function mouseDrag(tabId, fromX, fromY, toX, toY, opts = {}) {
     y: fromY - 30 - Math.random() * 40,
   };
   await humanMouseMove(tabId, startFrom, { x: fromX, y: fromY }, mods);
-  await sleep(80 + Math.random() * 80);
+  // Settle on source before press (tightened from 80–160 → 50–100 ms).
+  await sleep(50 + Math.random() * 50);
 
   await dispatchMouse(tabId, "mousePressed", fromX, fromY, base);
-  // Threshold-crossing nudge so HTML5 dragstart fires.
-  await sleep(40 + Math.random() * 40);
+  // Threshold-crossing nudge so HTML5 dragstart fires
+  // (tightened from 40–80 → 25–50 ms).
+  await sleep(25 + Math.random() * 25);
   await dispatchMouse(tabId, "mouseMoved", fromX + 4, fromY + 4, { modifiers: mods, button: "left" });
-  await sleep(30);
+  await sleep(20);
 
-  // Deliberate curve to the target — more waypoints, slower.
+  // Deliberate curve to the target — more waypoints, slower than a plain
+  // click but still tightened (was 12–30 → now 8–18 ms per step).
   const cp = curveControlPoint({ x: fromX, y: fromY }, { x: toX, y: toY });
   const steps = 12 + Math.floor(Math.random() * 6);
   for (let i = 1; i <= steps; i++) {
@@ -251,12 +258,13 @@ export async function mouseDrag(tabId, fromX, fromY, toX, toY, opts = {}) {
     await dispatchMouse(tabId, "mouseMoved", Math.round(p.x), Math.round(p.y), {
       modifiers: mods, button: "left",
     });
-    await sleep(12 + Math.random() * 18);
+    await sleep(8 + Math.random() * 10);
   }
 
   lastMousePos.set(tabId, { x: toX, y: toY });
-  // Drop hesitation — real users pause before releasing.
-  await sleep(100 + Math.random() * 150);
+  // Drop hesitation — real users pause before releasing
+  // (tightened from 100–250 → 60–150 ms).
+  await sleep(60 + Math.random() * 90);
   await dispatchMouse(tabId, "mouseReleased", toX, toY, base);
 }
 
@@ -290,6 +298,14 @@ export function clearLastMousePos(tabId) {
 // DOM stability (wait until mutations settle)
 // ──────────────────────────────────────────────────────────────────────────
 
+// Quiet period: how long the DOM must be mutation-free before we call
+// it "stable". 150 ms is tight enough to not block Claude's next action
+// on pages that settle instantly (most), and long enough to let a
+// single React re-render batch complete. Raising to 300 ms (old
+// default) added ~150 ms per click/nav/enter — ~1.5 s across a
+// 10-action task. Under 100 ms trips React's dev-mode double-render.
+const STABLE_QUIET_MS = 150;
+
 export async function waitForDomStable(tabId, timeoutMs = 2000) {
   try {
     await cdp(tabId, "Runtime.evaluate", {
@@ -297,7 +313,7 @@ export async function waitForDomStable(tabId, timeoutMs = 2000) {
         let t = null;
         const o = new MutationObserver(() => {
           clearTimeout(t);
-          t = setTimeout(() => { o.disconnect(); resolve(true); }, 300);
+          t = setTimeout(() => { o.disconnect(); resolve(true); }, ${STABLE_QUIET_MS});
         });
         o.observe(document.body, { childList: true, subtree: true, attributes: true });
         t = setTimeout(() => { o.disconnect(); resolve(false); }, ${timeoutMs});
