@@ -900,10 +900,23 @@ async function runLocal(hit, myCancel) {
 }
 
 // Dual-purpose send/stop button:
-//   • empty input + loading  → stop
+//   • mic active             → stop mic only (preserve text, don't send)
+//   • empty input + loading  → stop the running Claude task
 //   • empty input + idle     → (disabled, no-op)
 //   • text present           → send (which auto-cancels any running task)
+//
+// The mic-first branch exists because the old behavior surprise-sent
+// partial voice transcripts: user was speaking, pressed what looked
+// like a stop button, and their mid-sentence interim text ("احجز لي
+// طيران للـ...") shipped to Claude as a real question. Two-click
+// model is cleaner: first click stops listening + keeps text for
+// review; second click (with text) is an explicit send.
 $send.addEventListener("click", () => {
+  if (recognizing || userWants) {
+    userWants = false;
+    try { recog?.stop(); } catch {}
+    return;
+  }
   const hasContent = $input.value.trim() || pendingImages.length > 0;
   if (!hasContent && isLoading) { hardStop(""); return; }
   if (!hasContent) return;
@@ -912,6 +925,13 @@ $send.addEventListener("click", () => {
 $input.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
+    // Same mic-first rule as the button: Enter while the mic is
+    // listening = stop listening, don't commit the partial transcript.
+    if (recognizing || userWants) {
+      userWants = false;
+      try { recog?.stop(); } catch {}
+      return;
+    }
     const hasContent = $input.value.trim() || pendingImages.length > 0;
     if (!hasContent && isLoading) { hardStop(""); return; }
     if (hasContent) send();
