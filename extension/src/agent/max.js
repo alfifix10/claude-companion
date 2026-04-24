@@ -161,10 +161,22 @@ RULES:
     alternatives, not at the first failure.
   • Never call the exact same tool with the exact same input more than twice.`;
 
-function buildDynamicUser({ history, tab, memories }) {
+function buildDynamicUser({ history, tab, memories, hasImages }) {
   const title = tab?.title || "";
   const url = tab?.url || "";
-  let ctx = `ACTIVE TAB:\n  title: ${title}\n  url:   ${url}`;
+  let ctx = "";
+  // When the user attaches an image, bias Claude toward describing /
+  // acting on the image rather than the active tab. Without this
+  // hint, the strongly-worded "ACTIVE TAB: …" block below reads as
+  // the primary subject and the pasted image block gets ignored
+  // (observed: user pasted a screenshot of chrome://extensions while
+  // the active tab was Google — Claude described Google instead of
+  // the screenshot). This line appears first so it's the first thing
+  // Claude parses in the user message.
+  if (hasImages) {
+    ctx += "The user has attached one or more images. Treat the image(s) as the primary subject of this turn — analyze/describe the image content itself. Only reference the ACTIVE TAB context below if the user's text explicitly asks about the tab rather than the image.\n\n";
+  }
+  ctx += `ACTIVE TAB:\n  title: ${title}\n  url:   ${url}`;
   if (memories) ctx += `\n\nUSER MEMORIES:\n${memories.slice(0, 500)}`;
   ctx += `\n\nCONVERSATION:\n${history}`;
   return ctx;
@@ -191,7 +203,12 @@ export async function handleMaxChat(messages) {
     `${m.role === "user" ? "USER" : "ASSISTANT"}: ${typeof m.content === "string" ? m.content : "(structured content)"}`
   ).join("\n");
 
-  const userPrompt = buildDynamicUser({ history, tab, memories });
+  const userPrompt = buildDynamicUser({
+    history,
+    tab,
+    memories,
+    hasImages: (activeTask?.images?.length || 0) > 0,
+  });
 
   broadcastToPanels({ type: "provider_info", provider: "Claude Max" });
 
