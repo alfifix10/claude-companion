@@ -6,7 +6,6 @@
  *
  * Why hand-rolled and not `marked` / `markdown-it`:
  *   • ~100 lines covers every pattern Claude actually emits
- *   • zero runtime dependencies (keeps the extension bundle tiny)
  *   • we own every security-sensitive path (link URL hardening)
  *
  * Supported syntax:
@@ -21,13 +20,49 @@
  *   • paragraphs       \n\n         → <p>
  *   • soft breaks      \n           → <br>
  *
- * XSS defences:
- *   • Non-code text is escaped before other transforms run.
- *   • Link URLs: whitespace/control chars fail-closed; only relative,
- *     anchor, mailto:, tel:, and parseable http(s):// URLs survive.
- *   • Code blocks are placeholdered BEFORE any other pass so their
- *     contents can't be mangled by the paragraph/list/table rules.
+ * XSS defences (layered — both must fail for an attack to land):
+ *   1. Our own escaping + URL hardening (this file's logic).
+ *   2. DOMPurify as a final pass — vendored copy at ./dompurify.mjs.
+ *      Defense-in-depth: tool_result text often originates from a
+ *      hostile page (read_page on attacker-controlled site) and is
+ *      summarised by Claude into the chat. If the markdown rules ever
+ *      miss a vector (regex blind spot, future syntax addition),
+ *      DOMPurify catches it before innerHTML.
  */
+import DOMPurify from "./dompurify.mjs";
+
+// Allowlist for sanitisation. We only emit a small fixed set of tags —
+// listing them explicitly is safer than relying on the default profile,
+// because the default permits things like <form>, <input>, <iframe>,
+// <video>, etc. that our renderer never produces and which would only
+// arrive via injection.
+const PURIFY_CONFIG = {
+  ALLOWED_TAGS: [
+    "p", "br", "strong", "em", "code", "pre",
+    "h2", "h3", "h4", "h5", "h6",
+    "ul", "ol", "li",
+    "table", "thead", "tbody", "tr", "th", "td",
+    "a",
+  ],
+  ALLOWED_ATTR: ["href", "target", "rel"],
+} as const;
+
+// DOMPurify strips `target` from <a> by default (its anti-clickjacking
+// stance). We re-apply target=_blank + rel=noopener noreferrer for
+// every surviving anchor. This is the pattern DOMPurify itself
+// recommends (see "Hooks" in cure53/DOMPurify README) and matches
+// what our hand-rolled renderer used to emit.
+let hookInstalled = false;
+function ensureLinkHook() {
+  if (hookInstalled) return;
+  DOMPurify.addHook("afterSanitizeAttributes", (node: Element) => {
+    if (node.tagName === "A") {
+      node.setAttribute("target", "_blank");
+      node.setAttribute("rel", "noopener noreferrer");
+    }
+  });
+  hookInstalled = true;
+}
 
 // Built via `new RegExp` so the NUL sentinel sits in a plain string
 // literal instead of the regex source — keeps Biome quiet about
@@ -167,5 +202,11 @@ export function renderMarkdown(src: unknown): string {
   // Restore code blocks.
   text = text.replace(CODEBLOCK_SENTINEL_RE, (_, i: string) => codeBlocks[Number(i)] ?? "");
 
-  return text;
+  // Final defense-in-depth pass. Should be a no-op for well-formed
+  // output of the renderer above, but catches anything our regex
+  // pipeline failed to neutralise (e.g. an unescaped attribute payload
+  // smuggled through a future syntax addition). Cost: ~0.1 ms per
+  // chat bubble — invisible to humans.
+  ensureLinkHook();
+  return DOMPurify.sanitize(text, PURIFY_CONFIG);
 }

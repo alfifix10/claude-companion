@@ -464,15 +464,23 @@ export async function executeTool(name, input, tabId) {
             labelsAdded = !!labels;
           } catch {}
         }
-        const { base64 } = await takeScreenshot(tabId);
+        // highQuality lets the user-initiated 📸 chip pass through a
+        // crisper-shot request. Default (agent loop) stays on the
+        // token-cheap profile defined in cdp.takeScreenshot.
+        // mediaType is "image/png" when highQuality wins the budget,
+        // "image/jpeg" otherwise (or on PNG-too-big fallback). Pass it
+        // through so the panel doesn't hardcode "image/jpeg" in the
+        // attachment it sends to Claude — passing PNG bytes with a
+        // jpeg mediaType would corrupt the image at the API boundary.
+        const { base64, mediaType } = await takeScreenshot(tabId, { highQuality: input.highQuality === true });
         if (labels && Object.keys(labels).length) {
           const lines = Object.entries(labels)
             .map(([n, m]) => `  ${n}: ${m.role}${m.name ? ` "${m.name}"` : ""} @(${m.x},${m.y}) ref=${m.ref}`)
             .join("\n");
-          return { type: "screenshot_labeled", base64, labels,
+          return { type: "screenshot_labeled", base64, mediaType, labels,
             text: `Screenshot with ${Object.keys(labels).length} labeled interactive elements:\n${lines}\n\nTo act on one: "click ref=<value>" from the legend above, or use coordinates (x,y) from the entry.` };
         }
-        return { type: "screenshot", base64 };
+        return { type: "screenshot", base64, mediaType };
       } finally {
         if (labelsAdded) {
           try { await sendContentMessage(tabId, { type: "removeScreenshotLabels" }); } catch {}

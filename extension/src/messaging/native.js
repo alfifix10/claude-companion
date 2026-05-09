@@ -237,20 +237,22 @@ export function sendMaxQuery(id, prompt, opts = {}) {
   if (!nativePort) return false;
   try {
     const images = opts.images || [];
-    // Diagnostic: confirm images are still present right before we
-    // drop them into the native-messaging pipe. If this logs 0 while
-    // [bg<-panel] logged >0, the images were lost in activeTask
-    // storage. Temporary — remove after bug close.
     console.log("[native->host] sendMaxQuery images:", images.length,
-      "totalBase64Bytes:", images.reduce((n, i) => n + (i?.base64?.length || 0), 0));
+      "totalBase64Bytes:", images.reduce((n, i) => n + (i?.base64?.length || 0), 0),
+      "pureMode:", opts.pureMode === true);
     nativePort.postMessage({
       type: "max_query",
       id,
       prompt,
       model: opts.model,
       allowedTools: opts.allowedTools,
-      images,  // [{ mediaType, base64 }]
-      system: opts.system || "",   // Static system prompt — cached server-side
+      images,
+      system: opts.system || "",
+      // pureMode=true → native host disables ALL tools and skips the
+      // browser-agent system prompt. Used for image Q&A where the agent
+      // loop's machinery (tool definitions, browser context, anti-stuck
+      // guards) actively poisons a simple "what's in this image?" turn.
+      pureMode: opts.pureMode === true,
     });
     return true;
   } catch (err) {

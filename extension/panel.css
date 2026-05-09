@@ -624,6 +624,26 @@ body {
   flex: 1;
   min-width: 0;
 }
+/* Image chips inside the editor — visual parity with .attach-item but
+   slightly larger (72px) because the editor has more room than the
+   composer's compact attachment strip. */
+.edit-images {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.edit-image-chip {
+  position: relative; width: 72px; height: 72px;
+  border: 1px solid var(--border); border-radius: 8px;
+  overflow: hidden; background: var(--bg);
+}
+.edit-image-chip img { width: 100%; height: 100%; object-fit: cover; }
+.edit-image-remove {
+  position: absolute; top: 2px; left: 2px;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: rgba(0,0,0,.75); color: #fff; border: none;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  font-size: 14px; line-height: 1; padding: 0;
+}
+.edit-image-remove:hover { background: var(--red); }
 .edit-textarea {
   width: 100%;
   /* Height is set ONCE by JS at open time to match the existing
@@ -722,12 +742,6 @@ body {
 .tool-line .t-bad { color: var(--red); }
 .tool-line .t-sep { color: var(--text2); opacity: .4; margin: 0 2px; }
 
-.tool-screenshot {
-  max-width: 100%; max-height: 140px; object-fit: contain;
-  border-radius: 6px; margin-top: 4px; cursor: pointer;
-  border: 1px solid var(--border);
-}
-
 /* Typing */
 .typing {
   display: flex; align-items: center; gap: 4px; padding: 4px 14px 8px;
@@ -817,7 +831,24 @@ textarea::-webkit-scrollbar-corner { background: transparent; }
   background: var(--red); color: #fff; border-color: var(--red);
   animation: pulse 1.2s infinite;
 }
+/* Starting: between click and onstart (audio init + permission grant).
+   Subtle pulse with the accent colour so the user sees "yes, I clicked"
+   immediately, even before the recogniser has actually opened the mic. */
+.mic-btn.starting {
+  background: var(--accent); color: #fff; border-color: var(--accent);
+  animation: micStarting 0.9s ease-in-out infinite;
+}
+/* Stopping: between click-to-stop and onend. Brief — usually <500 ms —
+   but visible enough to confirm the click registered. */
+.mic-btn.stopping {
+  background: var(--input-bg); color: var(--text2); border-color: var(--text2);
+  opacity: 0.6;
+}
 @keyframes pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,.7); }
   50% { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
+}
+@keyframes micStarting {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50%      { opacity: 1.0; transform: scale(1.05); }
 }

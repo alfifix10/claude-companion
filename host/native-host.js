@@ -296,21 +296,25 @@ function handleMaxQuery(msg) {
     return;
   }
 
-  const args = [
-    "-p", "--output-format", "stream-json", "--verbose",
-    // We run headless (`-p`): there is no human sitting at the CLI to
-    // answer permission prompts. Without skip-permissions, Claude
-    // verbalises "I need approval" and never actually runs the tool —
-    // the user saw this as endless "لازم توافق على إذن" messages for
-    // tools that would otherwise succeed instantly.
-    //
-    // Security is enforced by --disallowedTools below (a hard filter
-    // respected even under skip-permissions) plus the extension's own
-    // sandbox: we never expose Bash/Write/Edit to the CLI, so a
-    // compromised prompt cannot get shell or filesystem access through
-    // this path.
-    "--dangerously-skip-permissions",
-  ];
+  // pureMode = "this is a vanilla image-Q&A turn, strip everything".
+  // The browser-agent flow needs tools, a system prompt, and the rest of
+  // the harness. Image questions ("what's in this picture?") need NONE
+  // of that — the model is perfectly capable of answering on its own,
+  // and every extra context block is a chance for it to hallucinate
+  // ("I see Claude's logo" instead of reading the actual pixels).
+  // pureMode skips: --system-prompt, --disallowedTools, the dummy MCP
+  // wiring. What's left is a clean Messages API call: image + question
+  // → text, like calling claude.ai directly.
+  const pureMode = msg.pureMode === true;
+
+  const args = ["-p", "--output-format", "stream-json", "--verbose"];
+  if (!pureMode) {
+    args.push("--dangerously-skip-permissions");
+  } else {
+    // No tools available means no permission prompts to skip — disable
+    // every built-in tool with the empty allowlist.
+    args.push("--tools", "");
+  }
   // msg.model is validated against a strict allowlist before reaching the
   // CLI — a crafted "model" field like "foo & calc.exe" would otherwise
   // ride into cmd.exe when we go through a shell on Windows.
@@ -323,37 +327,25 @@ function handleMaxQuery(msg) {
     args.push("--model", String(msg.model));
   }
 
-  // Hard filter on built-in tools that could touch the filesystem or
-  // spawn shells. Respected even with --dangerously-skip-permissions.
-  // run_javascript is listed here too: the tool exposes arbitrary
-  // Runtime.evaluate on the user's active tab, which combined with
-  // skip-permissions + any third-party MCP would be a session hijack
-  // vector (see SECURITY_REVIEW.md finding #2).
-  const HARD_DISALLOW = [
-    "Bash", "Write", "Edit", "NotebookEdit",
-    "mcp__claude-companion__run_javascript",
-  ];
-  for (const t of HARD_DISALLOW) args.push("--disallowedTools", t);
+  if (!pureMode) {
+    // Hard filter on built-in tools that could touch the filesystem or
+    // spawn shells. Respected even with --dangerously-skip-permissions.
+    const HARD_DISALLOW = [
+      "Bash", "Write", "Edit", "NotebookEdit",
+      "mcp__claude-companion__run_javascript",
+    ];
+    for (const t of HARD_DISALLOW) args.push("--disallowedTools", t);
 
-  // Static system prompt — passed via --system-prompt so the portion
-  // that never changes between turns (rules, aliases, budget, execution
-  // method) hits Anthropic's server-side prompt cache (5 min TTL,
-  // ~90% discount on cached tokens). The extension keeps the dynamic
-  // part (tab info, memories, chat history) in the user message so
-  // it can change freely without invalidating the cache.
-  //
-  // NOTE: the CLI flag is --system-prompt, not --system. commander.js
-  // silently absorbs unknown flags and swallows the following arg as
-  // its value — which previously ate our prompt and produced empty
-  // assistant replies.
-  //
-  // Length guard — CLI arg lists have OS limits (Windows ≈ 32 K).
-  // We stay well under. If a future prompt grows past 8 K, pipe it
-  // via stdin instead.
-  const systemPrompt = typeof msg.system === "string" ? msg.system : "";
-  if (systemPrompt && systemPrompt.length < 8000) {
-    args.push("--system-prompt", systemPrompt);
+    // Static system prompt — passed via --system-prompt so the portion
+    // that never changes between turns hits Anthropic's server-side
+    // prompt cache (5 min TTL, ~90% discount on cached tokens).
+    const systemPrompt = typeof msg.system === "string" ? msg.system : "";
+    if (systemPrompt && systemPrompt.length < 8000) {
+      args.push("--system-prompt", systemPrompt);
+    }
   }
+  // pureMode intentionally leaves the system prompt empty — the model's
+  // default "describe what you see" behaviour is exactly what we want.
 
   // If the user pasted images, switch to stream-json input so we can attach
   // them as proper image content blocks instead of text.

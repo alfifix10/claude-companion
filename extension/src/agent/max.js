@@ -161,31 +161,125 @@ RULES:
     alternatives, not at the first failure.
   • Never call the exact same tool with the exact same input more than twice.`;
 
-function buildDynamicUser({ history, tab, memories, hasImages }) {
+/**
+ * Pure image Q&A. Skips the agent loop entirely.
+ *
+ * Why this exists: the agent flow's system prompt + tool harness leaks
+ * "Claude / claude-companion" priors into every turn, which causes the
+ * vision pipeline to hallucinate on simple/ambiguous images (observed
+ * three different brand-new descriptions of "Claude logo" on three
+ * different inputs that contained no Claude content at all).
+ *
+ * What this does:
+ *   • Sends ONLY {user question, image(s)} via the native host.
+ *   • Disables all CLI tools (`--tools ""`).
+ *   • Sends NO system prompt — the model's default behaviour is
+ *     exactly what we want for image description.
+ *   • Streams text back; no tool-event handling needed.
+ *   • Ten-minute hard ceiling, single timeout, no anti-stuck loop.
+ */
+async function handleImageQA(messages) {
+  const lastUser = messages[messages.length - 1]?.content || "";
+  const prompt = (typeof lastUser === "string" ? lastUser.trim() : "")
+    || "Describe what you see in the image.";
+
+  broadcastToPanels({ type: "provider_info", provider: "Claude Max (image)" });
+
+  const healthy = await ensureHealthyPort(5000);
+  if (!healthy) {
+    broadcastToPanels({
+      type: "error",
+      text: "لا يمكنني التواصل مع Claude Code. تأكد أنّ الإضافة مُحمَّلة وأنّك سجّلت دخولاً عبر `claude login`.",
+    });
+    return;
+  }
+
+  const id = `qa_${Date.now()}`;
+  currentRunId = id;
+  if (activeTask) activeTask.runId = id;
+
+  let assistantText = "";
+  let done = false;
+
+  function finish(payload) {
+    if (done || currentRunId !== id) return;
+    done = true;
+    currentRunId = null;
+    clearTimeout(hardCeiling);
+    unregisterResponseHandler(id);
+    if (activeTask) {
+      activeTask.running = false;
+      activeTask.finalResult = payload;
+      activeTask.messages = [];
+    }
+    broadcastToPanels(payload);
+    const finishedRunId = id;
+    setTimeout(() => {
+      if (activeTask && !activeTask.running && activeTask.runId === finishedRunId) {
+        setActiveTask(null);
+      }
+    }, 2000);
+  }
+
+  // Single hard ceiling — no agent loop means no need for stuck/no-progress
+  // timers; if a 10 minute window isn't enough for one image description,
+  // something is wrong end-to-end and we should bail.
+  const hardCeiling = setTimeout(() => {
+    cancelAllHost();
+    finish({ type: "error", text: "تعذّر الحصول على ردّ خلال 10 دقائق." });
+  }, 10 * 60_000);
+
+  registerResponseHandler(id, (msg) => {
+    if (activeTask?.stopped) { cancelMaxQuery(id); return; }
+
+    if (msg.type === "max_event") {
+      const ev = msg.event;
+      if (!ev || typeof ev !== "object") return;
+      if (ev.type === "assistant" && ev.message?.content) {
+        for (const block of ev.message.content) {
+          if (block.type === "text" && block.text) {
+            assistantText += block.text;
+            broadcastToPanels({ type: "text_delta", text: block.text });
+          }
+        }
+      } else if (ev.type === "result") {
+        finish({
+          type: "done",
+          text: assistantText || ev.result || "لم يُرجع النموذج نصّاً.",
+          toolActions: [],
+          usage: ev.usage || null,
+          cost: { total: 0 },
+        });
+      }
+    } else if (msg.type === "max_text") {
+      assistantText += msg.text;
+      broadcastToPanels({ type: "text_delta", text: msg.text });
+    } else if (msg.type === "max_done") {
+      finish({ type: "done", text: assistantText || "لم يُرجع النموذج نصّاً.", toolActions: [] });
+    } else if (msg.type === "max_error") {
+      finish({ type: "error", text: msg.error || "خطأ غير معروف." });
+    }
+  });
+
+  const sent = sendMaxQuery(id, prompt, {
+    images: activeTask?.images || [],
+    system: "",        // No system prompt — pure default behaviour.
+    pureMode: true,    // Native host strips tools + skip-permissions.
+  });
+  if (!sent) {
+    clearTimeout(hardCeiling);
+    finish({ type: "error", text: "فشل إرسال الطلب للمضيف." });
+  }
+}
+
+function buildDynamicUser({ history, tab, memories }) {
+  // Browser-agent turns only — image turns are routed through
+  // handleImageQA above and never reach this function. So the dead
+  // `if (hasImages)` branch we used to keep here is gone: full
+  // browser-context every time, no special-casing.
   const title = tab?.title || "";
   const url = tab?.url || "";
-  let ctx = "";
-  // When the user attaches an image, bias Claude toward describing /
-  // acting on the image rather than the active tab, AND away from
-  // hallucinating content based on project memories / conversation
-  // history. Observed failure modes:
-  //   1. Image ignored → Claude describes ACTIVE TAB instead (fixed
-  //      by the first sentence below).
-  //   2. Image seen but low-content → Claude extrapolates from memory
-  //      / history (e.g. user pastes a screenshot of chrome://
-  //      extensions showing "Claude Companion" and Claude describes
-  //      the project's review personas because it recognised the name
-  //      — not anything actually in the pixels). Fixed by the second
-  //      and third sentences: bind Claude to the pixels + ask for an
-  //      honest "can't read this" when applicable.
-  if (hasImages) {
-    ctx +=
-      "The user has attached one or more images. Treat the image(s) as the primary subject of this turn. " +
-      "Describe ONLY what is visually present in the pixels — text you can actually read, layout you can actually see, colors, UI elements. " +
-      "Do NOT infer or add content based on the ACTIVE TAB, USER MEMORIES, or prior CONVERSATION. " +
-      "If parts of the image are too small, blurry, or cryptic to read, say so explicitly rather than guessing.\n\n";
-  }
-  ctx += `ACTIVE TAB:\n  title: ${title}\n  url:   ${url}`;
+  let ctx = `ACTIVE TAB:\n  title: ${title}\n  url:   ${url}`;
   if (memories) ctx += `\n\nUSER MEMORIES:\n${memories.slice(0, 500)}`;
   ctx += `\n\nCONVERSATION:\n${history}`;
   return ctx;
@@ -197,6 +291,30 @@ export async function handleMaxChat(messages) {
   // patterns don't lose their first 10 s of tool calls to the dying
   // subprocess's window.
   clearToolRejection();
+
+  // ──────────────────────────────────────────────────────────────────
+  // Two completely separate paths.
+  //
+  // The browser-agent path (default) carries 200+ lines of state: tool
+  // budgets, loop detection, consecutive-error counters, three timeout
+  // tiers, automation-border lifecycle, MCP routing. All of that is
+  // necessary for "go open Gmail and delete promotions" — and all of
+  // it is dead weight for "what's in this image?".
+  //
+  // Worse: the agent-path system prompt names "claude-companion" tools
+  // four times, the dynamic prompt inlines the active tab title and
+  // URL, and the CLI auto-attaches tool definitions even when no tool
+  // ends up being called. On a marginal-quality screenshot, that whole
+  // pile of context out-votes the actual pixels and the model
+  // hallucinates a Claude logo onto a Google search page.
+  //
+  // Image questions get the IMAGE-Q&A path instead: empty system, no
+  // tools, no context — just `{user question, image} → text`. Same
+  // shape as calling claude.ai directly.
+  // ──────────────────────────────────────────────────────────────────
+  if ((activeTask?.images?.length || 0) > 0) {
+    return handleImageQA(messages);
+  }
 
   const lastUser = messages[messages.length - 1]?.content || "";
 
@@ -212,12 +330,7 @@ export async function handleMaxChat(messages) {
     `${m.role === "user" ? "USER" : "ASSISTANT"}: ${typeof m.content === "string" ? m.content : "(structured content)"}`
   ).join("\n");
 
-  const userPrompt = buildDynamicUser({
-    history,
-    tab,
-    memories,
-    hasImages: (activeTask?.images?.length || 0) > 0,
-  });
+  const userPrompt = buildDynamicUser({ history, tab, memories });
 
   broadcastToPanels({ type: "provider_info", provider: "Claude Max" });
 
@@ -236,8 +349,10 @@ export async function handleMaxChat(messages) {
   if (activeTask) activeTask.runId = id;
 
   // Don't show the automation border at task start — only when Claude
-  // actually invokes a browser tool. For pure text/image-analysis tasks
-  // that don't touch the page, the border would be misleading.
+  // actually invokes a browser tool. For pure text turns that don't
+  // touch the page (e.g. "what's 2+2?"), the border would be misleading.
+  // (Image-analysis turns are handled by handleImageQA which never
+  // shows the border at all.)
   let borderShown = false;
 
   const toolActions = [];
@@ -452,10 +567,11 @@ export async function handleMaxChat(messages) {
     }
   });
 
-  const sent = sendMaxQuery(id, userPrompt, {
-    images: activeTask?.images || [],
-    system: STATIC_SYSTEM,
-  });
+  // Image turns are routed to handleImageQA at the top of handleMaxChat,
+  // so by the time we reach this send activeTask.images is empty by
+  // construction. We don't pass an `images` field — sendMaxQuery
+  // defaults it to [].
+  const sent = sendMaxQuery(id, userPrompt, { system: STATIC_SYSTEM });
   if (!sent) {
     clearTimeout(timeoutTimer);
     finishTask({ type: "error", text: "فشل إرسال الطلب للمضيف. أعد تحميل الإضافة." });

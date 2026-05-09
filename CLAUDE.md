@@ -15,13 +15,24 @@
 | `/perf` | Performance Engineer (`PERFORMANCE_REVIEW.md`) | feature كبير / شكوى بطء |
 | `/design` | Visual Designer (`VISUAL_DESIGN_REVIEW.md`) | جماليّات — ألوان، typography، hierarchy |
 | `/frontend` | Frontend Engineer (`FRONTEND_REVIEW.md`) | CSS health، a11y هيكليّ، compat |
+| `/wise` | **Wise Council** (`WISE_REVIEW.md`) | **بعد** المراجعين الآخرين — حكم نهائيّ |
 
 **الفرق بين `/design` و `/frontend`**:
 - `/design` يقول: *"الألوان مسطّحة"* — جماليّات
 - `/frontend` يقول: *"specificity battle في هذا الـ rule"* — تقنيّ
 
-**قاعدة الاستخدام**: 90% من الوقت `/red` كافٍ. 10% الباقية استدعِ المتخصّص حسب الحاجة.
-قبل release عامّ: **الخمسة مرّة واحدة**.
+**دور `/wise` المختلف**:
+- الآخرون **يحلّلون** ويجدون مشاكل → قوائم طويلة
+- الشيخ **يختم** ويُصدر حكماً → SHIP 🟢 / DEFER 🟡 / REJECT 🔴 / REFRAME 🔵
+- يُستدعى **بعد** (لا بدلاً عن) الآخرين
+- يُجيب في < 300 كلمة دائماً
+- ينحاز للبساطة + الشحن + المستخدم
+
+**قاعدة الاستخدام**:
+- 90% من الوقت `/red` كافٍ
+- 10% الباقية استدعِ المتخصّص حسب الحاجة
+- قبل **قرار غير قابل للتراجع** (merge إلى main، release، refactor كبير، dependency جديد): استدعِ `/wise` **في النهاية** ليُصدر الحكم
+- قبل release عامّ: **الخمسة + الشيخ** — الأوّلون للتحليل، الشيخ للختم
 
 ## 🔴 القاعدة الأولى — قبل أي كود جديد
 

@@ -62,6 +62,41 @@ const $closeHistoryBtn = document.getElementById("closeHistoryBtn");
 // { mediaType: "image/png", base64: "iVBOR..." }
 let pendingImages = [];
 
+// Full-resolution images keyed by user-message index in conversation[].
+// Why this exists: conversation[i].images stores 400-px thumbnails for
+// chrome.storage replay (quota-friendly). When the user clicks ✎ to
+// edit a recent message and resend, we want to ship the ORIGINAL pixels
+// to Claude — not a degraded thumbnail. This cache holds full-res copies
+// for the last EDIT_FULL_RES_CACHE_MAX user messages of the active
+// session. It is intentionally NOT persisted: surviving across reloads
+// would push us back into the chrome.storage quota fight, and the
+// degraded-thumbnail fallback is fine for old conversations the user
+// probably isn't still iterating on.
+const fullResImagesCache = new Map();
+const EDIT_FULL_RES_CACHE_MAX = 10;
+function cacheFullResImages(msgIdx, images) {
+  if (!Number.isFinite(msgIdx) || !images || !images.length) return;
+  // Delete-then-set to refresh insertion order (Map keeps LRU semantics).
+  fullResImagesCache.delete(msgIdx);
+  fullResImagesCache.set(msgIdx, images.map((im) => ({ ...im })));
+  while (fullResImagesCache.size > EDIT_FULL_RES_CACHE_MAX) {
+    const oldest = fullResImagesCache.keys().next().value;
+    fullResImagesCache.delete(oldest);
+  }
+}
+function getFullResImages(msgIdx) {
+  const hit = fullResImagesCache.get(msgIdx);
+  return hit ? hit.map((im) => ({ ...im })) : null;
+}
+function dropFullResImagesFrom(msgIdx) {
+  // When the user truncates conversation[] at msgIdx (edit-resend), every
+  // cached entry at or after that slot is stale — delete them so a later
+  // edit at the same slot doesn't read the previous turn's images.
+  for (const k of [...fullResImagesCache.keys()]) {
+    if (k >= msgIdx) fullResImagesCache.delete(k);
+  }
+}
+
 // Current task's cancellation token. Replaced on every new task start.
 // `hardStop()` sets `.aborted = true` so any in-flight local work bails.
 let currentCancel = { aborted: false };
@@ -392,18 +427,103 @@ function attachEditButton(parent, msgIdx) {
 
 function enterEditMode(wrap, msgIdx) {
   const msgEl = wrap.querySelector(".msg");
+  if (!msgEl) return;
   const textEl = wrap.querySelector(".msg-text");
-  if (!msgEl || !textEl) return;  // image-only bubble — nothing to edit
 
-  const originalText = textEl.textContent;
+  // Original text — empty string for image-only bubbles, which are now
+  // editable too (user can add a caption or paste another image).
+  const originalText = textEl ? textEl.textContent : "";
+
+  // Pull the original full-resolution images if we still have them
+  // (cached in-memory for the last EDIT_FULL_RES_CACHE_MAX user turns).
+  // Older messages — or any message after a panel reload — fall back to
+  // the 400-px thumbnails persisted in conversation[]. Both are valid
+  // { mediaType, base64 } shapes, so the rest of this code stays uniform.
+  // editImages is the LIVE list driving the UI: × removes, paste adds.
+  const cached = getFullResImages(msgIdx);
+  const fallback = (conversation[msgIdx]?.images || []).map((im) => ({ ...im }));
+  let editImages = cached || fallback;
 
   // Build the editor UI.
   const editor = document.createElement("div");
   editor.className = "edit-box";
+
+  // Image chip strip — shown above the textarea so the user sees what
+  // attachments will ride along on resend. Each chip has its own ×
+  // button that mutates editImages by reference and re-renders.
+  const imagesRow = document.createElement("div");
+  imagesRow.className = "edit-images";
+  function renderEditImages() {
+    imagesRow.innerHTML = "";
+    if (!editImages.length) {
+      imagesRow.style.display = "none";
+      return;
+    }
+    imagesRow.style.display = "";
+    for (const img of editImages) {
+      const chip = document.createElement("div");
+      chip.className = "edit-image-chip";
+      const thumb = document.createElement("img");
+      thumb.src = `data:${img.mediaType};base64,${img.base64}`;
+      chip.appendChild(thumb);
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "edit-image-remove";
+      rm.textContent = "×";
+      rm.title = "إزالة";
+      rm.addEventListener("click", (e) => {
+        e.preventDefault();
+        // Identity-based removal so a paste-mid-edit can't shift indices
+        // and remove the wrong chip.
+        const i = editImages.indexOf(img);
+        if (i >= 0) editImages.splice(i, 1);
+        renderEditImages();
+      });
+      chip.appendChild(rm);
+      imagesRow.appendChild(chip);
+    }
+  }
+  renderEditImages();
+  editor.appendChild(imagesRow);
+
   const ta = document.createElement("textarea");
   ta.className = "edit-textarea";
   ta.value = originalText;
   ta.dir = "rtl";
+  // image-only bubbles open with an empty textarea — placeholder gives
+  // the user a hint that adding a caption is the natural next move.
+  if (!originalText) ta.placeholder = "أضف نصّاً مع الصورة...";
+
+  // Paste-to-attach inside the editor mirrors the main composer's
+  // behaviour: clipboard images get pushed onto editImages, NOT the
+  // global pendingImages, so cancelling the edit leaves no stray
+  // attachments behind. The main composer's paste handler is bound
+  // to $input only, so it doesn't fire here — we add our own.
+  ta.addEventListener("paste", async (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    let added = 0;
+    for (const it of items) {
+      if (!String(it.type || "").startsWith("image/")) continue;
+      const mediaType = it.type || "image/png";
+      const blob = it.getAsFile();
+      if (!blob) continue;
+      if (editImages.length + 1 > MAX_IMAGE_COUNT) {
+        showNotice(`لا يمكن إرفاق أكثر من ${MAX_IMAGE_COUNT} صور.`);
+        break;
+      }
+      if (blob.size > MAX_PER_IMAGE_BYTES) {
+        showNotice("الصورة أكبر من 10MB — جرّب ضغطها أوّلاً.");
+        continue;
+      }
+      try {
+        const base64 = await blobToBase64(blob);
+        editImages.push({ mediaType: mediaType || blob.type || "image/png", base64 });
+        added++;
+      } catch {}
+    }
+    if (added) renderEditImages();
+  });
   const actions = document.createElement("div");
   actions.className = "edit-actions";
   const saveBtn = document.createElement("button");
@@ -461,11 +581,14 @@ function enterEditMode(wrap, msgIdx) {
   };
   const save = () => {
     const newText = ta.value.trim();
-    if (!newText) return;                        // empty = stay in edit mode
+    // Allow text-only OR image-only — only stay in edit mode when BOTH
+    // are empty. Sending an image with no caption is a legitimate use
+    // case (e.g. "describe this" follow-ups via the chip).
+    if (!newText && !editImages.length) return;
     // إرسال always resends — even with no text change. That way the
     // button does exactly what its label says, and users who want a
     // fresh attempt on the same prompt get "regenerate" for free.
-    commitEdit(wrap, msgIdx, newText);
+    commitEdit(wrap, msgIdx, newText, editImages);
   };
 
   saveBtn.addEventListener("click", save);
@@ -477,19 +600,19 @@ function enterEditMode(wrap, msgIdx) {
   // No input listener needed — field-sizing: content handles growth.
 }
 
-function commitEdit(wrap, msgIdx, newText) {
+function commitEdit(wrap, msgIdx, newText, editImages) {
   // If a task is currently streaming, the user pressing save is
   // basically "forget that, here's my new question" — stop the task
   // first, same pattern send() uses for overlap.
   if (isLoading) {
     hardStop("");
-    setTimeout(() => performEdit(wrap, msgIdx, newText), 150);
+    setTimeout(() => performEdit(wrap, msgIdx, newText, editImages), 150);
   } else {
-    performEdit(wrap, msgIdx, newText);
+    performEdit(wrap, msgIdx, newText, editImages);
   }
 }
 
-function performEdit(wrap, msgIdx, newText) {
+function performEdit(wrap, msgIdx, newText, editImages) {
   // 1. Peel every DOM node after the edited bubble (and the bubble
   //    itself) — includes tool-lines, screenshots, error bubbles,
   //    later user/assistant bubbles. send() below re-adds the
@@ -508,13 +631,26 @@ function performEdit(wrap, msgIdx, newText) {
   if (Number.isFinite(msgIdx) && msgIdx >= 0 && msgIdx <= conversation.length) {
     conversation = conversation.slice(0, msgIdx);
   }
+  // Drop full-res cache entries at or after the edited slot — those
+  // images belonged to turns that no longer exist. The fresh send()
+  // below will re-cache the new turn at the same msgIdx.
+  dropFullResImagesFrom(msgIdx);
 
   // 3. Persist the truncated state before firing the request — matches
   //    how send() saves on completion.
   saveHistory();
 
-  // 4. Replay through the normal send path. Images aren't carried
-  //    over; if the user wants them back, they can paste again.
+  // 4. Stage the images the user kept (or pasted in mid-edit) into the
+  //    composer's pendingImages, then replay through the normal send
+  //    path. send() reads pendingImages, resets it, and ships the
+  //    images to Claude alongside the new text — same wire format as
+  //    a fresh send. This is the whole point of the edit-with-images
+  //    UI: previously this line set pendingImages to [] implicitly and
+  //    Claude got a text-only retry.
+  if (editImages && editImages.length) {
+    pendingImages = editImages.map((im) => ({ ...im }));
+    renderAttachments();
+  }
   $input.value = newText;
   $input.dispatchEvent(new Event("input"));
   send();
@@ -569,14 +705,15 @@ function appendUserMessage(text, images, msgIdx) {
     d.appendChild(wrap2);
   }
   wrap.appendChild(d);
-  // Copy above edit — stack them vertically in a .msg-actions column
-  // instead of laying them inline beside the bubble. Image-only
-  // bubbles get neither (no text to copy or edit, and image-clipboard
-  // is browser-specific anyway).
-  if (text) {
+  // Action column: copy + edit. Edit is offered for any bubble — even
+  // image-only — so the user can add a caption or replace the screenshot
+  // and resend without starting over. Copy stays gated on text presence
+  // (image clipboard is browser-clumsy; out of scope here).
+  const hasMedia = !!(images && images.length);
+  if (text || hasMedia) {
     const actions = document.createElement("div");
     actions.className = "msg-actions";
-    attachCopyButton(actions, () => text);
+    if (text) attachCopyButton(actions, () => text);
     attachEditButton(actions, idx);
     wrap.appendChild(actions);
   }
@@ -620,32 +757,21 @@ function appendToolActions(actions) {
   // Collapse to unique labels — if Claude did read_page 3 times, show once.
   const labels = [];
   const seen = new Set();
-  const screenshots = [];
   for (const a of actions) {
-    if (a.screenshot) screenshots.push(a.screenshot);
     const lbl = TOOL_LABELS[a.tool] || a.tool;
     const key = a.error ? `!${lbl}` : lbl;
     if (seen.has(key)) continue;
     seen.add(key);
     labels.push({ label: lbl, error: !!a.error });
   }
-  if (labels.length === 0 && screenshots.length === 0) return;
+  if (labels.length === 0) return;
 
-  if (labels.length > 0) {
-    const line = document.createElement("div");
-    line.className = "tool-line";
-    line.innerHTML = labels
-      .map((l) => `<span class="${l.error ? "t-bad" : "t-ok"}">${l.error ? "✗" : "✓"} ${l.label}</span>`)
-      .join(`<span class="t-sep">·</span>`);
-    $messages.appendChild(line);
-  }
-
-  for (const b64 of screenshots) {
-    const img = document.createElement("img");
-    img.className = "tool-screenshot";
-    img.src = `data:image/jpeg;base64,${b64}`;
-    $messages.appendChild(img);
-  }
+  const line = document.createElement("div");
+  line.className = "tool-line";
+  line.innerHTML = labels
+    .map((l) => `<span class="${l.error ? "t-bad" : "t-ok"}">${l.error ? "✗" : "✓"} ${l.label}</span>`)
+    .join(`<span class="t-sep">·</span>`);
+  $messages.appendChild(line);
   scrollToBottom();
 }
 
@@ -790,15 +916,17 @@ async function send() {
   // still listening, three things need to happen before we continue:
   //   • userWants = false  — so onend doesn't auto-restart the session
   //   • recog.stop()       — actually close the audio stream
-  //   • reset baseline + committed — otherwise an in-flight onresult
+  //   • reset prefix/suffix/committed — otherwise an in-flight onresult
   //     rebuilds $input.value from the old voice state and re-populates
-  //     the box we're about to clear on line 763.
+  //     the box we're about to clear on send.
   // The listening class and typing indicator clear via onend shortly
   // after; that's fine because we re-set typing below.
-  if (userWants || recognizing) {
+  if (userWants || micActive()) {
     userWants = false;
-    baseline = "";
+    prefix = "";
+    suffix = "";
     committed = "";
+    if (micState !== "STOPPING" && micState !== "IDLE") setMicState("STOPPING");
     try { recog?.stop(); } catch {}
   }
 
@@ -815,6 +943,12 @@ async function send() {
   const images = pendingImages;
   pendingImages = [];
   renderAttachments();
+
+  // Snapshot the upcoming user-message slot — populated AFTER we cache so
+  // a later ✎ edit on this bubble can pull the original full-res pixels
+  // instead of the 400-px thumbnails that conversation[] persists.
+  const upcomingMsgIdx = conversation.length;
+  if (images.length) cacheFullResImages(upcomingMsgIdx, images);
 
   // One unified bubble for text + attached images — matches mainstream
   // chat UX (WhatsApp/Telegram/ChatGPT).
@@ -903,12 +1037,29 @@ async function runLocal(hit, myCancel) {
     else {
       if (r?.toolActions) appendToolActions(r.toolActions);
       if (r?.screenshot) {
-        removeWelcome();
-        const img = document.createElement("img");
-        img.className = "tool-screenshot";
-        img.src = `data:image/jpeg;base64,${r.screenshot}`;
-        $messages.appendChild(img);
-        scrollToBottom();
+        // mediaType is now driven by what cdp.takeScreenshot actually
+        // produced. Hardcoding "image/jpeg" used to ship PNG bytes with
+        // a JPEG label — Claude vision tolerates it but sees a noisy
+        // image, which is one of the suspects for the X.com → "Claude
+        // logo" hallucination. We pass through whatever the host says.
+        const mt = r.screenshotMediaType || "image/jpeg";
+        if (pendingImages.length < MAX_IMAGE_COUNT) {
+          pendingImages.push({ mediaType: mt, base64: r.screenshot });
+          renderAttachments();
+          // Update send button enable state — pendingImages now non-empty.
+          $send.disabled = !$input.value.trim() && pendingImages.length === 0;
+          // Visible diagnostic — proves to the user (no DevTools needed)
+          // that a real image really did get attached, what format it is,
+          // and how big it is. If they ever see "JPEG ~110KB" instead of
+          // "PNG ~600KB" they know the high-quality path didn't run
+          // (i.e. they need to reload the extension).
+          const kb = Math.round((r.screenshot.length * 0.75) / 1024);  // base64 → bytes ≈ 0.75
+          const fmt = mt.split("/")[1].toUpperCase();
+          showNotice(`✓ التُقطت صورة: ${fmt} ~${kb}KB — مرفقة بالرسالة التالية`,
+            { variant: "info", ms: 3500 });
+        } else {
+          showNotice(`لا يمكن إرفاق أكثر من ${MAX_IMAGE_COUNT} صور — أرسل الحالية أوّلاً.`);
+        }
       }
       if (r?.text) {
         appendAssistantBubble(r.text);
@@ -939,8 +1090,9 @@ async function runLocal(hit, myCancel) {
 // model is cleaner: first click stops listening + keeps text for
 // review; second click (with text) is an explicit send.
 $send.addEventListener("click", () => {
-  if (recognizing || userWants) {
+  if (micActive() || userWants) {
     userWants = false;
+    if (micState !== "STOPPING" && micState !== "IDLE") setMicState("STOPPING");
     try { recog?.stop(); } catch {}
     return;
   }
@@ -954,8 +1106,9 @@ $input.addEventListener("keydown", (e) => {
     e.preventDefault();
     // Same mic-first rule as the button: Enter while the mic is
     // listening = stop listening, don't commit the partial transcript.
-    if (recognizing || userWants) {
+    if (micActive() || userWants) {
       userWants = false;
+      if (micState !== "STOPPING" && micState !== "IDLE") setMicState("STOPPING");
       try { recog?.stop(); } catch {}
       return;
     }
@@ -1017,6 +1170,59 @@ $input.addEventListener("paste", async (e) => {
   if (rejectedFull) {
     showNotice(`الحد الأقصى ${MAX_IMAGE_COUNT} صور في الرسالة — أرسل الحالية ثم ألصق الباقي.`);
   }
+});
+
+// Drag-and-drop image attach. Mirrors the paste handler: same caps,
+// same target list, same render. Bound to the whole .app container
+// (not just the input) so users can drop anywhere over the panel —
+// the input's own drop area is too small to aim at confidently.
+//
+// Why we needed this on top of paste: pasting requires the file to
+// already be on the clipboard, which means an extra "copy file" step
+// before opening the panel. Drag-from-Files-Explorer is the natural
+// gesture and was the gap callers were hitting.
+const DROP_TARGET = $app || document.body;
+
+function preventDefaultDrag(e) {
+  // dragenter/dragover MUST preventDefault for the drop event to fire
+  // at all — without it the browser default (load file in new tab)
+  // wins and the user gets navigated away from the panel.
+  if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files")) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+}
+DROP_TARGET.addEventListener("dragenter", preventDefaultDrag);
+DROP_TARGET.addEventListener("dragover", preventDefaultDrag);
+
+DROP_TARGET.addEventListener("drop", async (e) => {
+  const files = e.dataTransfer?.files;
+  if (!files || !files.length) return;
+  e.preventDefault();
+  e.stopPropagation();
+  let rejectedBig = 0;
+  let rejectedFull = 0;
+  let added = 0;
+  for (const f of files) {
+    if (!String(f.type || "").startsWith("image/")) continue;
+    if (pendingImages.length >= MAX_IMAGE_COUNT) { rejectedFull++; continue; }
+    if (f.size > MAX_PER_IMAGE_BYTES) { rejectedBig++; continue; }
+    try {
+      const base64 = await blobToBase64(f);
+      pendingImages.push({ mediaType: f.type || "image/png", base64 });
+      added++;
+    } catch {}
+  }
+  if (added) {
+    renderAttachments();
+    $send.disabled = !$input.value.trim() && pendingImages.length === 0;
+    showNotice(
+      `✓ أُضيفت ${added} صورة من السحب — مرفقة بالرسالة التالية`,
+      { variant: "info", ms: 3500 },
+    );
+  }
+  if (rejectedBig)  showNotice(`تم تجاهل ${rejectedBig} صورة أكبر من 10MB.`);
+  if (rejectedFull) showNotice(`الحد الأقصى ${MAX_IMAGE_COUNT} صور — أرسل الحالية أوّلاً.`);
 });
 
 function blobToBase64(blob) {
@@ -1625,11 +1831,67 @@ $newChatBtn?.addEventListener("click", startNewConversation);
 
 // ─────────────────────────────────────────────────────────────────────
 // Voice (Web Speech API, Arabic)
+//
+// State machine — exactly one of these at any moment:
+//   IDLE       — mic off
+//   STARTING   — clicked start, waiting for onstart (or async permission)
+//   LISTENING  — onstart fired, actively transcribing
+//   STOPPING   — clicked stop or send() ran, waiting for onend
+//   DISABLED   — permanent error (no permission, no mic, no support)
+//
+// `userWants` is the auto-restart hint read in onend: if the recogniser
+// times out the audio session itself (Chrome does this every ~60 s) and
+// the user still wants to listen, onend kicks off a new session
+// transparently. Without this the mic would silently stop every minute.
 // ─────────────────────────────────────────────────────────────────────
 const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-let recog = null, recognizing = false, userWants = false;
-let committed = "", baseline = "", maxListenTimer = null;
+let recog = null;
+let micState = "IDLE";        // IDLE | STARTING | LISTENING | STOPPING | DISABLED
+let userWants = false;        // user pressed start and hasn't pressed stop
+let committed = "";           // recogniser's accumulated final transcripts (since last cursor sync)
+let prefix = "";              // text BEFORE the caret at the moment dictation last anchored
+let suffix = "";              // text AFTER  the caret at the moment dictation last anchored
+let maxListenTimer = null;
 const MAX_LISTEN_MS = 60_000;
+// Cursor model:
+//   The recogniser doesn't know where the caret is. We capture the
+//   user's current caret position into (prefix, suffix) on every event
+//   that could move the caret (click, arrow key, focus, manual edit,
+//   mic-start). Each onresult then renders as
+//       prefix + (committed + interim) + suffix
+//   with the caret pinned to the END OF THE INSERTION so subsequent
+//   speech continues where it just left off.
+//
+// User's complaint that motivated this: "I delete a word in the middle,
+// leave the cursor there to dictate the replacement, and the new speech
+// gets appended to the END instead". Pre-fix: only `baseline` existed
+// and onresult always wrote `baseline + committed + interim` — caret
+// position was ignored entirely.
+// Set briefly while onresult writes to $input.value so the manual-edit
+// detector below can ignore that programmatic write. Real user keystrokes
+// (delete, type, paste) go through the same input event but with
+// voiceWriting=false, which is how we tell them apart.
+let voiceWriting = false;
+// Auto-retry budget for transient network errors. Resets on every
+// successful onstart so a stable session doesn't burn the budget.
+let networkRetriesLeft = 1;
+function setMicState(next) {
+  micState = next;
+  $mic.classList.toggle("listening", next === "LISTENING");
+  $mic.classList.toggle("starting",  next === "STARTING");
+  $mic.classList.toggle("stopping",  next === "STOPPING");
+  // DISABLED is the only state that hard-disables the click — the others
+  // are all interactive (you can always click to toggle). Don't include
+  // STARTING/STOPPING here: a click during those is "user changed their
+  // mind", which we want to honour, not block.
+  $mic.disabled = (next === "DISABLED");
+}
+function micActive() {
+  // "is the mic in any active state?" — true for the whole STARTING →
+  // LISTENING → STOPPING range. Used at the top of click + send flows
+  // to decide between toggle-stop and toggle-start.
+  return micState === "STARTING" || micState === "LISTENING" || micState === "STOPPING";
+}
 
 // Brave's build of Chromium exposes SpeechRecognition but ships it
 // without the Google API key Chrome uses to authenticate. Every request
@@ -1645,8 +1907,7 @@ async function detectBrave() {
 
 function initVoice() {
   if (!SpeechRec) {
-    // Keep the button visually but make it clear it's a no-op.
-    $mic.disabled = true;
+    setMicState("DISABLED");
     $mic.title = "المتصفح لا يدعم التعرّف الصوتي";
     return;
   }
@@ -1662,10 +1923,46 @@ function initVoice() {
   recog.interimResults = true;
   recog.maxAlternatives = 1;
   recog.onstart = () => {
-    recognizing = true;
-    $mic.classList.add("listening");
+    setMicState("LISTENING");
     setTyping(true, "يستمع...");
+    // A successful start clears the per-session retry budget so a stable
+    // multi-minute session won't accidentally fail-open to retry-loop
+    // behaviour after the next blip.
+    networkRetriesLeft = 1;
   };
+
+  // Cursor-position sync. Every event that could MOVE the caret while
+  // the mic is on (click, arrow key, focus, typed/deleted character)
+  // re-anchors dictation: future speech inserts at the new caret
+  // position instead of appending to the end.
+  //
+  //   • input    — user typed/pasted/deleted (also fires for our own
+  //                programmatic value writes; we filter those with
+  //                voiceWriting).
+  //   • keyup    — covers arrow-key / Home / End / Ctrl+A — none of
+  //                these fire input events.
+  //   • mouseup  — click that places the caret elsewhere.
+  //   • focus    — user tabbed back into the box; selectionStart/End
+  //                already reflect the resumed caret position.
+  //
+  // selectionchange would be the "correct" Web API but it fires on
+  // document and includes our own programmatic setSelectionRange,
+  // which would feedback-loop. The four events above cover every
+  // user-driven case without that risk.
+  function syncVoiceCaret() {
+    if (!micActive() && !userWants) return;
+    if (voiceWriting) return;
+    const start = $input.selectionStart ?? $input.value.length;
+    const end   = $input.selectionEnd   ?? start;
+    prefix = $input.value.slice(0, start);
+    suffix = $input.value.slice(end);
+    committed = "";
+  }
+  $input.addEventListener("input",   syncVoiceCaret);
+  $input.addEventListener("keyup",   syncVoiceCaret);
+  $input.addEventListener("mouseup", syncVoiceCaret);
+  $input.addEventListener("focus",   syncVoiceCaret);
+
   recog.onresult = (e) => {
     // Discard any onresult that arrives after send() (or the user)
     // already turned userWants off. Web Speech sometimes fires a last
@@ -1678,9 +1975,38 @@ function initVoice() {
       if (r.isFinal) committed += r[0].transcript;
       else interim += r[0].transcript;
     }
-    const prefix = baseline ? baseline + " " : "";
-    $input.value = (prefix + committed + interim).trimStart();
-    $input.dispatchEvent(new Event("input"));
+
+    // Whitespace hygiene at the seams. The recogniser sometimes returns
+    // text with leading/trailing whitespace and the user's prefix/suffix
+    // may or may not end with a space. Normalise so we never produce
+    // "hello  world" or "helloworld".
+    const left  = prefix.replace(/\s+$/, "");
+    const inner = (committed + interim).replace(/^\s+|\s+$/g, "");
+    const right = suffix.replace(/^\s+/, "");
+    const leftJoin  = (left  && inner) ? " " : "";
+    const rightJoin = (inner && right) ? " " : "";
+
+    const newValue = left + leftJoin + inner + rightJoin + right;
+    // Caret pinned to the end of the just-inserted text so subsequent
+    // speech continues from there naturally. (User can still re-aim by
+    // clicking elsewhere — syncVoiceCaret picks that up.)
+    const caret = (left + leftJoin + inner).length;
+
+    voiceWriting = true;
+    try {
+      // CRITICAL: keep voiceWriting=true through the dispatchEvent — the
+      // syncVoiceCaret listener runs synchronously inside dispatch and
+      // reads the flag at that moment. If we reset before dispatch the
+      // listener sees voiceWriting=false → treats our own write as a
+      // manual edit → wipes `committed` → next frame duplicates the
+      // whole transcript.
+      $input.value = newValue;
+      try { $input.setSelectionRange(caret, caret); } catch {}
+      $input.dispatchEvent(new Event("input"));
+    } finally {
+      voiceWriting = false;
+    }
+    extendMaxListenWindow();
   };
   // Two classes of speech errors:
   //   • PERMANENT — condition won't resolve without user action.
@@ -1695,8 +2021,7 @@ function initVoice() {
   let lastTransientNoticeAt = 0;
   const disableMic = (title) => {
     userWants = false;
-    $mic.disabled = true;
-    $mic.classList.remove("listening");
+    setMicState("DISABLED");
     $mic.title = title;
     if (maxListenTimer) { clearTimeout(maxListenTimer); maxListenTimer = null; }
   };
@@ -1707,11 +2032,9 @@ function initVoice() {
     const isTransient = e.error === "network";
     if (!isPermanent && !isTransient) return; // no-speech, aborted — silent
 
-    // Stop whatever session is in flight so onend doesn't auto-restart.
-    userWants = false;
-    if (maxListenTimer) { clearTimeout(maxListenTimer); maxListenTimer = null; }
-
     if (isPermanent) {
+      userWants = false;
+      if (maxListenTimer) { clearTimeout(maxListenTimer); maxListenTimer = null; }
       if (permanentErrorShown) { disableMic($mic.title); return; }
       permanentErrorShown = true;
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
@@ -1725,9 +2048,20 @@ function initVoice() {
       return;
     }
 
-    // Transient network error — throttle the notice (once per 10 s) and
-    // keep the mic button enabled so the user can retry. Full hint in
-    // the tooltip for the curious.
+    // Transient network error. We try ONE silent retry before bothering
+    // the user with a notice — the network jitters that cause this
+    // resolve in well under a second most of the time, and a successful
+    // retry feels like the mic just kept working. Throttled notice only
+    // surfaces if the retry also fails. budget resets on every clean
+    // onstart so a stable multi-minute session keeps its credit.
+    if (networkRetriesLeft > 0 && userWants) {
+      networkRetriesLeft--;
+      // Don't change userWants — onend will see it true and restart.
+      // Don't change state machine — let onend transition us correctly.
+      return;
+    }
+    userWants = false;
+    if (maxListenTimer) { clearTimeout(maxListenTimer); maxListenTimer = null; }
     const now = Date.now();
     if (now - lastTransientNoticeAt >= 10_000) {
       lastTransientNoticeAt = now;
@@ -1736,11 +2070,30 @@ function initVoice() {
     $mic.title = "التعرّف الصوتي يحتاج خدمة Google — في Brave أوقِف Shields";
   };
   recog.onend = () => {
-    recognizing = false;
+    // Auto-restart path: Chrome's recogniser ends the session itself
+    // every ~60 s even with continuous=true. If the user still wants to
+    // listen we transparently start a new session so they don't notice
+    // the boundary.
     if (userWants) {
-      try { recog.start(); return; } catch {}
+      setMicState("STARTING");
+      try { recog.start(); return; }
+      catch (e) {
+        // start() can throw "InvalidStateError" if a previous session
+        // is still tearing down. Wait one tick and try once more —
+        // that's almost always enough.
+        setTimeout(() => {
+          if (!userWants) return;
+          try { recog.start(); }
+          catch { userWants = false; finalizeMicEnd(); }
+        }, 50);
+        return;
+      }
     }
-    $mic.classList.remove("listening");
+    finalizeMicEnd();
+  };
+
+  function finalizeMicEnd() {
+    setMicState("IDLE");
     // Preserve the typing indicator if a task already took over —
     // happens when the user hits send while the mic is still listening.
     // Without this, "Claude يفكّر..." gets wiped out as soon as onend
@@ -1748,7 +2101,22 @@ function initVoice() {
     if (!isLoading) setTyping(false);
     if (maxListenTimer) { clearTimeout(maxListenTimer); maxListenTimer = null; }
     updateSend();
-  };
+  }
+}
+
+// Sliding window: every time the recogniser actually produces text,
+// reset the cap. A user dictating a long paragraph won't get cut off
+// at 60 s; a user who started the mic and walked away still gets
+// auto-stopped because the timer doesn't extend without speech.
+function extendMaxListenWindow() {
+  if (maxListenTimer) clearTimeout(maxListenTimer);
+  maxListenTimer = setTimeout(() => {
+    if (userWants) {
+      userWants = false;
+      if (micState !== "STOPPING" && micState !== "IDLE") setMicState("STOPPING");
+      try { recog?.stop(); } catch {}
+    }
+  }, MAX_LISTEN_MS);
 }
 
 async function ensureMicPermission() {
@@ -1765,21 +2133,76 @@ async function ensureMicPermission() {
 
 $mic.addEventListener("click", async () => {
   if (!recog) { initVoice(); if (!recog) return; }
-  if (userWants || recognizing) {
+
+  // STOP path. We toggle off the moment the user clicks — even if the
+  // session is still STARTING (no onstart yet) or already STOPPING.
+  // userWants=false ensures the auto-restart in onend doesn't fight us.
+  if (userWants || micActive()) {
     userWants = false;
+    if (micState !== "STOPPING" && micState !== "IDLE") setMicState("STOPPING");
     try { recog.stop(); } catch {}
     return;
   }
-  const ok = await ensureMicPermission();
-  if (!ok) return;
-  baseline = $input.value.trim();
-  committed = "";
+
+  // START path. We flip to STARTING IMMEDIATELY (before the async
+  // permission check) so the button shows "starting" feedback right
+  // away, AND so a rapid second click during the permission await
+  // toggles us back off via the STOP path above instead of racing.
+  setMicState("STARTING");
   userWants = true;
-  try { recog.start(); } catch {}
-  if (maxListenTimer) clearTimeout(maxListenTimer);
-  maxListenTimer = setTimeout(() => {
-    if (userWants) { userWants = false; try { recog.stop(); } catch {} }
-  }, MAX_LISTEN_MS);
+  // Anchor dictation at the user's current caret position. If they
+  // hadn't focused the input yet (selection is null), insert at the
+  // end — same effect as the old "append to existing text" behaviour.
+  // If they had the caret at position 5 of "I am happy", suffix becomes
+  // "am happy" and the next dictation slots itself between "I " and
+  // "am happy" — exactly the user-asked-for behaviour the old code
+  // (which only had a `baseline` and no concept of a caret) lacked.
+  const start = $input.selectionStart ?? $input.value.length;
+  const end   = $input.selectionEnd   ?? start;
+  prefix = $input.value.slice(0, start);
+  suffix = $input.value.slice(end);
+  committed = "";
+  networkRetriesLeft = 1;
+
+  const ok = await ensureMicPermission();
+  // The user (or a permission-failure error) may have already toggled
+  // us off during the await above. Check before proceeding.
+  if (!userWants) {
+    if (micState !== "IDLE") setMicState("IDLE");
+    return;
+  }
+  if (!ok) {
+    userWants = false;
+    setMicState("IDLE");
+    return;
+  }
+
+  try {
+    recog.start();
+  } catch (err) {
+    // start() throws InvalidStateError if a previous session is still
+    // tearing down (e.g. user mashed the button). Surface this once
+    // — silent failure here is the worst possible UX because the user
+    // sees the button do nothing and has no idea why.
+    userWants = false;
+    setMicState("IDLE");
+    showNotice("تعذّر بدء التسجيل — جرّب مرّة أخرى بعد لحظة.");
+    return;
+  }
+  // Initial cap; recog.onresult slides this forward whenever speech
+  // arrives. If no speech arrives within 60 s, mic auto-stops.
+  extendMaxListenWindow();
+});
+
+// Keyboard shortcut: Ctrl+Shift+M (or Cmd+Shift+M on macOS) toggles
+// the mic from anywhere in the panel. The combo avoids the common
+// browser/OS reservations of plain Ctrl+M / F1.
+document.addEventListener("keydown", (e) => {
+  const meta = e.ctrlKey || e.metaKey;
+  if (meta && e.shiftKey && (e.key === "m" || e.key === "M")) {
+    e.preventDefault();
+    $mic.click();
+  }
 });
 
 initVoice();

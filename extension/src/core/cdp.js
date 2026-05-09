@@ -324,11 +324,53 @@ export async function waitForDomStable(tabId, timeoutMs = 2000) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Screenshot (JPEG q45 + downscaled for token efficiency)
+// Screenshot — two profiles, picked by the caller:
+//
+//   • AGENT profile (default): JPEG q45 @ 1280px max width.
+//     Tuned for the LLM's automated tool-loop where it shoots 5-30 times
+//     per task. Speed and token cost dominate; small text legibility is a
+//     soft requirement.
+//
+//   • MANUAL profile (highQuality: true): JPEG q80 @ 1920px max width.
+//     Tuned for the user pressing the 📸 chip to ask "what's in this?".
+//     One-shot capture, latency invisible to humans, and small text
+//     (sidebar labels, buttons, tab strips) MUST be readable. The old
+//     q45/1280 settings made small Arabic / English UI text unreadable
+//     and Claude vision filled the gap by guessing from project context
+//     ("I'm in Claude Companion → that sparkle must be Claude's logo")
+//     — a real hallucination case observed in the wild.
+//
+// Implementation note: even MANUAL stays JPEG (not WebP) for now because
+// our test surface and the Anthropic Files API both accept JPEG by default
+// and we want to keep one code path. Switching to WebP can save another
+// ~25-30% with no quality cost — see screenshot perf TODO.
 // ──────────────────────────────────────────────────────────────────────────
 
-export async function takeScreenshot(tabId) {
+export async function takeScreenshot(tabId, options = {}) {
   await ensureAttached(tabId);
+
+  const highQuality = options.highQuality === true;
+
+  // Format: PNG (lossless) for the user-pressed path; JPEG for the
+  // agent loop. Why this matters: JPEG compression — even at q80 —
+  // smudges the 1-2 px stems of small Arabic letters and fine UI text
+  // (sidebar labels, tab strips), which is exactly the input that
+  // tripped Claude into hallucinating "Claude logo" instead of reading
+  // the actual "X" / "Grok" labels off X.com. PNG removes the entire
+  // failure mode at the cost of 3-4× the bytes — fine for a one-off
+  // user request, not fine for the 30-shot agent loop.
+  const FORMAT = highQuality ? "png" : "jpeg";
+  const MEDIA_TYPE = highQuality ? "image/png" : "image/jpeg";
+
+  // Width caps: agent loop needs cheap, user inspection needs detail.
+  const MAX_W = highQuality ? 1920 : 1280;
+  // Speed/quality knob: when the user is waiting for an answer, prefer
+  // crisp output over the ~30 ms saved by speed-optimised encoding.
+  const OPTIMIZE_SPEED = !highQuality;
+  // Size budget: agent shots stay tight (Anthropic charges per image
+  // token); user shots get a bigger budget for PNG which is naturally
+  // 3-4× a JPEG of the same scene.
+  const SIZE_CAP = highQuality ? 4_500_000 : 400_000;
 
   // Downscale oversized viewports — image tokens scale with dimensions.
   let clip = null;
@@ -337,14 +379,24 @@ export async function takeScreenshot(tabId) {
     const vw = metrics?.cssLayoutViewport?.clientWidth || metrics?.layoutViewport?.clientWidth;
     const vh = metrics?.cssLayoutViewport?.clientHeight || metrics?.layoutViewport?.clientHeight;
     if (vw && vh) {
-      const MAX_W = 1280;
       const scale = vw > MAX_W ? MAX_W / vw : 1;
       clip = { x: 0, y: 0, width: vw, height: vh, scale };
     }
   } catch {}
 
-  const opts = { format: "jpeg", quality: 45, optimizeForSpeed: true, captureBeyondViewport: false };
+  const opts = {
+    format: FORMAT,
+    optimizeForSpeed: OPTIMIZE_SPEED,
+    captureBeyondViewport: false,
+  };
+  // PNG ignores the `quality` field — only set it for JPEG.
+  if (FORMAT === "jpeg") opts.quality = highQuality ? 80 : 45;
   if (clip) opts.clip = clip;
+  // Diagnostic so we can verify in the panel/service-worker console
+  // that the high-quality path is actually running. If a user reports
+  // hallucination and this line never appears, the extension wasn't
+  // reloaded — that has been the #1 cause of "fix didn't work" so far.
+  try { console.log(`[screenshot] profile=${highQuality ? "MANUAL/png" : "AGENT/jpeg"} maxW=${MAX_W}`); } catch {}
 
   // Hide our own automation overlay so it doesn't end up baked into the
   // screenshot as a thick orange frame. Best-effort — if the page has a
@@ -371,11 +423,26 @@ export async function takeScreenshot(tabId) {
 
   const res = await cdp(tabId, "Page.captureScreenshot", opts);
   let base64 = res.data;
+  let outMediaType = MEDIA_TYPE;
 
-  // Hard cap at ~400KB — if still too big, drop to q25
-  if (base64.length > 400_000) {
-    const smaller = await cdp(tabId, "Page.captureScreenshot", { ...opts, quality: 25 });
-    base64 = smaller.data;
+  // Adaptive size cap.
+  // - JPEG path: drop quality once.
+  // - PNG path:  PNG can't be re-encoded smaller, so on overflow we
+  //   degrade gracefully to a JPEG q70 capture (still better than the
+  //   agent default and well under the host's 10 MB cap). This only
+  //   triggers on huge viewports (e.g. 4K monitors at 1.0 DPR) — the
+  //   common case stays PNG.
+  if (base64.length > SIZE_CAP) {
+    if (FORMAT === "jpeg") {
+      const fallbackQ = highQuality ? 60 : 25;
+      const smaller = await cdp(tabId, "Page.captureScreenshot", { ...opts, quality: fallbackQ });
+      base64 = smaller.data;
+    } else {
+      const jpegOpts = { ...opts, format: "jpeg", quality: 70 };
+      const smaller = await cdp(tabId, "Page.captureScreenshot", jpegOpts);
+      base64 = smaller.data;
+      outMediaType = "image/jpeg";
+    }
   }
 
   // Restore the border so the sticky-during-task indicator doesn't vanish
@@ -386,8 +453,11 @@ export async function takeScreenshot(tabId) {
   screenshotStore.set(imageId, base64);
   const keys = Array.from(screenshotStore.keys());
   while (keys.length > 10) screenshotStore.delete(keys.shift());
+  // Diagnostic: helps confirm the new pipeline is running and that
+  // PNG actually shipped (not silently degraded by the SIZE_CAP path).
+  try { console.log(`[screenshot] sent mediaType=${outMediaType} bytes=${base64.length}`); } catch {}
 
-  return { base64, imageId };
+  return { base64, imageId, mediaType: outMediaType };
 }
 
 // ──────────────────────────────────────────────────────────────────────────

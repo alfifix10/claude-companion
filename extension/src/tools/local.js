@@ -38,8 +38,15 @@ export async function executeLocal(action, params = {}) {
       return { toolActions: [{ tool: "form_input", detail: `"${params.value}" → ${hits[0].name || hits[0].role}` }] };
     }
     case "screenshot": {
-      const r = await executeTool("screenshot", {}, tabId);
-      return { screenshot: r?.base64, toolActions: [{ tool: "screenshot" }] };
+      // User-pressed-the-camera path → high quality (PNG, 1920px).
+      // The agent loop continues to use the default cheap profile
+      // (JPEG q45, 1280px) via the executor.
+      const r = await executeTool("screenshot", { highQuality: true }, tabId);
+      return {
+        screenshot: r?.base64,
+        screenshotMediaType: r?.mediaType || "image/png",
+        toolActions: [{ tool: "screenshot" }],
+      };
     }
     case "read_page": {
       const r = await executeTool("read_page", { filter: "interactive" }, tabId);

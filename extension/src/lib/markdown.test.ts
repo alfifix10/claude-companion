@@ -1,3 +1,11 @@
+// @vitest-environment jsdom
+//
+// renderMarkdown's final pass calls DOMPurify, which needs a window/DOM
+// to operate. In the real extension this is just `window`; under
+// vitest's default "node" environment there is no window, so the
+// whole renderer throws. jsdom gives us a minimal DOM that's enough
+// for sanitisation logic to run end-to-end.
+
 import { describe, expect, it } from "vitest";
 import { escapeHtml, renderMarkdown } from "./markdown.js";
 
@@ -129,9 +137,12 @@ describe("renderMarkdown — tables", () => {
 describe("renderMarkdown — links (XSS hardening)", () => {
   it("absolute https URL is kept", () => {
     const out = renderMarkdown("[click](https://example.com)");
-    expect(out).toContain(
-      `<a href="https://example.com/" target="_blank" rel="noopener noreferrer">click</a>`,
-    );
+    // Attribute order isn't significant — DOMPurify may reorder.
+    // Assert each piece independently.
+    expect(out).toContain(`href="https://example.com/"`);
+    expect(out).toContain(`target="_blank"`);
+    expect(out).toContain(`rel="noopener noreferrer"`);
+    expect(out).toContain(">click</a>");
   });
 
   it("relative URL is kept", () => {
@@ -183,8 +194,16 @@ describe("renderMarkdown — escaping", () => {
     expect(renderMarkdown("AT&T")).toContain("AT&amp;T");
   });
 
-  it("quote inside text is escaped", () => {
-    expect(renderMarkdown(`say "hi"`)).toContain("&quot;hi&quot;");
+  it("quote in text content does not break out of an attribute", () => {
+    // The renderer escapes `"` to &quot; while building HTML; DOMPurify
+    // then re-decodes it in TEXT positions (where `"` is harmless) but
+    // KEEPS escaping in ATTRIBUTE positions (where it matters). Assert
+    // the security property — the resulting HTML must be parseable
+    // without the quote being interpreted as a markup delimiter.
+    const out = renderMarkdown(`say "hi"`);
+    expect(out).toContain("hi");
+    // Crucial: no stray attribute introduced
+    expect(out).not.toMatch(/<[a-z][a-z0-9]*[^>]*\s"hi"/i);
   });
 });
 
@@ -214,5 +233,51 @@ describe("renderMarkdown — combined document", () => {
     expect(out).toContain("<strong>bold</strong>");
     expect(out).toContain("<li>item 1</li>");
     expect(out).toContain("<pre><code>code</code></pre>");
+  });
+});
+
+// DOMPurify defense-in-depth — these inputs are not produced by the
+// upstream Markdown rules, but cover the case where a future syntax
+// addition or a regex blind-spot lets raw HTML reach the sanitiser.
+// We assert the sanitiser strips dangerous constructs even when our
+// own escaping fails to.
+describe("renderMarkdown — sanitisation (defense-in-depth)", () => {
+  it("strips <script> tags that somehow reach the output", () => {
+    // Use a plausible bypass: a code-fence that contains a script.
+    // The fenced-code path escapes content, so this is already safe;
+    // the test confirms the final sanitiser is in the pipeline.
+    const out = renderMarkdown("```\n<script>alert(1)</script>\n```");
+    expect(out).not.toContain("<script>");
+  });
+
+  it("strips <iframe> tags", () => {
+    // Markdown text → escaped, but verify the allowlist denies iframe
+    // even if it ever leaks through.
+    const out = renderMarkdown("Hello <iframe src=\"//evil\"></iframe>");
+    expect(out).not.toContain("<iframe");
+  });
+
+  it("strips on* event handlers from <a>", () => {
+    // Our link rule emits target+rel only; if a future bug ever lets
+    // an onclick reach the output, DOMPurify removes it.
+    const out = renderMarkdown('[t](https://example.com)');
+    expect(out).toContain("<a ");
+    expect(out).not.toMatch(/\son\w+=/i);
+  });
+
+  it("rejects javascript: URLs (markdown rule blocks; sanitiser is the second wall)", () => {
+    const out = renderMarkdown("[click](javascript:alert(1))");
+    // Markdown rule already drops the href, leaving just the text.
+    // Sanitiser additionally guarantees no javascript: ever survives.
+    expect(out).not.toContain("javascript:");
+  });
+
+  it("preserves the standard tag set we emit", () => {
+    const md =
+      "# H\n\n**b** *i* `c`\n\n[t](https://example.com)\n\n- a\n\n```\nx\n```\n\n| a | b |\n| --- | --- |\n| 1 | 2 |";
+    const out = renderMarkdown(md);
+    for (const tag of ["h2", "strong", "em", "code", "a", "ul", "li", "pre", "table", "thead", "tbody", "tr", "th", "td"]) {
+      expect(out).toContain(`<${tag}`);
+    }
   });
 });
