@@ -71,14 +71,21 @@ export async function ensureAttached(tabId) {
 // Chromium shows a mandatory "Extension is debugging this browser" bar
 // while any tab has chrome.debugger attached. The bar steals ~36 px of
 // vertical space from both the page AND the side panel, which users
-// reasonably find annoying when they're not actively running a task.
+// reasonably find annoying.
 //
-// Policy: once the current Max task finishes, wait DETACH_IDLE_MS of
-// quiet, then detach every tab we attached. If a new task starts inside
-// that window, ensureAttached cancels the pending detach — avoids a
-// bar-flicker between back-to-back prompts.
+// Trade-off:
+//   • Short idle (e.g. 5 s)  → bar disappears between tasks, BUT
+//     reappears every time the user runs a new task. Constant flicker.
+//   • Long idle (e.g. 30 m)  → bar appears once per session and stays.
+//     No flicker. The page/panel get used to the lost 36 px and the
+//     user only "pays" for it once.
+//
+// User feedback was overwhelmingly the second option: stop the flicker.
+// We now wait 30 minutes of zero browser-tool activity before detaching.
+// For permanent suppression of the bar entirely, launch Chrome with
+// `--silent-debugger-extension-api` (Chromium-supported since 2017).
 // ──────────────────────────────────────────────────────────────────────────
-const DETACH_IDLE_MS = 5_000;
+const DETACH_IDLE_MS = 30 * 60_000;
 let detachTimer = null;
 
 export function cancelDetachSchedule() {

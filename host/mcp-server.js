@@ -24,6 +24,7 @@ import net from "node:net";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { spawn } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 
@@ -34,6 +35,107 @@ import { z } from "zod";
 const DEFAULT_PORT = 18799;
 const CONFIG_DIR = path.join(os.homedir(), ".config", "claude-companion");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
+// Pro Mode settings live in the same user-data.json that the extension
+// mirrors to disk. We re-read it on every Pro-Mode tool call (cheap —
+// it's a few KB) so toggling Pro Mode in the UI takes effect on the
+// VERY NEXT tool invocation, no restart required.
+const USER_DATA_PATH = path.join(CONFIG_DIR, "user-data.json");
+function loadProModeSettings() {
+  try {
+    const raw = fs.readFileSync(USER_DATA_PATH, "utf-8");
+    const data = JSON.parse(raw);
+    return {
+      proMode: data.proMode === true,
+      workingDirectory: typeof data.workingDirectory === "string" ? data.workingDirectory : "",
+    };
+  } catch {
+    return { proMode: false, workingDirectory: "" };
+  }
+}
+// Validate that `inputPath` resolves inside `workingDirectory` (and only
+// inside — symlinks pointing out are rejected). Throws on violations so
+// the MCP tool returns an error to Claude. Path arg may be absolute or
+// relative — we resolve against workingDirectory in either case.
+function validatePath(inputPath, workingDirectory) {
+  if (!workingDirectory) {
+    throw new Error("Working directory not configured. Open settings → Pro Mode.");
+  }
+  const wd = path.resolve(workingDirectory);
+  let abs;
+  if (path.isAbsolute(inputPath)) {
+    abs = path.resolve(inputPath);
+  } else {
+    abs = path.resolve(wd, inputPath);
+  }
+  // First check the lexical path — defends against `../` traversal even
+  // when the resolved file doesn't exist.
+  const sep = path.sep;
+  if (abs !== wd && !abs.startsWith(wd + sep)) {
+    throw new Error(`Path is outside the working directory: ${inputPath}`);
+  }
+  // Then resolve any symlinks. If the file exists and points outside, refuse.
+  // If it doesn't exist (write_file new path), realpath throws — that's fine,
+  // we already validated the lexical path above.
+  try {
+    const real = fs.realpathSync(abs);
+    if (real !== wd && !real.startsWith(wd + sep)) {
+      throw new Error(`Symlink points outside the working directory: ${inputPath}`);
+    }
+    return real;
+  } catch (e) {
+    if (e.code === "ENOENT") return abs;   // file doesn't exist yet — return lexical
+    throw e;
+  }
+}
+// Gate every Pro-Mode tool with this. Throws (Claude sees the message)
+// if Pro Mode is off or working directory isn't set.
+function requireProMode() {
+  const settings = loadProModeSettings();
+  if (!settings.proMode) {
+    throw new Error("Pro Mode is off. Enable it in the extension settings to use file/shell tools.");
+  }
+  if (!settings.workingDirectory) {
+    throw new Error("Pro Mode is on but working directory is empty. Set it in extension settings.");
+  }
+  return settings;
+}
+
+// Locate a Chrome (or Chromium-flavoured) binary we can drive headlessly
+// for PDF generation. Almost certain to succeed because the user is
+// running the extension — they have a Chromium browser installed.
+// Search order biased to Brave / Chrome first, falling back to Edge.
+function findChromeBin() {
+  const candidates = [];
+  if (process.platform === "win32") {
+    const pf = process.env["PROGRAMFILES"] || "C:\\Program Files";
+    const pfx = process.env["PROGRAMFILES(X86)"] || "C:\\Program Files (x86)";
+    const localApp = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+    candidates.push(
+      path.join(localApp, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+      path.join(pf, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+      path.join(pf, "Google", "Chrome", "Application", "chrome.exe"),
+      path.join(pfx, "Google", "Chrome", "Application", "chrome.exe"),
+      path.join(localApp, "Google", "Chrome", "Application", "chrome.exe"),
+      path.join(pf, "Microsoft", "Edge", "Application", "msedge.exe"),
+      path.join(pfx, "Microsoft", "Edge", "Application", "msedge.exe"),
+    );
+  } else if (process.platform === "darwin") {
+    candidates.push(
+      "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    );
+  } else {
+    candidates.push(
+      "/usr/bin/brave-browser", "/usr/bin/google-chrome",
+      "/usr/bin/chromium", "/usr/bin/chromium-browser",
+      "/usr/bin/microsoft-edge",
+      "/snap/bin/chromium",
+    );
+  }
+  for (const c of candidates) { try { if (fs.existsSync(c)) return c; } catch {} }
+  return null;
+}
 
 // Shared with native-host.js — keep logic identical so both sides converge
 // on the same secret regardless of who starts first.
@@ -473,6 +575,488 @@ server.tool("file_upload", "Upload local file(s) to an <input type=\"file\"> ele
   selector: z.string().optional(),
   files: z.array(z.string()).min(1),
 }, async (a) => ({ content: [{ type: "text", text: String(await request("file_upload", a)) }] }));
+
+// ──────────────────────────────────────────────────────────────────────────
+// Pro Mode — Filesystem (read-only, Layer 1 / Phase 2)
+//
+// All tools below gate on the user-set Pro Mode flag and confine paths
+// to the configured working directory. Off by default. The tools are
+// VISIBLE to Claude even when Pro Mode is off — Claude calls them, gets
+// a clear "Pro Mode is off" error, and tells the user to enable it.
+// That's better UX than hiding the tools (Claude wouldn't know they
+// exist and would suggest CLI-based workarounds).
+// ──────────────────────────────────────────────────────────────────────────
+
+server.tool("read_file",
+  "Read a text file from the user's working directory. Path may be absolute (must resolve inside working dir) or relative (resolved against working dir). Refuses files larger than 1 MB — for those, use `find_files` + targeted reads. Pro Mode required.",
+  { path: z.string().min(1).describe("Path to the file, absolute or relative to working dir") },
+  async (a) => {
+    try {
+      const { workingDirectory } = requireProMode();
+      const safePath = validatePath(a.path, workingDirectory);
+      const stat = fs.statSync(safePath);
+      if (stat.isDirectory()) throw new Error("Path is a directory, not a file. Use list_directory.");
+      // 1 MB cap — protects the chat from accidentally pasting a binary
+      // and ensures the model can actually process the content. Larger
+      // files should be searched/sliced via find_files + grep first.
+      const MAX_BYTES = 1024 * 1024;
+      if (stat.size > MAX_BYTES) {
+        throw new Error(`File is ${(stat.size / 1024).toFixed(0)} KB — over the 1 MB read cap. Use targeted reads via find_files / grep.`);
+      }
+      const content = fs.readFileSync(safePath, "utf-8");
+      return { content: [{ type: "text", text: content }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+server.tool("list_directory",
+  "List entries in a directory (files + subdirs). Each entry shows name, type, size (files), and last-modified time. Path resolves against working dir. Pro Mode required.",
+  { path: z.string().optional().describe("Directory path; defaults to working directory itself") },
+  async (a) => {
+    try {
+      const { workingDirectory } = requireProMode();
+      const safePath = validatePath(a.path || ".", workingDirectory);
+      const stat = fs.statSync(safePath);
+      if (!stat.isDirectory()) throw new Error("Path is a file, not a directory. Use read_file.");
+      const entries = fs.readdirSync(safePath, { withFileTypes: true });
+      const lines = entries.map((ent) => {
+        const full = path.join(safePath, ent.name);
+        try {
+          const s = fs.statSync(full);
+          const kind = ent.isDirectory() ? "DIR" : ent.isSymbolicLink() ? "LNK" : "FILE";
+          const size = ent.isDirectory() ? "-" : `${s.size}`;
+          const mtime = s.mtime.toISOString().slice(0, 19).replace("T", " ");
+          return `${kind.padEnd(4)}  ${size.padStart(10)}  ${mtime}  ${ent.name}`;
+        } catch { return `?     -          -                    ${ent.name}`; }
+      });
+      const header = `Directory: ${path.relative(workingDirectory, safePath) || "."}\n` +
+        `Entries: ${entries.length}\n` +
+        `─────────────────────────────────────────────────────────`;
+      return { content: [{ type: "text", text: header + "\n" + lines.join("\n") }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+server.tool("find_files",
+  "Find files in the working directory matching a glob-like pattern. Supports `*` and `?` and `**` for recursive. Returns up to 200 paths. Examples: `*.md`, `src/**/*.ts`, `**/test_*.py`. Pro Mode required.",
+  {
+    pattern: z.string().min(1).describe("Glob pattern (e.g. '**/*.ts', 'src/*.py', 'README*')"),
+    root: z.string().optional().describe("Subdirectory to search; defaults to working directory"),
+  },
+  async (a) => {
+    try {
+      const { workingDirectory } = requireProMode();
+      const safeRoot = validatePath(a.root || ".", workingDirectory);
+      const stat = fs.statSync(safeRoot);
+      if (!stat.isDirectory()) throw new Error("Root is not a directory.");
+
+      // Hand-rolled glob: simple but covers the cases Claude actually
+      // writes. We deliberately don't pull in `glob` or `minimatch` —
+      // both have known prototype-pollution histories and the surface
+      // we need is small.
+      const pat = a.pattern;
+      const recursive = pat.includes("**");
+      // Convert glob to RegExp by escaping regex specials except *, ?, /
+      // and translating: ** → .*, * → [^/]*, ? → [^/]
+      const regex = new RegExp("^" + pat
+        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+        .replace(/\*\*/g, "<DOUBLESTAR>")
+        .replace(/\*/g, "[^/]*")
+        .replace(/\?/g, "[^/]")
+        .replace(/<DOUBLESTAR>/g, ".*")
+        + "$");
+      const MAX_RESULTS = 200;
+      const matches = [];
+      // Skip directories that explode the search (node_modules, .git)
+      // unless the pattern explicitly mentions them.
+      const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", "__pycache__"]);
+      const wantsSkipped = SKIP_DIRS.values && [...SKIP_DIRS].some((d) => pat.includes(d));
+
+      function walk(dir) {
+        if (matches.length >= MAX_RESULTS) return;
+        let entries = [];
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        for (const ent of entries) {
+          if (matches.length >= MAX_RESULTS) return;
+          const full = path.join(dir, ent.name);
+          const rel = path.relative(safeRoot, full).replace(/\\/g, "/");
+          if (ent.isDirectory()) {
+            if (!wantsSkipped && SKIP_DIRS.has(ent.name)) continue;
+            if (recursive) walk(full);
+          } else if (ent.isFile()) {
+            if (regex.test(rel) || regex.test(ent.name)) matches.push(rel);
+          }
+        }
+      }
+      walk(safeRoot);
+
+      if (matches.length === 0) {
+        return { content: [{ type: "text", text: `No files matched: ${pat}` }] };
+      }
+      const text = `${matches.length} match${matches.length === 1 ? "" : "es"}` +
+        (matches.length === MAX_RESULTS ? " (capped at 200 — narrow the pattern for more)" : "") +
+        ":\n" + matches.join("\n");
+      return { content: [{ type: "text", text }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+server.tool("get_working_directory",
+  "Report the currently-configured Pro Mode working directory. Useful as a sanity-check before file operations. Returns the path even if Pro Mode is off (so the user can verify their setup before turning it on).",
+  {},
+  async () => {
+    const settings = loadProModeSettings();
+    const text = settings.workingDirectory
+      ? `Working directory: ${settings.workingDirectory}\nPro Mode: ${settings.proMode ? "ON ✓" : "OFF — enable in extension settings"}`
+      : "Working directory not configured. Open extension settings → Pro Mode → set the working directory.";
+    return { content: [{ type: "text", text }] };
+  });
+
+// ──────────────────────────────────────────────────────────────────────────
+// Pro Mode — Filesystem (write, Layer 1 / Phase 3)
+// ──────────────────────────────────────────────────────────────────────────
+
+server.tool("write_file",
+  "Create or overwrite a text file in the working directory. Path resolves against working dir. Parent directories auto-created. Pro Mode required. NOTE: silently overwrites — use list_directory first if you need to check.",
+  {
+    path: z.string().min(1).describe("Path to file (absolute inside working dir, or relative)"),
+    content: z.string().describe("File content (UTF-8 text)"),
+  },
+  async (a) => {
+    try {
+      const { workingDirectory } = requireProMode();
+      const safePath = validatePath(a.path, workingDirectory);
+      // Auto-create parent directory chain — convenient for Claude that
+      // wants to write `data/exports/foo.json` in one shot.
+      fs.mkdirSync(path.dirname(safePath), { recursive: true });
+      // Atomic-ish: write to .tmp then rename. Protects against the
+      // half-written-on-crash case the user would otherwise have to
+      // diagnose with `cat`.
+      const tmp = safePath + ".tmp";
+      fs.writeFileSync(tmp, a.content, "utf-8");
+      fs.renameSync(tmp, safePath);
+      const size = Buffer.byteLength(a.content, "utf-8");
+      return { content: [{ type: "text", text: `Wrote ${size} bytes to ${path.relative(workingDirectory, safePath)}` }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+server.tool("edit_file",
+  "Find and replace a unique substring in a file. `old_string` MUST appear EXACTLY ONCE in the file — otherwise the call refuses to avoid ambiguous replacements. For broader rewrites, use write_file. Pro Mode required.",
+  {
+    path: z.string().min(1),
+    old_string: z.string().min(1).describe("Exact substring to find. Must be unique in the file."),
+    new_string: z.string().describe("Replacement text. May be empty to delete the substring."),
+  },
+  async (a) => {
+    try {
+      const { workingDirectory } = requireProMode();
+      const safePath = validatePath(a.path, workingDirectory);
+      const original = fs.readFileSync(safePath, "utf-8");
+      // Count occurrences. `String.split(needle).length - 1` is the
+      // standard non-regex count and avoids regex-escaping the user's
+      // search string.
+      const occurrences = original.split(a.old_string).length - 1;
+      if (occurrences === 0) {
+        throw new Error("old_string not found in file. Read the file first to check the exact text.");
+      }
+      if (occurrences > 1) {
+        throw new Error(`old_string appears ${occurrences} times. Make it unique by including more context.`);
+      }
+      const updated = original.replace(a.old_string, a.new_string);
+      const tmp = safePath + ".tmp";
+      fs.writeFileSync(tmp, updated, "utf-8");
+      fs.renameSync(tmp, safePath);
+      return { content: [{ type: "text", text: `Edited ${path.relative(workingDirectory, safePath)} (1 replacement).` }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+server.tool("delete_file",
+  "Delete a single file from the working directory. Refuses directories — use list_directory first to be sure. Pro Mode required. CAUTION: irreversible.",
+  { path: z.string().min(1) },
+  async (a) => {
+    try {
+      const { workingDirectory } = requireProMode();
+      const safePath = validatePath(a.path, workingDirectory);
+      const stat = fs.statSync(safePath);
+      if (stat.isDirectory()) throw new Error("Path is a directory. delete_file only removes files.");
+      fs.unlinkSync(safePath);
+      return { content: [{ type: "text", text: `Deleted ${path.relative(workingDirectory, safePath)}.` }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+server.tool("create_directory",
+  "Create a directory (and any missing parent directories) inside the working directory. No-op if it already exists. Pro Mode required.",
+  { path: z.string().min(1) },
+  async (a) => {
+    try {
+      const { workingDirectory } = requireProMode();
+      const safePath = validatePath(a.path, workingDirectory);
+      fs.mkdirSync(safePath, { recursive: true });
+      return { content: [{ type: "text", text: `Created ${path.relative(workingDirectory, safePath)}.` }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+// ──────────────────────────────────────────────────────────────────────────
+// Pro Mode — Shell (Layer 1 / Phase 4)
+//
+// Three layers of defense before a user-supplied command actually runs:
+//   1. Allowlist: a set of well-known dev tools (git, npm, python, ...)
+//      auto-approve. Anything outside is rejected — Claude must ask the
+//      user to switch the cmd to something on the list.
+//   2. Denylist: explicit blocks for catastrophic verbs even if they
+//      somehow shadow an allowlisted name (e.g. user aliases `python`
+//      to `rm`). Belt-and-suspenders.
+//   3. cwd locked to working directory unless explicitly inside it.
+//
+// shell:false is also key: args are passed as an array, so users CAN'T
+// inject shell metacharacters via prompt injection. `git status; rm -rf`
+// arrives as one literal arg "status; rm -rf" — git ignores it.
+// ──────────────────────────────────────────────────────────────────────────
+
+const COMMAND_ALLOWLIST = new Set([
+  // Version control
+  "git",
+  // Package managers
+  "npm", "pnpm", "yarn", "bun", "pip", "pip3", "pipx", "poetry", "uv",
+  // Runtimes / interpreters
+  "node", "python", "python3", "deno",
+  // Test / lint / build
+  "tsc", "vitest", "jest", "pytest", "mocha", "eslint", "prettier", "biome",
+  "rollup", "esbuild", "webpack", "vite",
+  // POSIX-y read-only utilities (Windows has them via Git Bash / WSL)
+  "ls", "cat", "head", "tail", "wc", "grep", "find", "echo", "pwd",
+  "which", "where", "whoami", "date",
+  // Safe-ish creates
+  "mkdir", "touch",
+  // Inspection of binaries / processes (read-only)
+  "node", "type",
+]);
+
+// Hard refusal regardless of allowlist position. Substrings, not whole-token.
+const COMMAND_DENY_SUBSTR = [
+  "rm -rf", "rm -fr", "rmdir /s",   // recursive deletes
+  "sudo", "doas", "su ",            // privilege escalation
+  "chmod 777", "chown ",            // perm changes
+  "format ", "mkfs",                 // filesystem destruction
+  "dd if=", "> /dev/",               // disk overwrites
+  ":(){",                            // fork bomb shorthand
+  "curl http", "wget http",          // discourage random downloads (allow inside scripts via npm/python though)
+];
+
+server.tool("run_command",
+  "Run a shell command from the allowlist (git, npm, python, node, pip, etc). " +
+  "Args are passed as an array — shell metacharacters in args don't get interpreted. " +
+  "Working directory defaults to the configured working dir. " +
+  "Output is capped at 16 KB. " +
+  "Pro Mode required.",
+  {
+    cmd: z.string().min(1).describe("Executable name from the allowlist (e.g. 'git', 'npm', 'python')"),
+    args: z.array(z.string()).optional().describe("Arguments as separate strings (NOT one shell-string)"),
+    cwd: z.string().optional().describe("Working subdirectory; defaults to the configured working dir"),
+    timeout_ms: z.number().int().min(100).max(300_000).optional().describe("Timeout in ms (default 30000, max 300000)"),
+  },
+  async (a) => {
+    try {
+      const { workingDirectory } = requireProMode();
+      // Normalise cmd — basename only (no path traversal in the cmd itself).
+      const cmdName = path.basename(a.cmd).toLowerCase().replace(/\.(exe|cmd|bat|sh|ps1)$/i, "");
+      if (!COMMAND_ALLOWLIST.has(cmdName)) {
+        const allowed = [...COMMAND_ALLOWLIST].sort().join(", ");
+        throw new Error(`Command "${a.cmd}" is not on the Pro Mode allowlist. Allowed: ${allowed}`);
+      }
+      // Reconstruct what the user/Claude would have invoked and check the
+      // full string against the denylist. This catches cases where args
+      // smuggle a destructive verb (e.g. `git`, args=['!','rm','-rf','.']).
+      const fullCmd = (a.cmd + " " + (a.args || []).join(" ")).toLowerCase();
+      for (const bad of COMMAND_DENY_SUBSTR) {
+        if (fullCmd.includes(bad.toLowerCase())) {
+          throw new Error(`Command rejected: contains banned substring "${bad}".`);
+        }
+      }
+      const cwd = a.cwd ? validatePath(a.cwd, workingDirectory) : workingDirectory;
+      const timeout = a.timeout_ms || 30_000;
+      // shell: false is the security spine here. Passing args as an array
+      // means user-controlled strings can't be re-parsed as commands.
+      const child = spawn(a.cmd, a.args || [], {
+        cwd,
+        shell: false,
+        windowsHide: true,
+        timeout,
+      });
+
+      const MAX_OUTPUT = 16 * 1024;
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (d) => {
+        if (stdout.length < MAX_OUTPUT) stdout += d.toString("utf-8");
+      });
+      child.stderr.on("data", (d) => {
+        if (stderr.length < MAX_OUTPUT) stderr += d.toString("utf-8");
+      });
+
+      const exitCode = await new Promise((resolve, reject) => {
+        child.on("error", reject);
+        child.on("close", (code) => resolve(code));
+      });
+
+      const truncate = (s) => {
+        if (s.length <= MAX_OUTPUT) return s;
+        return s.slice(0, MAX_OUTPUT) + `\n…(truncated at ${MAX_OUTPUT} bytes)`;
+      };
+      const text =
+        `$ ${a.cmd} ${(a.args || []).join(" ")}\n` +
+        `(cwd: ${path.relative(workingDirectory, cwd) || "."}, exit: ${exitCode})\n` +
+        (stdout ? `\n--- stdout ---\n${truncate(stdout)}` : "") +
+        (stderr ? `\n--- stderr ---\n${truncate(stderr)}` : "");
+      return { content: [{ type: "text", text: text.trim() }], isError: exitCode !== 0 };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+// ──────────────────────────────────────────────────────────────────────────
+// Pro Mode — Documents (Layer 2 / Phase 5)
+//
+// PDF generation runs the user's already-installed Chrome in headless
+// mode. Zero npm dependency for PDF — we leverage the browser they're
+// using to run this very extension.
+//
+// JSON / CSV are trivial wrappers over write_file with proper formatting.
+// We expose them as separate tools so Claude doesn't need to remember
+// to JSON.stringify or CSV-escape.
+// ──────────────────────────────────────────────────────────────────────────
+
+server.tool("generate_pdf",
+  "Generate a PDF from HTML content using the user's installed Chromium browser (headless). " +
+  "Useful for archives, reports, formatted exports. " +
+  "HTML supports full CSS — design RTL-friendly templates for Arabic content. " +
+  "Output is saved to working directory. Pro Mode required.",
+  {
+    html: z.string().min(1).describe("Full HTML document. Include <html>, <head>, and CSS for proper layout."),
+    output_path: z.string().min(1).describe("Where to save the PDF (relative to working dir, e.g. 'report.pdf')"),
+    landscape: z.boolean().optional().describe("Landscape orientation (default false)"),
+  },
+  async (a) => {
+    try {
+      const { workingDirectory } = requireProMode();
+      const safeOut = validatePath(a.output_path, workingDirectory);
+      if (!safeOut.toLowerCase().endsWith(".pdf")) {
+        throw new Error("output_path must end in .pdf");
+      }
+      const chrome = findChromeBin();
+      if (!chrome) {
+        throw new Error("Chromium browser not found. Install Chrome / Brave / Edge to enable PDF generation.");
+      }
+      // Write HTML to a tmp file. Chrome's --print-to-pdf reads file://
+      // URLs without the JS sandbox restrictions of `data:` URIs.
+      fs.mkdirSync(path.dirname(safeOut), { recursive: true });
+      const tmpHtml = path.join(os.tmpdir(), `cc-pdf-${Date.now()}-${randomBytes(4).toString("hex")}.html`);
+      fs.writeFileSync(tmpHtml, a.html, "utf-8");
+      try {
+        const args = [
+          "--headless=new",
+          "--disable-gpu",
+          "--no-sandbox",
+          "--no-margins",
+          "--no-pdf-header-footer",
+          "--virtual-time-budget=10000",  // give CSS/web fonts a moment to load
+          `--print-to-pdf=${safeOut}`,
+        ];
+        if (a.landscape) args.push("--print-to-pdf-no-header", "--landscape");
+        // Use file:// URL — relative paths in the HTML resolve against
+        // the tmp dir, which matters for embedded <img src="...">.
+        const fileUrl = "file://" + tmpHtml.replace(/\\/g, "/");
+        args.push(fileUrl);
+
+        await new Promise((resolve, reject) => {
+          const proc = spawn(chrome, args, { windowsHide: true, timeout: 60_000 });
+          let stderr = "";
+          proc.stderr.on("data", (d) => { stderr += d.toString("utf-8"); });
+          proc.on("error", reject);
+          proc.on("close", (code) => {
+            if (code === 0) resolve();
+            else reject(new Error(`Chrome exited with ${code}. ${stderr.slice(-300)}`));
+          });
+        });
+        if (!fs.existsSync(safeOut)) {
+          throw new Error("Chrome reported success but no PDF was created. Check the HTML for fatal errors.");
+        }
+        const size = fs.statSync(safeOut).size;
+        return {
+          content: [{
+            type: "text",
+            text: `Generated PDF: ${path.relative(workingDirectory, safeOut)} (${(size / 1024).toFixed(1)} KB)`,
+          }],
+        };
+      } finally {
+        try { fs.unlinkSync(tmpHtml); } catch {}
+      }
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+server.tool("save_json",
+  "Save data as a pretty-printed JSON file in the working directory. Wrapper over write_file with JSON.stringify (indent 2). Pro Mode required.",
+  {
+    data: z.unknown().describe("Any JSON-serialisable value (object, array, string, etc)"),
+    output_path: z.string().min(1).describe("File path ending in .json"),
+  },
+  async (a) => {
+    try {
+      const { workingDirectory } = requireProMode();
+      const safeOut = validatePath(a.output_path, workingDirectory);
+      const json = JSON.stringify(a.data, null, 2);
+      fs.mkdirSync(path.dirname(safeOut), { recursive: true });
+      const tmp = safeOut + ".tmp";
+      fs.writeFileSync(tmp, json, "utf-8");
+      fs.renameSync(tmp, safeOut);
+      const lines = json.split("\n").length;
+      return { content: [{ type: "text", text: `Wrote JSON: ${path.relative(workingDirectory, safeOut)} (${lines} lines, ${(json.length / 1024).toFixed(1)} KB)` }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+server.tool("save_csv",
+  "Save tabular data as a CSV file. Each row in `rows` is a record; the FIRST row is treated as headers. " +
+  "Quotes and commas in cells are escaped per RFC 4180. " +
+  "Output written with UTF-8 BOM so Excel auto-detects encoding for Arabic. " +
+  "Pro Mode required.",
+  {
+    rows: z.array(z.array(z.string())).min(1).describe("Array of rows; rows[0] is the header row"),
+    output_path: z.string().min(1).describe("File path ending in .csv"),
+  },
+  async (a) => {
+    try {
+      const { workingDirectory } = requireProMode();
+      const safeOut = validatePath(a.output_path, workingDirectory);
+      const escape = (cell) => {
+        const s = String(cell == null ? "" : cell);
+        return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      // CRLF + UTF-8 BOM so Excel reads Arabic correctly. RFC 4180.
+      const csv = "﻿" + a.rows.map((row) => row.map(escape).join(",")).join("\r\n");
+      fs.mkdirSync(path.dirname(safeOut), { recursive: true });
+      const tmp = safeOut + ".tmp";
+      fs.writeFileSync(tmp, csv, "utf-8");
+      fs.renameSync(tmp, safeOut);
+      return { content: [{ type: "text", text: `Wrote CSV: ${path.relative(workingDirectory, safeOut)} (${a.rows.length} rows)` }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
 
 // ──────────────────────────────────────────────────────────────────────────
 // Start MCP stdio transport (Claude Code side)

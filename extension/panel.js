@@ -1328,14 +1328,23 @@ const $memoriesInput = document.getElementById("memoriesInput");
 const $tasksInput = document.getElementById("tasksInput");
 const $saveSettingsBtn = document.getElementById("saveSettingsBtn");
 const $settingsToast = document.getElementById("settingsToast");
+// Pro Mode UI handles
+const $proModeToggle = document.getElementById("proModeToggle");
+const $workingDirInput = document.getElementById("workingDirInput");
+const $proModeStatus = document.getElementById("proModeStatus");
+const $proModeBadge = document.getElementById("proModeBadge");
 
 async function openSettings() {
   // Pull the latest values at open time so edits made elsewhere (e.g. a
   // restore from the native-host backup that ran while the panel was open)
   // are reflected.
-  const { memories = "", tasks = "" } = await chrome.storage.local.get(["memories", "tasks"]);
+  const { memories = "", tasks = "", proMode = false, workingDirectory = "" } =
+    await chrome.storage.local.get(["memories", "tasks", "proMode", "workingDirectory"]);
   $memoriesInput.value = memories;
   $tasksInput.value = tasks;
+  $proModeToggle.checked = !!proMode;
+  $workingDirInput.value = workingDirectory;
+  $proModeStatus.hidden = true;
   $settingsToast.hidden = true;
   $settingsOverlay.hidden = false;
   // Focus the first textarea for keyboard-first users.
@@ -1349,16 +1358,76 @@ function closeSettings() {
 async function saveSettings() {
   const memories = $memoriesInput.value.trim();
   const tasks = $tasksInput.value.trim();
-  await chrome.storage.local.set({ memories, tasks });
+  const proMode = !!$proModeToggle.checked;
+  const workingDirectory = $workingDirInput.value.trim();
+
+  // ALWAYS save — never block on validation. The previous version
+  // refused the save when Pro Mode was on without a working directory,
+  // showed a small inline error, and returned. Users reported this as
+  // "the save button is broken" because the toast never appeared and
+  // the toggle silently bounced back to whatever was on disk before.
+  //
+  // New rule: persist what the user typed. If the configuration is
+  // incomplete (Pro Mode on but no working dir, or relative path),
+  // surface a WARNING in the status line — the actual tool calls will
+  // refuse with a clear message anyway, so we can't end up in an
+  // unsafe state. UX > silent rejections.
+  await chrome.storage.local.set({ memories, tasks, proMode, workingDirectory });
   // Mirror to native-host backup file so settings survive extension
-  // uninstall. Best-effort; a failure here is silent.
-  try { chrome.runtime.sendMessage({ type: "mirror_user_data", data: { memories, tasks } }); } catch {}
+  // uninstall AND so the MCP server can read them on each tool call.
+  // The MCP server lives in a different process and consults
+  // ~/.config/claude-companion/user-data.json on every Pro-Mode tool
+  // invocation to validate the flag — that file IS this mirror.
+  try {
+    chrome.runtime.sendMessage({
+      type: "mirror_user_data",
+      data: { memories, tasks, proMode, workingDirectory },
+    });
+  } catch {}
   // Reload the task chips row since it's driven by `tasks`.
   try { await loadTasks(); } catch {}
-  // Brief confirmation without closing — users often tweak twice.
+  // Update header badge.
+  refreshProModeBadge();
+
+  // Surface configuration warnings — non-blocking.
+  let warning = "";
+  if (proMode) {
+    if (!workingDirectory) {
+      warning = "⚠ Pro Mode فعّال لكن مجلّد العمل فارغ — لن تعمل أدوات الملفّات حتّى تحدّده.";
+    } else if (!/^([A-Za-z]:[\\\/]|\/)/.test(workingDirectory)) {
+      warning = "⚠ مسار غير مطلق — استخدم مسارَ كاملاً مثل C:\\Users\\fix\\Desktop\\my-project.";
+    } else if (/^([A-Za-z]:[\\\/]?$|\/$)/.test(workingDirectory)) {
+      warning = "⚠ جذر القرص مرفوض لأمان — اختر مجلّداً فرعياً.";
+    }
+  }
+  if (warning) {
+    $proModeStatus.textContent = warning;
+    $proModeStatus.style.color = "var(--accent)";
+    $proModeStatus.hidden = false;
+  } else if (proMode) {
+    $proModeStatus.textContent = "✓ Pro Mode فعّال — مجلّد العمل: " + workingDirectory;
+    $proModeStatus.style.color = "var(--accent-br)";
+    $proModeStatus.hidden = false;
+  } else {
+    $proModeStatus.hidden = true;
+  }
+
+  // Toast confirmation — ALWAYS shows on save, regardless of warnings.
+  // The toast confirms persistence; warnings (above) explain caveats.
   $settingsToast.hidden = false;
   setTimeout(() => { $settingsToast.hidden = true; }, 1800);
 }
+
+async function refreshProModeBadge() {
+  const { proMode = false } = await chrome.storage.local.get("proMode");
+  if ($proModeBadge) $proModeBadge.hidden = !proMode;
+}
+
+// Show / hide the badge on first load too.
+refreshProModeBadge();
+
+// Clicking the badge opens settings — fastest path to flip Pro Mode off.
+$proModeBadge?.addEventListener("click", openSettings);
 
 $settings.addEventListener("click", openSettings);
 $closeSettingsBtn?.addEventListener("click", closeSettings);

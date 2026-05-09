@@ -42,6 +42,17 @@ export interface ToolMetadata {
   readonly name: string;
   /** True when identical-input repetition is a loop, not progress. */
   readonly mutating: boolean;
+  /**
+   * Per-tool override of the loop-detector threshold. When set, the
+   * detector uses this number instead of the mutating-vs-readonly
+   * default. Use cases:
+   *   • `run_javascript`: same script with same args is LEGITIMATELY
+   *     repeated during scrape workflows (collect tweets after each
+   *     scroll). Default mutating=3 fires too eagerly.
+   *   • Could be 0 / -1 in future to fully disable loop detection
+   *     for a tool — not used yet.
+   */
+  readonly loopThreshold?: number;
   /** Coarse grouping for future UI / perms / docs. */
   readonly category: ToolCategory;
   /** One-line summary — documentation only, not consumed at runtime. */
@@ -125,9 +136,16 @@ export const TOOL_REGISTRY: Record<string, ToolMetadata> = {
   run_javascript: {
     name: "run_javascript",
     mutating: true,
+    // Pro-Mode workflows (scraping, pagination, polling) call the same
+    // script repeatedly by design — the page state changes between
+    // calls even though the script source doesn't. The default 3-repeat
+    // threshold for mutating tools fired prematurely on the legitimate
+    // "scroll → collect → scroll → collect" pattern. Bump to 12 so we
+    // still catch genuine infinite loops without crippling scrapers.
+    loopThreshold: 12,
     category: "scripting",
     description:
-      "Execute JavaScript in the page context. DISABLED at the native-host HARD_DISALLOW layer for security.",
+      "Execute JavaScript in the page context. DISABLED in default mode; unlocked when Pro Mode is on.",
   },
   screenshot: {
     name: "screenshot",
@@ -206,6 +224,15 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set(
 /** True when the tool changes state — mirrors MUTATING_TOOLS.has(name). */
 export function isMutating(name: string): boolean {
   return TOOL_REGISTRY[name]?.mutating === true;
+}
+
+/**
+ * Per-tool loop threshold override, or undefined when no override is
+ * configured. The loop detector falls back to its mutating/readonly
+ * default in the undefined case.
+ */
+export function getLoopThreshold(name: string): number | undefined {
+  return TOOL_REGISTRY[name]?.loopThreshold;
 }
 
 /** All tools matching a category. */

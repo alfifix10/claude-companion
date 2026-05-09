@@ -90,9 +90,16 @@ EXECUTION METHOD:
     is wrong.
   • For single-step tasks ("افتح يوتيوب", "لخّص هذه الصفحة"), skip the
     plan and just execute. Over-planning is noise.
-  • VERIFY after any step that changes page state: click, navigate,
-    form_input, press_key that submits. Call read_page or get_page_text
-    to confirm the expected outcome before the next step. Don't assume.
+  • VERIFY ONLY when an operation could SILENTLY FAIL:
+    - submit / form-press_key  → read_page to confirm validation passed
+    - navigate                 → read trailer for landing URL; only
+                                 read_page on suspicious mismatch
+    - click on canvas/SPA      → read_page if the click might've been
+                                 intercepted
+    Skip verification for: write_file (returns size), save_json
+    (returns path), edit_file (returns line count), run_javascript
+    (returns its own value), screenshot (returns image). Re-reading
+    after these is pure latency tax with no information gain.
   • On failure, DIAGNOSE before retrying. Re-read the page and explain
     to yourself WHY it failed (ref expired, dialog appeared, layout
     changed, navigation didn't land). Then try a DIFFERENT approach —
@@ -150,6 +157,46 @@ RULES:
   • You have a tighter budget for ACTIONS (click, type_text, press_key,
     form_input, drag, navigate, tabs_create, switch_tab, select_option,
     hover, run_javascript) — about 40 per task. Plan before you click.
+
+  SPEED DISCIPLINE (read this CAREFULLY — most user complaints are slowness):
+  Each tool call costs ~10-30 seconds of Claude API roundtrip latency,
+  not counting the tool execution itself. A 6-step task fragmented into
+  20 small tool calls takes 5+ minutes; the same task in 3 well-shaped
+  calls takes under a minute. Optimise for FEWER, BIGGER calls.
+
+  • PREFER ONE BIG SCRIPT OVER MANY SMALL ONES.
+    For scraping, scrolling, polling, batch DOM queries: write a SINGLE
+    run_javascript whose body is an async IIFE containing the entire
+    loop (scroll + wait + collect + dedupe + return). Do NOT issue
+    separate scroll calls + separate run_javascript collect calls; that
+    pattern is the #1 cause of multi-minute task times.
+
+  • SKIP VERBAL PREAMBLES. "Let me first check the working directory…",
+    "I'll now save the data…", "Let me think about this…" — these are
+    pure latency. The user can see what tool you're calling. JUST CALL
+    IT. End-of-turn text summary is welcome; mid-turn narration is not.
+
+  • DON'T RE-VERIFY OBVIOUSLY-SUCCESSFUL OPERATIONS.
+    write_file returns success → don't read_file to confirm the bytes.
+    save_json returns success → don't list_directory to confirm the
+    file exists. Re-read ONLY when an operation could have silently
+    failed: form submit (might validate-reject), navigate (might land
+    on an error page), click on a SPA control (might be intercepted).
+
+  • DON'T RE-CALL get_working_directory OR tabs_context MID-TASK.
+    The values don't change. Cache them mentally from the first call.
+
+  • PARALLELISE INDEPENDENT READS.
+    See the PARALLEL TOOL CALLS section above. Sequential reads when
+    they could run in parallel = wasted minutes on long tasks.
+
+  • DATA TRANSFORM PRINCIPLE.
+    When a tool returns a large payload (run_javascript dumping 5K
+    tweets, get_page_text on a long article): immediately route it to
+    the next persistence tool (save_json / write_file / generate_pdf).
+    Do NOT print/inspect/summarise the payload mid-task — every byte
+    you echo back into your reasoning context bloats the next API call
+    and slows everything that follows.
 
   STOP CONDITIONS (do NOT keep burning tokens):
   • If the SAME tool call fails twice with the same input, STOP retrying.
@@ -397,18 +444,21 @@ export async function handleMaxChat(messages) {
 
   // Three safety nets so a misbehaving task can't run forever:
   //   1. No-first-event (20s):  the host never emitted a single event.
-  //   2. Stuck detector (90s):  events stopped arriving mid-task.
+  //   2. Stuck detector (300s): events stopped arriving mid-task,
+  //      AND no tool is currently executing. Long-running Pro-Mode
+  //      tools (run_command for npm install, generate_pdf for big
+  //      docs, run_javascript collecting thousands of DOM nodes) can
+  //      legitimately go quiet for minutes — we suppress this guard
+  //      while toolsInFlight > 0. 300 s of pure THINKING silence is
+  //      what we want to catch, not 30 s of an honest npm install.
   //   3. Hard ceiling (20 min): absolute max regardless of activity.
-  //
-  // T_MAX was 6 min originally — killed legitimate deep-research tasks
-  // (e.g. "gather 50 films from Wikipedia + find their YouTube videos")
-  // that were still actively making progress. T_STUCK + MAX_TOTAL + the
-  // loop detectors already handle the real pathologies; 20 min gives
-  // breathing room for honest long work while keeping a ceiling for the
-  // truly pathological case that slips past the other guards.
   const T_FIRST = 20_000;
-  const T_STUCK = 90_000;
+  const T_STUCK = 300_000;
   const T_MAX = 20 * 60_000;
+  // Number of tool calls that have been issued but haven't returned yet.
+  // While > 0 the stuck detector is paused — Claude isn't thinking, the
+  // tool is running.
+  let toolsInFlight = 0;
 
   // Every timeout path MUST also kill lingering processes and arm a tool
   // blackout — otherwise a dying claude keeps emitting clicks/navigates.
@@ -428,6 +478,10 @@ export async function handleMaxChat(messages) {
   const stuckTimer = setInterval(() => {
     if (currentRunId !== id) { clearInterval(stuckTimer); return; }
     if (!firstEventSeen) return;
+    // Tool is running — Claude is waiting on it, not stuck. The tool
+    // will eventually emit its tool_result event which restarts the
+    // progress clock.
+    if (toolsInFlight > 0) return;
     if (Date.now() - lastProgressAt > T_STUCK) {
       clearInterval(stuckTimer);
       timeoutCancel(`توقّفت المهمة دون تقدّم لأكثر من ${Math.round(T_STUCK / 1000)} ثانية — أُلغيَت.`);
@@ -458,6 +512,9 @@ export async function handleMaxChat(messages) {
             const name = fullName.replace(/^mcp__claude-companion__/, "");
             toolActions.push({ tool: name, input: block.input || {} });
             broadcastToPanels({ type: "tool_start", tool: name });
+            // Pause the stuck detector while this tool is in flight.
+            // It'll resume when the matching tool_result arrives below.
+            toolsInFlight++;
             // First browser tool call — now we can honestly show the border.
             if (!borderShown) {
               borderShown = true;
@@ -498,6 +555,10 @@ export async function handleMaxChat(messages) {
       } else if (ev.type === "user" && ev.message?.content) {
         for (const block of ev.message.content) {
           if (block.type === "tool_result") {
+            // Tool finished — re-arm the stuck detector for the next
+            // round of pure thinking. Floor at 0 in case the events
+            // arrive out of order (rare but observed).
+            toolsInFlight = Math.max(0, toolsInFlight - 1);
             const content = Array.isArray(block.content)
               ? block.content.map((c) => c.text || "").join("")
               : String(block.content || "");

@@ -16,7 +16,7 @@
  * one when handleMaxChat starts a new run.
  */
 
-import { isMutating } from "./tool-registry.js";
+import { isMutating, getLoopThreshold } from "./tool-registry.js";
 
 export interface LoopDetectorConfig {
   /** Number of recent calls kept in the window. */
@@ -28,7 +28,11 @@ export interface LoopDetectorConfig {
 }
 
 export const DEFAULT_LOOP_CONFIG: LoopDetectorConfig = {
-  window: 8,
+  // Window large enough to accommodate per-tool overrides (run_javascript
+  // = 12). If the window is smaller than the highest threshold, shifting
+  // out old entries means we'd never count high enough to trip the
+  // threshold — effectively disabling loop detection for that tool.
+  window: 16,
   mutatingRepeats: 3,
   readonlyRepeats: 6,
 };
@@ -71,7 +75,13 @@ export class LoopDetector {
 
     const identical = this.recent.filter((c) => c.name === name && c.inputKey === inputKey).length;
 
-    const threshold = isMutating(name) ? this.config.mutatingRepeats : this.config.readonlyRepeats;
+    // Per-tool override > class default. The override exists for tools
+    // like run_javascript whose "same input, different output" pattern
+    // is by design (scrape → scroll → scrape again with new content).
+    const override = getLoopThreshold(name);
+    const threshold = override !== undefined
+      ? override
+      : (isMutating(name) ? this.config.mutatingRepeats : this.config.readonlyRepeats);
 
     return {
       loop: identical >= threshold,

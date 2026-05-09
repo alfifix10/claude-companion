@@ -33,6 +33,11 @@ import { randomBytes } from "node:crypto";
 const DEFAULT_TCP_PORT = 18799; // distinct from old project's 18765
 const CONFIG_DIR = path.join(os.homedir(), ".config", "claude-companion");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
+// Shared with mcp-server.js — both processes read this file as the
+// single source of truth for proMode + workingDirectory + memories +
+// tasks. Defined up here so the spawn path can read proMode without a
+// forward reference to the user-data save/load handlers below.
+const USER_DATA_PATH = path.join(CONFIG_DIR, "user-data.json");
 
 // Read config; generate a fresh shared secret on first run so native-host
 // and mcp-server can authenticate each other over the localhost TCP port.
@@ -329,18 +334,43 @@ function handleMaxQuery(msg) {
 
   if (!pureMode) {
     // Hard filter on built-in tools that could touch the filesystem or
-    // spawn shells. Respected even with --dangerously-skip-permissions.
-    const HARD_DISALLOW = [
-      "Bash", "Write", "Edit", "NotebookEdit",
-      "mcp__claude-companion__run_javascript",
-    ];
+    // spawn shells via the *built-in* Bash/Write/Edit. We use our own
+    // explicit MCP tools for those when Pro Mode is on, with proper
+    // working-directory sandboxing — better than the CLI built-ins
+    // which have no sandbox at all.
+    const HARD_DISALLOW = ["Bash", "Write", "Edit", "NotebookEdit"];
+
+    // run_javascript exposes arbitrary Runtime.evaluate on the user's
+    // active tab. In default mode this is a session-hijack vector:
+    // a hostile page could prompt-inject instructions and the tool
+    // would execute them without restriction. In Pro Mode the user
+    // has explicitly opted in to advanced capabilities (the same
+    // toggle that unlocks file/shell tools), so we trust them to
+    // also accept run_javascript's risk surface.
+    //
+    // Read Pro Mode from the same user-data.json file the MCP server
+    // reads — single source of truth, no second mirror.
+    let proMode = false;
+    try {
+      const ud = JSON.parse(fs.readFileSync(USER_DATA_PATH, "utf-8"));
+      proMode = ud?.proMode === true;
+    } catch {}
+    if (!proMode) {
+      HARD_DISALLOW.push("mcp__claude-companion__run_javascript");
+    }
+
     for (const t of HARD_DISALLOW) args.push("--disallowedTools", t);
 
     // Static system prompt — passed via --system-prompt so the portion
     // that never changes between turns hits Anthropic's server-side
     // prompt cache (5 min TTL, ~90% discount on cached tokens).
     const systemPrompt = typeof msg.system === "string" ? msg.system : "";
-    if (systemPrompt && systemPrompt.length < 8000) {
+    // 16 KB cap — well under Windows' 32 K cmd.exe arg limit (which we
+    // share with --model and a couple of --disallowedTools entries) but
+    // generous enough for a verbose rule set. Older code capped at 8 K
+    // and silently dropped the entire prompt when it grew past that —
+    // the rules vanished and Claude reverted to default behaviour.
+    if (systemPrompt && systemPrompt.length < 16_000) {
       args.push("--system-prompt", systemPrompt);
     }
   }
@@ -444,9 +474,10 @@ function cancelAllActive() {
 // User data persistence — survives extension uninstall
 //   chrome.storage.local dies with the extension, so we mirror memories/tasks
 //   to a file in the user's home. Read on startup, written on every save.
+//   USER_DATA_PATH is declared at the top of this file so the Pro-Mode
+//   detection in handleMaxQuery can read it without a forward reference.
 // ──────────────────────────────────────────────────────────────────────────
 
-const USER_DATA_PATH = path.join(CONFIG_DIR, "user-data.json");
 
 function handleLoadUserData(msg) {
   let data = null;

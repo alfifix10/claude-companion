@@ -104,8 +104,15 @@ export const TOOL_REGISTRY = {
     run_javascript: {
         name: "run_javascript",
         mutating: true,
+        // Pro-Mode workflows (scraping, pagination, polling) call the same
+        // script repeatedly by design — the page state changes between
+        // calls even though the script source doesn't. The default 3-repeat
+        // threshold for mutating tools fired prematurely on the legitimate
+        // "scroll → collect → scroll → collect" pattern. Bump to 12 so we
+        // still catch genuine infinite loops without crippling scrapers.
+        loopThreshold: 12,
         category: "scripting",
-        description: "Execute JavaScript in the page context. DISABLED at the native-host HARD_DISALLOW layer for security.",
+        description: "Execute JavaScript in the page context. DISABLED in default mode; unlocked when Pro Mode is on.",
     },
     screenshot: {
         name: "screenshot",
@@ -179,6 +186,14 @@ export const MUTATING_TOOLS = new Set(Object.values(TOOL_REGISTRY)
 /** True when the tool changes state — mirrors MUTATING_TOOLS.has(name). */
 export function isMutating(name) {
     return TOOL_REGISTRY[name]?.mutating === true;
+}
+/**
+ * Per-tool loop threshold override, or undefined when no override is
+ * configured. The loop detector falls back to its mutating/readonly
+ * default in the undefined case.
+ */
+export function getLoopThreshold(name) {
+    return TOOL_REGISTRY[name]?.loopThreshold;
 }
 /** All tools matching a category. */
 export function toolsByCategory(category) {

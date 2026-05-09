@@ -20,6 +20,12 @@
       <div class="hdr-brand">
         <img src="icons/icon48.png" alt="" class="hdr-icon">
         <span class="hdr-name">Claude Companion</span>
+        <!-- Pro Mode indicator. Shown only when proMode flag is on in
+             chrome.storage. Click jumps straight to settings. The colour
+             is intentionally LOUD so the user can never lose track of
+             whether file/shell tools are currently exposed. -->
+        <button id="proModeBadge" class="pro-badge" hidden
+                title="Pro Mode فعّال — اضغط للإعدادات" type="button">🔓 Pro</button>
       </div>
       <div class="hdr-actions">
         <button id="newChatBtn" class="ibtn" title="محادثة جديدة" aria-label="محادثة جديدة">
@@ -153,6 +159,31 @@
         <textarea id="tasksInput" class="settings-textarea" rows="6"
           placeholder="صباح: افتح الإيميل ولخّص&#10;&#10;أخبار: افتح سبق ولخّص الأهم&#10;&#10;(افصل بين المهام بسطر فارغ)"></textarea>
         <p class="settings-hint">أزرار ⚡ في الشريط الجانبي.</p>
+
+        <!-- Pro Mode section. Off by default. Unlocks filesystem read-only
+             tools (this phase) and shell + write tools later. The warning
+             text matters: a user who turns this on without understanding
+             that web pages can prompt-inject the AI is the threat model
+             we're guarding against. -->
+        <div class="pro-mode-section" style="margin-top:22px; padding-top:16px; border-top:1px solid var(--border);">
+          <label class="settings-label" style="display:flex; align-items:center; gap:10px; cursor:pointer;">
+            <input type="checkbox" id="proModeToggle" style="width:16px; height:16px;">
+            <span>🔓 Pro Mode</span>
+          </label>
+          <p class="settings-hint" style="margin-top:6px;">
+            يُفعّل أدوات قراءة الملفّات داخل مجلّد العمل المُحدَّد. مغلق افتراضياً.
+            <span style="color: var(--accent);">⚠ افتح فقط إذا كنت تثق بالمواقع التي تتصفّحها.</span>
+          </p>
+
+          <label class="settings-label" for="workingDirInput" style="margin-top:12px;">📁 مجلّد العمل</label>
+          <input type="text" id="workingDirInput" class="settings-textarea" style="height:auto; padding:8px 12px;"
+            placeholder="C:\Users\fix\Desktop\my-project" autocomplete="off" spellcheck="false">
+          <p class="settings-hint">
+            كلّ عمليّات قراءة الملفّات محصورة في هذا المجلّد وفروعه.
+            استخدم مجلّداً محدّداً (مشروعاً) — ليس <code>~</code> أو <code>C:\</code> مباشرة.
+          </p>
+          <p id="proModeStatus" class="settings-hint" style="margin-top:8px;" hidden></p>
+        </div>
       </div>
 
       <div class="settings-footer">

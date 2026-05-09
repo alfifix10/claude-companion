@@ -83,12 +83,18 @@ export function mirrorToNative(data) {
  */
 export async function restoreFromNativeIfEmpty() {
   try {
-    const { memories, tasks } = await chrome.storage.local.get(["memories", "tasks"]);
+    const { memories, tasks, proMode, workingDirectory } =
+      await chrome.storage.local.get(["memories", "tasks", "proMode", "workingDirectory"]);
 
-    if (memories || tasks) {
+    if (memories || tasks || typeof proMode === "boolean" || workingDirectory) {
       // Refresh the native backup so it reflects what's currently in use.
       // Fire-and-forget — failures are tolerable.
-      mirrorToNative({ memories: memories || "", tasks: tasks || "" });
+      mirrorToNative({
+        memories: memories || "",
+        tasks: tasks || "",
+        proMode: !!proMode,
+        workingDirectory: workingDirectory || "",
+      });
       return;
     }
 
@@ -99,6 +105,10 @@ export async function restoreFromNativeIfEmpty() {
     const patch = {};
     if (typeof native.memories === "string" && native.memories) patch.memories = native.memories;
     if (typeof native.tasks === "string" && native.tasks) patch.tasks = native.tasks;
+    if (typeof native.proMode === "boolean") patch.proMode = native.proMode;
+    if (typeof native.workingDirectory === "string" && native.workingDirectory) {
+      patch.workingDirectory = native.workingDirectory;
+    }
     if (Object.keys(patch).length) {
       await chrome.storage.local.set(patch);
       console.log("[user-data] restored from native backup:", Object.keys(patch).join(", "));
