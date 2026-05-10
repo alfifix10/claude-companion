@@ -655,6 +655,19 @@ server.tool("read_performance",
   {},
   async (a) => ({ content: [{ type: "text", text: String(await request("read_performance", a)) }] }));
 
+server.tool("clear_injected_scripts",
+  "Recovery tool — strip auto-loop scripts the AGENT injected into the active tab and clear all running intervals/timeouts. " +
+  "Use when a previous session left a window.__autoLoop / TK4 / autoScroll running and the page keeps doing things on its own. " +
+  "Default pattern matches common auto-loop globals (`__*`, `TK\\d+`, `autoLoop*`, `autoScroll*`, `autoDrain*`). " +
+  "Pass a custom regex to widen / narrow the match. Optionally reload the page to flush remaining closures.",
+  {
+    pattern: z.string().optional()
+      .describe("Custom regex (case-insensitive, JS flavour) to match window-property names. Omit for the safe default."),
+    reload: z.boolean().optional()
+      .describe("After clearing, reload the page to nuke any closures the script holds onto. Default false."),
+  },
+  async (a) => ({ content: [{ type: "text", text: String(await request("clear_injected_scripts", a)) }] }));
+
 // ──────────────────────────────────────────────────────────────────────────
 // Pro Mode — Filesystem (read-only, Layer 1 / Phase 2)
 //

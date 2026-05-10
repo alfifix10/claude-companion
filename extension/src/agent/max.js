@@ -442,6 +442,17 @@ export async function handleMaxChat(messages) {
   const MAX_TOTAL = 150;       // absolute ceiling — reads + actions combined
   const MAX_CONSECUTIVE_ERRORS = 6;
 
+  // Transient-error retry. Real-world long sessions hit network
+  // hiccups (ENOTFOUND, gateway timeouts, brief 5xx). Without auto-
+  // retry the user sees a hard error mid-task and has to type "اكمل"
+  // — exactly what happened during the TikTok-scraper session that
+  // motivated this. Bounded retries on KNOWN-transient patterns
+  // only, never on auth/4xx. Auth errors mean credentials, retrying
+  // can lock accounts.
+  const TRANSIENT_RE = /ENOTFOUND|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|API Error: 5\d\d|503|504|429|Bad Gateway|Service Unavailable|Gateway Timeout|temporarily|Unable to connect/i;
+  const MAX_TRANSIENT_RETRIES = 2;
+  let transientRetryCount = 0;
+
   // Three safety nets so a misbehaving task can't run forever:
   //   1. No-first-event (20s):  the host never emitted a single event.
   //   2. Stuck detector (300s): events stopped arriving mid-task,
@@ -451,10 +462,15 @@ export async function handleMaxChat(messages) {
   //      legitimately go quiet for minutes — we suppress this guard
   //      while toolsInFlight > 0. 300 s of pure THINKING silence is
   //      what we want to catch, not 30 s of an honest npm install.
-  //   3. Hard ceiling (20 min): absolute max regardless of activity.
+  //   3. Hard ceiling (60 min): absolute max regardless of activity.
+  //      Raised from 20 min after observing real-world long-form
+  //      tasks (multi-page scrapers, batch PDF generation) that
+  //      legitimately need 30-50 minutes. Stuck-detector still
+  //      guards against runaway loops; this is just a generous
+  //      backstop.
   const T_FIRST = 20_000;
   const T_STUCK = 300_000;
-  const T_MAX = 20 * 60_000;
+  const T_MAX = 60 * 60_000;
   // Number of tool calls that have been issued but haven't returned yet.
   // While > 0 the stuck detector is paused — Claude isn't thinking, the
   // tool is running.
@@ -467,6 +483,41 @@ export async function handleMaxChat(messages) {
     cancelAllHost();
     rejectToolsFor(10_000);
     finishTask({ type: "error", text: reason });
+  }
+
+  // Transient-retry helper. Returns true if a retry was scheduled
+  // (caller should NOT call finishTask), false if the error is fatal
+  // (caller proceeds with finishTask). Side effects: re-arms
+  // firstEventSeen + lastProgressAt, schedules sendMaxQuery after
+  // backoff, posts a status note to the panel so the user sees
+  // what's happening.
+  function tryTransientRetry(errorText) {
+    if (currentRunId !== id) return false; // stale
+    if (transientRetryCount >= MAX_TRANSIENT_RETRIES) return false;
+    if (!TRANSIENT_RE.test(errorText || "")) return false;
+    transientRetryCount++;
+    const attempt = transientRetryCount;
+    // Exponential-ish backoff: 2s then 6s. Short enough to feel
+    // automatic; long enough to let a transient blip clear.
+    const delay = attempt === 1 ? 2_000 : 6_000;
+    const shortErr = String(errorText || "").trim().split("\n")[0].slice(0, 100);
+    broadcastToPanels({
+      type: "text_delta",
+      text: `\n\n⏳ خطأ شبكيّ مؤقّت (${attempt}/${MAX_TRANSIENT_RETRIES}): ${shortErr}\nأُعيد المحاولة بعد ${delay / 1000} ثوان…\n\n`,
+    });
+    setTimeout(() => {
+      if (currentRunId !== id) return;
+      // Re-arm "first event" so a follow-up CLI that hangs gets
+      // caught by T_FIRST again. lastProgressAt resets too — the
+      // stuck detector starts counting fresh from this retry.
+      firstEventSeen = false;
+      lastProgressAt = Date.now();
+      const ok = sendMaxQuery(id, userPrompt, { system: STATIC_SYSTEM });
+      if (!ok) {
+        finishTask({ type: "error", text: "فشلت إعادة المحاولة — تأكّد من اتصال الإضافة بالمضيف." });
+      }
+    }, delay);
+    return true;
   }
 
   const timeoutTimer = setTimeout(() => {
@@ -613,12 +664,23 @@ export async function handleMaxChat(messages) {
       broadcastToPanels({ type: "text_delta", text: msg.text });
     } else if (msg.type === "max_done") {
       if (currentRunId === id) {
+        // CLI exited non-zero with a transient-network stderr → retry
+        // before giving up. exitCode + stderr come straight from
+        // native-host (proc.on("close")), so we have ground truth.
+        if (msg.exitCode && msg.exitCode !== 0
+            && tryTransientRetry(msg.stderr || `claude CLI exit ${msg.exitCode}`)) {
+          return;
+        }
         const emptyReplyMsg = toolActions.length
           ? "انتهت الأدوات لكن النموذج لم يكتب نصّاً. أعد الطلب بصياغة أوضح."
           : "لم يُرجع النموذج نصّاً. أعد المحاولة.";
         finishTask({ type: "done", text: assistantText || emptyReplyMsg, toolActions });
       }
     } else if (msg.type === "max_error") {
+      // Network-level error from spawn/stdin/etc. (NOT the Claude API
+      // 4xx — those come through max_done with non-zero exit). Retry
+      // when the message looks transient.
+      if (tryTransientRetry(msg.error)) return;
       const friendly = msg.error === "NO_CLAUDE_CLI"
         ? "Claude CLI غير مُثبَّت. افتح دليل الإعداد."
         : msg.error === "EMPTY_PROMPT"

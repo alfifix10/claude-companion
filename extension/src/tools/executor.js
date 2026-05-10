@@ -951,6 +951,75 @@ export async function executeTool(name, input, tabId) {
       return JSON.stringify(v, null, 2);
     }
 
+    case "clear_injected_scripts": {
+      // Recovery from "agent left auto-scrollers running" scenarios.
+      // The script mass-clears intervals + timeouts in a wide id range
+      // (browsers assign sequential numeric ids), then deletes window
+      // properties matching common auto-loop names OR a custom pattern.
+      // Optional page reload nukes any closures we couldn't reach.
+      await ensureAttached(tabId);
+      const customPattern = typeof input.pattern === "string" && input.pattern
+        ? input.pattern
+        : "";
+      const reload = input.reload === true;
+      // Default pattern catches the agent's typical injected globals:
+      //   • TK1, TK4, TK4_2 (TikTok scrapers)
+      //   • __autoLoop, __autoStop (control flags)
+      //   • __tk_v3_snapshot (data caches)
+      //   • Any name starting with __ or autoLoop / autoScroll
+      const patternLiteral = customPattern
+        ? JSON.stringify(customPattern)
+        : `"^(?:__|TK\\\\d+|tk\\\\d+|autoLoop|autoScroll|autoDrain)"`;
+      const expr = `(() => {
+        const removed = [];
+        const errs = [];
+        let intervalsKilled = 0;
+
+        // 1. Clear interval/timeout ids in a wide range. Browsers
+        //    assign sequential 32-bit ints; 100k covers any realistic
+        //    session. Ignored ids no-op silently.
+        const MAX = 100000;
+        for (let i = 1; i < MAX; i++) {
+          try { clearInterval(i); } catch {}
+          try { clearTimeout(i); } catch {}
+        }
+        intervalsKilled = MAX;
+
+        // 2. Delete matching window properties.
+        let re;
+        try { re = new RegExp(${patternLiteral}, 'i'); }
+        catch (e) { errs.push('bad pattern: ' + e.message); re = null; }
+        if (re) {
+          for (const key of Object.keys(window)) {
+            if (re.test(key)) {
+              try {
+                delete window[key];
+                removed.push(key);
+              } catch (e) {
+                errs.push(key + ': ' + e.message);
+              }
+            }
+          }
+        }
+
+        return { removed, removedCount: removed.length, intervalsCleared: intervalsKilled, errors: errs };
+      })()`;
+      const r = await cdp(tabId, "Runtime.evaluate", { expression: expr, returnByValue: true });
+      const v = r?.result?.value || { removed: [], removedCount: 0, intervalsCleared: 0, errors: [] };
+      let summary = `Cleared ${v.intervalsCleared} interval/timeout ids, removed ${v.removedCount} window propert${v.removedCount === 1 ? "y" : "ies"}.`;
+      if (v.removed.length) summary += `\nRemoved: ${v.removed.join(", ")}`;
+      if (v.errors?.length) summary += `\nErrors: ${v.errors.join("; ")}`;
+      if (reload) {
+        try {
+          await cdp(tabId, "Page.reload", { ignoreCache: false });
+          summary += "\nPage reloaded — any remaining closures are now gone.";
+        } catch (e) {
+          summary += `\nReload failed: ${e.message}`;
+        }
+      }
+      return summary;
+    }
+
     case "read_performance": {
       await ensureAttached(tabId);
       const expr = `(() => {

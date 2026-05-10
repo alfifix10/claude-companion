@@ -216,6 +216,15 @@ export const TOOL_REGISTRY = {
         category: "devtools",
         description: "Read the active tab's performance timing — navigation, paint, memory.",
     },
+    clear_injected_scripts: {
+        name: "clear_injected_scripts",
+        // Mutating: it removes window properties + clears intervals/
+        // timeouts. Loop detector should treat it as an action so a
+        // misbehaving agent that calls it repeatedly gets caught.
+        mutating: true,
+        category: "devtools",
+        description: "Recovery tool. Strip auto-loop scripts the agent injected into a tab (window.__autoX, intervals, timeouts).",
+    },
 };
 /** Alphabetically-sorted list of every tool name. */
 export function getAllToolNames() {
