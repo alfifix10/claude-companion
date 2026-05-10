@@ -77,15 +77,36 @@ Side Panel (UI) ─ Service Worker ─ Native Host (Node) ─┬── claude CL
 
 ## الميزات الأساسية
 1. **Side panel UI** — chat بسيط
-2. **18 أداة متصفح** عبر MCP
-3. **Local Arabic shortcuts** — "اضغط على X"، "افتح يوتيوب"، إلخ (مجانية بدون AI)
-4. **Markdown renderer** للردود (bold, headings, tables, code)
-5. **Voice input** عربي (Web Speech API)
-6. **مهام مكررة** — chips ⚡ في الشريط الجانبي (من settings)
-7. **ذاكرة مخصّصة** — نص يُرسَل مع كل طلب
-8. **Orange automation border** — يظهر أثناء الأتمتة
-9. **Click ripple** — موجة برتقالية عند النقر
-10. **Copy buttons** — على كل رسالة
+2. **57 أداة MCP** موزّعة على 10 فئات (تفاصيل تحت)
+3. **Pro Mode** — filesystem + shell + PDF/JSON/CSV (gated خلف toggle)
+4. **Local Arabic shortcuts** — "اضغط على X"، "افتح يوتيوب"، إلخ (مجانية بدون AI)
+5. **Markdown renderer** للردود (bold, headings, tables, code, code blocks)
+6. **Voice input** عربي (Web Speech API)
+7. **مهام مكررة** — chips ⚡ في الشريط الجانبي (من settings)
+8. **ذاكرة مخصّصة (memories)** — نص يُرسَل مع كل طلب
+9. **Project memory** — CLAUDE.md + _STATE.md من working dir تُحقَن في كلّ turn
+10. **Smart conversation history** — first-2 + last-12 + compaction nudge (لا يفقد goal الجلسات الطويلة)
+11. **Auto-retry** على transient API errors (ENOTFOUND, 5xx, 429، إلخ)
+12. **Orange automation border** — يظهر أثناء الأتمتة
+13. **Image Q&A pure mode** — مسار منفصل بلا system prompt لمنع الهلوسة
+14. **Multi-browser session routing** — Brave + Chrome + Edge بدون تداخل
+15. **Copy buttons + Edit-and-resend** — على كل رسالة
+
+## الـ 57 أداة بالفئات
+
+| الفئة | العدد | أمثلة |
+|---|:--:|---|
+| **Browser automation** | 22 | navigate, read_page, click, type_text, screenshot, run_javascript, ... |
+| **DevTools** (read-only) | 7 | read_console_messages, read_network_requests, read_page_errors, inspect_element, read_storage (Pro), read_performance, clear_injected_scripts |
+| **Filesystem** (Pro) | 8 | read_file, write_file, edit_file, list_directory, find_files, ... |
+| **Shell** (Pro) | 1 | run_command (allowlist + denylist + shell:false) |
+| **Documents** (Pro) | 3 | generate_pdf, save_json, save_csv |
+| **Git structured** (Pro) | 5 | git_status, git_diff, git_log, git_blame, git_branches |
+| **Code search** (Pro) | 4 | grep_files, find_symbol, find_references, code_outline |
+| **HTTP** (Pro) | 2 | http_fetch, http_get_json |
+| **Code Quality** (Pro) | 3 | lint_file, format_file, type_check |
+| **SQLite** (Pro) | 2 | sqlite_query, sqlite_schema (read-only enforced) |
+| **Project memory** (Pro) | 1 | update_project_state |
 
 ## الدروس البرمجية الحرجة (لا تُكرَّر)
 
@@ -120,11 +141,32 @@ Side Panel (UI) ─ Service Worker ─ Native Host (Node) ─┬── claude CL
 4. `setBorder(false)` في cancelActiveMaxTask
 5. UI guards: `if (!isLoading) return` في onBgMessage
 
-### Task timeouts
+### Task timeouts (محدَّثة بعد جلسات طويلة فعليّة)
 - **No-first-event**: 20s
-- **Stuck (no progress)**: 90s
-- **Hard ceiling**: 6 min
+- **Stuck (no progress)**: 300s (5min) — مُنع التشغيل أثناء `toolsInFlight > 0`
+- **Hard ceiling**: 60min — رُفعت من 20min بعد scrapers طويلة كانت تُقطع
+- **Auto-retry**: ENOTFOUND/ECONNRESET/ETIMEDOUT/5xx/429 → ×2 مع backoff (2s → 6s)
 - **finishTask idempotent**
+
+### Smart conversation history (داخل الجلسة)
+- **First 2 messages always kept** — الـ goal-setting في أوّل turn
+- **Last 12 messages always kept** — الـ flow الحاليّ
+- **بينهما marker** — `[ELIDED: N earlier turns folded — see _STATE.md]`
+- **Compaction nudge** عند 30+ message: نظام يقترح `update_project_state`
+- **Token cost**: ثابت ~6.6K input/turn حتّى لمحادثات 200 turn (لو raised النافذة، 18K+ في 50 turn)
+
+### Project memory (عبر الجلسات)
+- **`<workingDir>/CLAUDE.md`** — معماريّة المشروع (≤8KB) — يُحقَن كلّ turn
+- **`<workingDir>/_STATE.md`** — حالة العمل (≤4KB) — الـ agent يحدّثها بنفسه
+- **يدخل dynamic user message**, ليس static system → لا يكسر prompt cache
+- **Pro Mode + workingDirectory مطلوبان** — graceful no-op خلاف ذلك
+
+### Pro Mode (Layer 1+2+3+4+5)
+- **Toggle في settings** — مع working directory مُحدَّد
+- **Filesystem** sandboxed داخل working dir + symlink-escape check
+- **Shell** allowlist (git/npm/python/node/tsc/...) + denylist (rm -rf/sudo/chmod 777/dd if=...)
+- **shell:false** + args كـ array → لا shell injection
+- **run_javascript** disabled في default mode (Pro Mode فقط — RCE surface)
 
 ### UI design
 - **لا header مكرر** — الاسم يُعرض مرة واحدة فقط
@@ -151,6 +193,10 @@ Side Panel (UI) ─ Service Worker ─ Native Host (Node) ─┬── claude CL
 - الإضافة لا تعمل إذا Brave مغلق كلياً
 - Voice input يحتاج إنترنت (Web Speech API)
 - Markdown renderer مكتوب يدوياً (لا dependencies)
+- panel.js عند 2,278 سطر — monolith، يحتاج تقسيم لو انضمّ مهندس ثانٍ
+- Skills MVP rolled back (composer.ts/interview.js orphan files موجودة لكن غير مستخدمة)
+- لا scheduling (`chrome.alarms` غير مُستعمَل) — خيار قادم
+- لا token-usage indicator في الـ panel — المستخدم لا يعرف متى يبدأ chat جديد
 
 ## الهيكل النهائي
 
@@ -185,4 +231,4 @@ claude-companion/
 - Extended cache TTL لو Anthropic دعمه
 
 ---
-آخر تحديث: 2026-04-18
+آخر تحديث: 2026-05-09 (57 tools + project memory + smart history + auto-retry + T_MAX 60min)

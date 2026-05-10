@@ -94,10 +94,18 @@
         </button>
       </div>
 
-    <!-- Typing indicator (no stop button — send button doubles as stop) -->
+    <!-- Typing indicator + live progress stats. The first row is the
+         classic dots + "what's happening" label. The second row, hidden
+         until the first tool call fires, surfaces real progress: total
+         action count, last tool, elapsed time. Lets the user see the
+         agent IS working — not just sitting at "Claude يفكّر..." for
+         minutes during long scrapes. -->
     <div class="typing" id="typing" style="display:none;">
-      <span></span><span></span><span></span>
-      <span class="typing-text" id="typingText">يفكّر...</span>
+      <div class="typing-main">
+        <span></span><span></span><span></span>
+        <span class="typing-text" id="typingText">يفكّر...</span>
+      </div>
+      <div class="typing-stats" id="typingStats" hidden></div>
     </div>
 
     <!-- Pasted-image previews (shown only when user has pasted images) -->

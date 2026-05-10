@@ -863,3 +863,28 @@ textarea::-webkit-scrollbar-corner { background: transparent; }
   0%, 100% { opacity: 0.6; transform: scale(1); }
   50%      { opacity: 1.0; transform: scale(1.05); }
 }
+
+/* ─── Live progress stats under typing indicator ─────────────────────
+   Surfaces "the agent is doing real work" during long sessions. Hidden
+   until the first tool call fires; updated on every tool_start AND
+   once per second while a task is active. Format: muted single line,
+   small font, never pushes the conversation around. */
+.typing-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.typing-stats {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text2);
+  opacity: 0.85;
+  letter-spacing: 0.2px;
+  font-variant-numeric: tabular-nums;  /* counter doesn't jiggle as digits change */
+}
+.typing-stats[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  /* Stats line never animates anyway — kept here so future changes
+     stay reduced-motion-friendly. */
+}

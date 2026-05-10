@@ -126,13 +126,16 @@ function hardStop(reason = "أوقفت العملية.") {
   if (bgPort) { try { bgPort.postMessage({ type: "chat_stop" }); } catch {} }
   // 3. Close the streaming bubble cleanly
   streamingBubble = null;
-  // 4. Reset all UI state
+  // 4. Tear down the live progress display
+  endTaskStats();
+  // 5. Reset all UI state
   setLoading(false);
   stopBlackoutUntil = Date.now() + 3000;
   if (reason) appendError(reason);
 }
 
 const TOOL_LABELS = {
+  // Browser core
   read_page: "قراءة العناصر", get_page_text: "استخراج النص",
   find: "بحث", click: "نقر", type_text: "كتابة",
   press_key: "ضغط مفتاح", form_input: "ملء حقل",
@@ -140,13 +143,116 @@ const TOOL_LABELS = {
   scroll: "تمرير", navigate: "انتقال",
   hover: "تمرير الماوس", wait_for: "انتظار",
   select_option: "اختيار", list_tabs: "تبويبات",
-  switch_tab: "تبديل تبويب", tabs_create: "تبويب جديد", tabs_context: "معلومات التبويب",
+  switch_tab: "تبديل تبويب", tabs_create: "تبويب جديد",
+  tabs_context: "معلومات التبويب", tabs_overview: "عرض كلّ التبويبات",
+  tabs_close: "إغلاق تبويب", drag: "سحب", file_upload: "رفع ملف",
+  // DevTools
+  read_console_messages: "قراءة Console",
+  read_network_requests: "قراءة Network",
+  read_page_errors: "قراءة الأخطاء",
+  inspect_element: "فحص عنصر",
+  read_storage: "قراءة Storage",
+  read_performance: "قراءة Performance",
+  clear_injected_scripts: "تنظيف السكربتات",
+  // Pro Mode — Filesystem
+  read_file: "قراءة ملف", write_file: "كتابة ملف", edit_file: "تعديل ملف",
+  delete_file: "حذف ملف", list_directory: "قائمة المجلّد",
+  find_files: "بحث عن ملفات", create_directory: "إنشاء مجلّد",
+  get_working_directory: "مجلّد العمل",
+  // Pro Mode — Shell + Docs
+  run_command: "تنفيذ أمر",
+  generate_pdf: "توليد PDF", save_json: "حفظ JSON", save_csv: "حفظ CSV",
+  // Pro Mode — Git
+  git_status: "حالة Git", git_diff: "Git diff", git_log: "Git log",
+  git_blame: "Git blame", git_branches: "فروع Git",
+  // Pro Mode — Code search
+  grep_files: "بحث محتوى", find_symbol: "بحث رمز",
+  find_references: "مراجع رمز", code_outline: "خريطة كود",
+  // Pro Mode — HTTP
+  http_fetch: "طلب HTTP", http_get_json: "GET JSON",
+  // Pro Mode — Code Quality
+  lint_file: "Lint", format_file: "Format", type_check: "فحص أنواع",
+  // Pro Mode — SQLite
+  sqlite_query: "استعلام SQLite", sqlite_schema: "Schema SQLite",
+  // Pro Mode — Project memory
+  update_project_state: "حفظ حالة المشروع",
 };
 
 let conversation = [];
 const MAX_HISTORY = 50;
 let isLoading = false;
 let streamingBubble = null;
+
+// ─────────────────────────────────────────────────────────────────────
+// Live progress stats — surfaces real work during long agent runs.
+//
+// Without this, a 10-minute scrape session looked identical to a 5-
+// second answer: just "Claude يفكّر...". The user lost trust ("is it
+// stuck?", "did it crash?"). The stats line under the typing dots
+// shows action count + last tool + elapsed seconds, updating once a
+// second AND on every tool_start.
+//
+// Lifecycle:
+//   • startTaskStats()    — called from send() AND from onBgMessage's
+//                            resume path (panel reopened mid-task)
+//   • bumpTaskStats(tool) — called from onBgMessage("tool_start")
+//   • endTaskStats()      — called from done / error / hardStop
+//
+// Reset between tasks, hidden when not loading.
+// ─────────────────────────────────────────────────────────────────────
+const $typingStats = document.getElementById("typingStats");
+let taskStats = null;
+
+function startTaskStats() {
+  // Cancel any leftover timer first — defensive against rapid
+  // send → cancel → send sequences where end didn't fire cleanly.
+  if (taskStats?.tickTimer) clearInterval(taskStats.tickTimer);
+  taskStats = {
+    startedAt: Date.now(),
+    actionCount: 0,
+    lastTool: null,
+    tickTimer: setInterval(renderTaskStats, 1000),
+  };
+  renderTaskStats();
+}
+
+function bumpTaskStats(tool) {
+  if (!taskStats) return;
+  taskStats.actionCount++;
+  if (typeof tool === "string" && tool) taskStats.lastTool = tool;
+  renderTaskStats();
+}
+
+function endTaskStats() {
+  if (taskStats?.tickTimer) clearInterval(taskStats.tickTimer);
+  taskStats = null;
+  if ($typingStats) {
+    $typingStats.textContent = "";
+    $typingStats.hidden = true;
+  }
+}
+
+function renderTaskStats() {
+  if (!$typingStats || !taskStats) return;
+  const elapsedMs = Date.now() - taskStats.startedAt;
+  const sec = Math.floor(elapsedMs / 1000);
+  const elapsedStr = sec < 60
+    ? `${sec}ث`
+    : `${Math.floor(sec / 60)}د ${sec % 60}ث`;
+  // Don't show the stats line until SOMETHING has happened — pure
+  // thinking turns ("ما هو 2+2؟") shouldn't surface a stats row at
+  // all. Once an action lands, the line stays for the rest of the run.
+  if (taskStats.actionCount === 0 && sec < 10) {
+    $typingStats.hidden = true;
+    return;
+  }
+  const toolLabel = taskStats.lastTool
+    ? `📋 ${TOOL_LABELS[taskStats.lastTool] || taskStats.lastTool}`
+    : "📋 يحضّر…";
+  const countPart = taskStats.actionCount > 0 ? ` • ${taskStats.actionCount} إجراء` : "";
+  $typingStats.textContent = `${toolLabel}${countPart} • ${elapsedStr}`;
+  $typingStats.hidden = false;
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // Background port (long-lived)
@@ -182,6 +288,10 @@ function onBgMessage(msg) {
     setLoading(true);
     removeWelcome();
     setTyping(true, "Claude يفكّر...");
+    // Start the stats line fresh on resume — the original task's
+    // counter is on the bg side and not synced; better to count
+    // from now than show a misleading number.
+    if (!taskStats) startTaskStats();
   }
   // After the resume path, idle + non-resume types still fall through
   // to the switch so `done` / `error` / `no_task` land correctly even
@@ -202,6 +312,7 @@ function onBgMessage(msg) {
       break;
     case "tool_start":
       setTyping(true, `جارٍ: ${TOOL_LABELS[msg.tool] || msg.tool}...`);
+      bumpTaskStats(msg.tool);
       break;
     case "provider_info":
       // We don't display this anywhere — status header was removed.
@@ -217,6 +328,7 @@ function onBgMessage(msg) {
       if (!bubble && text) appendAssistantBubble(text);
       if (msg.toolActions?.length) appendToolActions(msg.toolActions);
       if (text) conversation.push({ role: "assistant", content: text });
+      endTaskStats();
       setLoading(false);
       saveHistory();
       // If the user had scrolled up to read something else while the
@@ -230,6 +342,7 @@ function onBgMessage(msg) {
       // Without this, a retry after error keeps writing into the old bubble.
       if (streamingBubble) streamingBubble = null;
       appendError(msg.text || "خطأ غير معروف");
+      endTaskStats();
       setLoading(false);
       break;
     case "no_task":
@@ -985,6 +1098,7 @@ async function send() {
   setLoading(true);
   setTyping(true, "Claude يفكّر...");
   streamingBubble = null;
+  startTaskStats();
 
   if (!bgPort) connectBg();
   // Diagnostic: log image count + payload size at dispatch time.
