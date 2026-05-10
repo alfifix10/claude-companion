@@ -301,6 +301,74 @@ function handleMaxQuery(msg) {
     return;
   }
 
+  // Project memory — auto-load CLAUDE.md + _STATE.md from the Pro
+  // Mode working directory and prepend their contents to the user
+  // prompt. Why this exists: the model has no memory across chat
+  // sessions; a fresh chat starts from zero. By keeping a CLAUDE.md
+  // (stable docs: architecture, conventions, lessons) and a _STATE.md
+  // (working memory: what's done, what's next) in the project
+  // directory, every session begins with the relevant context loaded
+  // automatically. The `update_project_state` MCP tool lets Claude
+  // refresh _STATE.md at the end of a session.
+  //
+  // Design notes:
+  //   • Goes into the DYNAMIC user message, NOT the static system
+  //     prompt. _STATE.md changes turn-by-turn, so caching it as
+  //     "static" would invalidate the prompt cache constantly. Putting
+  //     it in user text keeps the static block (rules, aliases) cached.
+  //   • Pro Mode + workingDirectory required. Non-Pro users see no
+  //     change in behaviour.
+  //   • Caps: CLAUDE.md ≤ 8 KB, _STATE.md ≤ 4 KB. Beyond that the
+  //     project-memory cost outweighs the value; the user gets a
+  //     truncation note in the same block so the model knows.
+  //   • Image-Q&A (pureMode) skips this — context bleed is exactly
+  //     what we're trying to avoid there.
+  let projectContextBlock = "";
+  if (msg.pureMode !== true) {
+    try {
+      const ud = JSON.parse(fs.readFileSync(USER_DATA_PATH, "utf-8"));
+      if (ud?.proMode === true && typeof ud?.workingDirectory === "string" && ud.workingDirectory) {
+        const wd = path.resolve(ud.workingDirectory);
+        const wdName = path.basename(wd) || wd;
+        const parts = [];
+        const tryRead = (filename, capBytes) => {
+          const p = path.join(wd, filename);
+          try {
+            const stat = fs.statSync(p);
+            if (!stat.isFile()) return null;
+            // Don't read absurdly-large files — likely not a memory file.
+            if (stat.size > 64 * 1024) return null;
+            const raw = fs.readFileSync(p, "utf-8");
+            const truncated = raw.length > capBytes;
+            const text = truncated ? raw.slice(0, capBytes) : raw;
+            return { text, truncated };
+          } catch {
+            return null;
+          }
+        };
+        const claude = tryRead("CLAUDE.md", 8 * 1024);
+        if (claude) {
+          parts.push(`PROJECT CONTEXT (${wdName}/CLAUDE.md):\n${claude.text}` +
+            (claude.truncated ? "\n…(truncated at 8 KB)" : ""));
+        }
+        const state = tryRead("_STATE.md", 4 * 1024);
+        if (state) {
+          parts.push(`PROJECT STATE (${wdName}/_STATE.md — kept fresh by update_project_state tool):\n${state.text}` +
+            (state.truncated ? "\n…(truncated at 4 KB)" : ""));
+        }
+        if (parts.length > 0) {
+          projectContextBlock = parts.join("\n\n") + "\n\n──────────────\n\n";
+        }
+      }
+    } catch {
+      // Missing user-data, malformed JSON, etc. — degrade silently.
+    }
+  }
+  // The model sees this concatenation as one user message. The "──"
+  // separator above is a strong visual cue between project context
+  // and the user's actual turn-of-conversation prompt.
+  const finalPrompt = projectContextBlock + prompt;
+
   // pureMode = "this is a vanilla image-Q&A turn, strip everything".
   // The browser-agent flow needs tools, a system prompt, and the rest of
   // the harness. Image questions ("what's in this picture?") need NONE
@@ -407,9 +475,13 @@ function handleMaxQuery(msg) {
     streamClaude(msg.id, proc);
     try {
       if (images.length > 0) {
-        // stream-json user message with text + image content blocks
+        // stream-json user message with text + image content blocks.
+        // pureMode (image Q&A) intentionally skipped the project
+        // context block above, so finalPrompt === prompt here for
+        // image turns. For non-pure image turns (rare), the project
+        // context rides along.
         const content = [];
-        if (prompt) content.push({ type: "text", text: prompt });
+        if (finalPrompt) content.push({ type: "text", text: finalPrompt });
         for (const img of images) {
           content.push({
             type: "image",
@@ -427,7 +499,7 @@ function handleMaxQuery(msg) {
         proc.stdin.write(JSON.stringify(userMsg) + "\n");
         proc.stdin.end();
       } else {
-        proc.stdin.write(prompt);
+        proc.stdin.write(finalPrompt);
         proc.stdin.end();
       }
     } catch (e) {

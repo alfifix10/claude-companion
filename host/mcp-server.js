@@ -1856,6 +1856,61 @@ server.tool("type_check",
   });
 
 // ──────────────────────────────────────────────────────────────────────────
+// Pro Mode — Project memory (1 tool)
+//
+// Companion to the auto-load behaviour in native-host.js. Each chat
+// session begins with CLAUDE.md + _STATE.md from the working directory
+// prepended to the dynamic user message. This tool lets the agent
+// REFRESH _STATE.md at the end of meaningful work — so the next chat
+// resumes with accurate "what's done, what's next" without the user
+// having to re-explain.
+//
+// Why _STATE.md and not CLAUDE.md:
+//   • CLAUDE.md is stable docs (architecture, conventions, lessons).
+//     The user owns it. Agent edits are intentional, not routine.
+//   • _STATE.md is working memory — meant to evolve. Refreshing it
+//     after every session is the whole point.
+// The tool deliberately replaces the file (not append) so old state
+// doesn't accumulate stale entries. Agent should write a complete,
+// current snapshot — what's done, what's pending, key decisions, any
+// gotchas the next session needs to know.
+// ──────────────────────────────────────────────────────────────────────────
+
+server.tool("update_project_state",
+  "Replace the contents of _STATE.md in the working directory. " +
+  "_STATE.md is auto-loaded into EVERY future chat session as 'project state', so " +
+  "writing a complete snapshot here means the next session resumes without having to re-explain. " +
+  "Call this at the END of meaningful work. " +
+  "Write a complete summary (not a diff): what's done, what's pending, key decisions, gotchas. " +
+  "Pro Mode required.",
+  {
+    content: z.string().min(1).max(8192).describe(
+      "Full new content of _STATE.md. Replaces existing content — write the complete current state, not a delta. Aim for 500-2000 chars: enough to resume cleanly, not so much that it bloats every future prompt."
+    ),
+  },
+  async (a) => {
+    try {
+      const { workingDirectory } = requireProMode();
+      const statePath = path.join(workingDirectory, "_STATE.md");
+      // Atomic write — same pattern as write_file. tmp + rename
+      // means a crash mid-write doesn't leave a half-written _STATE.md
+      // that would mislead the next session.
+      const tmp = statePath + ".tmp";
+      fs.writeFileSync(tmp, a.content, "utf-8");
+      fs.renameSync(tmp, statePath);
+      const wdName = path.basename(workingDirectory) || workingDirectory;
+      return {
+        content: [{
+          type: "text",
+          text: `✓ Wrote ${a.content.length} chars to ${wdName}/_STATE.md. Will be auto-loaded into the next chat session.`,
+        }],
+      };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+// ──────────────────────────────────────────────────────────────────────────
 // Pro Mode — SQLite (2 tools)
 //
 // Read-only access to local SQLite database files. Uses the sqlite3
