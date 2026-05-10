@@ -1206,6 +1206,301 @@ server.tool("git_branches",
   });
 
 // ──────────────────────────────────────────────────────────────────────────
+// Pro Mode — Code search (4 tools)
+//
+// File-walker-based tools that work where shell `grep` falls short on
+// Windows (the binary is often missing or behaves differently in Git
+// Bash). Implemented in pure Node so behaviour is identical across
+// platforms. All four respect the working directory sandbox + skip
+// the same heavy dirs (node_modules, .git, dist, build, etc.).
+// ──────────────────────────────────────────────────────────────────────────
+
+// Shared file walker. Walks `root` recursively, calling `cb(absPath,
+// relPath)` for each plain file. Stops when count reaches `max`.
+// Returns the count actually visited so callers can detect the cap.
+const CODE_SKIP_DIRS = new Set([
+  "node_modules", ".git", "dist", "build", ".next", "__pycache__",
+  ".venv", "venv", "coverage", ".cache", ".turbo", ".svelte-kit",
+]);
+const CODE_MAX_FILE_SIZE = 1024 * 1024; // skip files > 1 MB (binaries, lockfiles)
+
+function walkCodeFiles(root, max, includeRegex, cb) {
+  let visited = 0;
+  function recurse(dir) {
+    if (visited >= max) return;
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const ent of entries) {
+      if (visited >= max) return;
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory()) {
+        if (CODE_SKIP_DIRS.has(ent.name)) continue;
+        recurse(full);
+      } else if (ent.isFile()) {
+        const rel = path.relative(root, full).replace(/\\/g, "/");
+        if (includeRegex && !includeRegex.test(rel)) continue;
+        // Skip oversized files (lockfiles, build artifacts, blobs)
+        try { if (fs.statSync(full).size > CODE_MAX_FILE_SIZE) continue; } catch { continue; }
+        cb(full, rel);
+        visited++;
+      }
+    }
+  }
+  recurse(root);
+  return visited;
+}
+
+// Convert a glob-ish include filter ("*.ts", "src/**/*.tsx") to RegExp.
+// Same translation as find_files. Empty input → null (= match all).
+function compileIncludePattern(pattern) {
+  if (!pattern) return null;
+  const re = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*/g, "<DOUBLESTAR>")
+    .replace(/\*/g, "[^/]*")
+    .replace(/\?/g, "[^/]")
+    .replace(/<DOUBLESTAR>/g, ".*");
+  return new RegExp("^" + re + "$");
+}
+
+server.tool("grep_files",
+  "Search file CONTENTS for a regex pattern. Returns lines that match, with file path, line number, and a snippet. " +
+  "Faster than reading each file and grepping manually. " +
+  "Skips node_modules, .git, dist, build, etc. by default. Pro Mode required.",
+  {
+    pattern: z.string().min(1).describe("Regex (JavaScript flavour). Wrap in (?i:…) for case-insensitive."),
+    include: z.string().optional().describe("Glob filter on relative path (e.g. '**/*.ts', 'src/**/*.{js,ts}')."),
+    root: z.string().optional().describe("Subdirectory to search. Defaults to working directory."),
+    max_matches: z.number().int().min(1).max(500).optional().describe("Cap on total matches (default 100)."),
+    context_lines: z.number().int().min(0).max(5).optional().describe("Lines of context above + below each match (default 0)."),
+  },
+  async (a) => {
+    try {
+      const { workingDirectory } = requireProMode();
+      const safeRoot = a.root ? validatePath(a.root, workingDirectory) : workingDirectory;
+      let regex;
+      try { regex = new RegExp(a.pattern); }
+      catch (e) { return { content: [{ type: "text", text: `Error: invalid regex — ${e.message}` }], isError: true }; }
+      const includeRe = compileIncludePattern(a.include || "");
+      const ctx = a.context_lines || 0;
+      const max = a.max_matches || 100;
+      const matches = [];
+      let filesScanned = 0;
+
+      walkCodeFiles(safeRoot, 5000, includeRe, (full, rel) => {
+        if (matches.length >= max) return;
+        filesScanned++;
+        let content;
+        try { content = fs.readFileSync(full, "utf-8"); } catch { return; }
+        // Skip files that look binary — null bytes in the first 8 KB
+        // are a reliable cheap signal.
+        if (content.slice(0, 8192).indexOf(" ") >= 0) return;
+        const lines = content.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          if (matches.length >= max) return;
+          if (regex.test(lines[i])) {
+            const before = ctx ? lines.slice(Math.max(0, i - ctx), i) : [];
+            const after = ctx ? lines.slice(i + 1, i + 1 + ctx) : [];
+            matches.push({ path: rel, line: i + 1, text: lines[i], before, after });
+          }
+        }
+      });
+
+      if (matches.length === 0) {
+        return { content: [{ type: "text", text: `No matches across ${filesScanned} file(s).` }] };
+      }
+      // Render: path:line:text — readable by humans, parseable by tools
+      const out = matches.map((m) => {
+        const head = `${m.path}:${m.line}: ${m.text}`;
+        if (!ctx) return head;
+        const beforeFmt = m.before.map((l, j) => `${m.path}:${m.line - m.before.length + j}- ${l}`).join("\n");
+        const afterFmt = m.after.map((l, j) => `${m.path}:${m.line + 1 + j}- ${l}`).join("\n");
+        return [beforeFmt, head, afterFmt].filter(Boolean).join("\n");
+      }).join("\n\n");
+      const cap = matches.length >= max ? ` (capped at ${max} — narrow the search)` : "";
+      return { content: [{ type: "text", text: `${matches.length} match(es) in ${filesScanned} files${cap}:\n\n${out}` }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+server.tool("find_symbol",
+  "Find where a symbol (function, class, interface, type, const, let, var) is DEFINED. " +
+  "Regex-based — works for JavaScript, TypeScript, Python, Go. " +
+  "Returns file path + line + the line itself, for each definition site found. " +
+  "Pro Mode required.",
+  {
+    name: z.string().min(1).describe("Symbol name. Matched as a whole word."),
+    kind: z.enum(["any", "function", "class", "interface", "type", "const"]).optional()
+      .describe("Restrict by definition kind (default 'any')."),
+    include: z.string().optional().describe("Glob filter on path. Defaults to common code extensions."),
+  },
+  async (a) => {
+    try {
+      const { workingDirectory } = requireProMode();
+      const name = a.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const kind = a.kind || "any";
+
+      // Definition patterns by kind. Each captures the "name" position
+      // so we can confirm it matches `a.name`. We use \\b boundaries to
+      // avoid substring false-matches.
+      const patterns = [];
+      if (kind === "any" || kind === "function") {
+        patterns.push(new RegExp(`\\bfunction\\s+${name}\\b`));     // JS
+        patterns.push(new RegExp(`\\bdef\\s+${name}\\b`));           // Python
+        patterns.push(new RegExp(`\\bfunc\\s+(?:\\([^)]*\\)\\s+)?${name}\\b`)); // Go
+        patterns.push(new RegExp(`\\b${name}\\s*[:=]\\s*(?:async\\s+)?(?:function|\\([^)]*\\)\\s*=>)`)); // const foo = ...
+      }
+      if (kind === "any" || kind === "class") {
+        patterns.push(new RegExp(`\\bclass\\s+${name}\\b`));
+      }
+      if (kind === "any" || kind === "interface") {
+        patterns.push(new RegExp(`\\binterface\\s+${name}\\b`));
+      }
+      if (kind === "any" || kind === "type") {
+        patterns.push(new RegExp(`\\btype\\s+${name}\\b`));         // TS / Go
+      }
+      if (kind === "any" || kind === "const") {
+        patterns.push(new RegExp(`\\b(?:const|let|var)\\s+${name}\\b`));
+      }
+
+      const include = a.include || "**/*.{js,jsx,mjs,cjs,ts,tsx,py,go,rs,java,c,cc,cpp,h,hpp,cs,rb,php,swift}";
+      // Single-extension glob doesn't expand "{a,b}" without help — split.
+      const subs = include.match(/\{([^}]+)\}/);
+      const includeList = subs
+        ? subs[1].split(",").map((ext) => include.replace(/\{[^}]+\}/, ext.trim()))
+        : [include];
+      const includeRes = includeList.map(compileIncludePattern).filter(Boolean);
+
+      const results = [];
+      walkCodeFiles(workingDirectory, 3000, null, (full, rel) => {
+        if (results.length >= 200) return;
+        if (includeRes.length && !includeRes.some((re) => re.test(rel))) return;
+        let content;
+        try { content = fs.readFileSync(full, "utf-8"); } catch { return; }
+        const lines = content.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          if (results.length >= 200) return;
+          for (const p of patterns) {
+            if (p.test(lines[i])) {
+              results.push({ path: rel, line: i + 1, text: lines[i].trim() });
+              break;
+            }
+          }
+        }
+      });
+      if (results.length === 0) {
+        return { content: [{ type: "text", text: `No definitions found for "${a.name}" (kind: ${kind}).` }] };
+      }
+      const out = results.map((r) => `${r.path}:${r.line}: ${r.text}`).join("\n");
+      return { content: [{ type: "text", text: `${results.length} definition(s):\n${out}` }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+server.tool("find_references",
+  "Find every place a symbol is USED across the codebase. Whole-word matching, no regex needed from caller. " +
+  "Like grep_files but with sane defaults for symbol-search and a wider extension filter. Pro Mode required.",
+  {
+    name: z.string().min(1).describe("Symbol name to search for (whole-word)."),
+    include: z.string().optional().describe("Glob filter on path. Defaults to common code extensions."),
+    max: z.number().int().min(1).max(500).optional().describe("Cap on matches (default 200)."),
+  },
+  async (a) => {
+    try {
+      const { workingDirectory } = requireProMode();
+      const escaped = a.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const regex = new RegExp(`\\b${escaped}\\b`);
+      const include = a.include || "**/*.{js,jsx,mjs,cjs,ts,tsx,py,go,rs,java,c,cc,cpp,h,hpp,cs,rb,php,swift,html,css,scss}";
+      const subs = include.match(/\{([^}]+)\}/);
+      const includeList = subs
+        ? subs[1].split(",").map((ext) => include.replace(/\{[^}]+\}/, ext.trim()))
+        : [include];
+      const includeRes = includeList.map(compileIncludePattern).filter(Boolean);
+      const max = a.max || 200;
+
+      const results = [];
+      walkCodeFiles(workingDirectory, 5000, null, (full, rel) => {
+        if (results.length >= max) return;
+        if (includeRes.length && !includeRes.some((re) => re.test(rel))) return;
+        let content;
+        try { content = fs.readFileSync(full, "utf-8"); } catch { return; }
+        if (content.slice(0, 8192).indexOf(" ") >= 0) return;
+        const lines = content.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          if (results.length >= max) return;
+          if (regex.test(lines[i])) {
+            results.push({ path: rel, line: i + 1, text: lines[i].trim() });
+          }
+        }
+      });
+      if (results.length === 0) {
+        return { content: [{ type: "text", text: `No references to "${a.name}".` }] };
+      }
+      // Group by file for readability.
+      const byFile = new Map();
+      for (const r of results) {
+        if (!byFile.has(r.path)) byFile.set(r.path, []);
+        byFile.get(r.path).push(r);
+      }
+      const sections = [];
+      for (const [filePath, refs] of byFile) {
+        sections.push(`${filePath} (${refs.length}):\n` + refs.map((r) => `  ${r.line}: ${r.text}`).join("\n"));
+      }
+      const cap = results.length >= max ? ` (capped at ${max})` : "";
+      return { content: [{ type: "text", text: `${results.length} reference(s) in ${byFile.size} file(s)${cap}:\n\n${sections.join("\n\n")}` }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+server.tool("code_outline",
+  "Return a high-level outline of one source file: every function, class, interface, type, top-level const declaration, with its line number. " +
+  "Useful before reading a long file — see the structure first, then read the parts that matter. Pro Mode required.",
+  {
+    path: z.string().min(1).describe("File to outline (relative to working dir)."),
+  },
+  async (a) => {
+    try {
+      const { workingDirectory } = requireProMode();
+      const safePath = validatePath(a.path, workingDirectory);
+      const content = fs.readFileSync(safePath, "utf-8");
+      const lines = content.split("\n");
+      // Outline patterns. Order matters: more specific first.
+      const rules = [
+        { kind: "class",     re: /^\s*(?:export\s+)?(?:abstract\s+)?class\s+([A-Z]\w*)/ },
+        { kind: "interface", re: /^\s*(?:export\s+)?interface\s+([A-Z]\w*)/ },
+        { kind: "type",      re: /^\s*(?:export\s+)?type\s+([A-Z]\w*)/ },
+        { kind: "function",  re: /^\s*(?:export\s+)?(?:async\s+)?function\s*\*?\s+(\w+)/ },
+        { kind: "function",  re: /^\s*(?:export\s+)?(?:const|let)\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]*\)\s*=>|function)/ },
+        { kind: "method",    re: /^\s+(?:public\s+|private\s+|protected\s+|static\s+|async\s+)*(\w+)\s*\([^)]*\)\s*\{/ },
+        { kind: "def",       re: /^\s*def\s+(\w+)/ },        // Python
+        { kind: "class",     re: /^\s*class\s+([A-Z]\w*)/ },  // Python class
+        { kind: "func",      re: /^\s*func\s+(?:\([^)]*\)\s+)?(\w+)/ }, // Go
+        { kind: "const",     re: /^\s*(?:export\s+)?const\s+([A-Z][A-Z0-9_]*)\s*=/ }, // SCREAMING_CONST top-level
+      ];
+      const symbols = [];
+      for (let i = 0; i < lines.length; i++) {
+        for (const { kind, re } of rules) {
+          const m = lines[i].match(re);
+          if (m) {
+            symbols.push({ kind, name: m[1], line: i + 1 });
+            break;  // one match per line
+          }
+        }
+      }
+      if (symbols.length === 0) {
+        return { content: [{ type: "text", text: `No top-level symbols detected in ${a.path} (${lines.length} lines).` }] };
+      }
+      const text = symbols.map((s) => `${String(s.line).padStart(5)}  ${s.kind.padEnd(9)} ${s.name}`).join("\n");
+      return { content: [{ type: "text", text: `${symbols.length} symbol(s) in ${a.path} (${lines.length} lines):\n\n${text}` }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+// ──────────────────────────────────────────────────────────────────────────
 // Pro Mode — Documents (Layer 2 / Phase 5)
 //
 // PDF generation runs the user's already-installed Chrome in headless
