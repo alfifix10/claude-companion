@@ -1005,6 +1005,207 @@ server.tool("run_command",
   });
 
 // ──────────────────────────────────────────────────────────────────────────
+// Pro Mode — Git (structured)
+//
+// Five wrappers that run git in the working directory and parse the
+// output into JSON. Could be done via `run_command` + the model parsing
+// raw text — these tools save round-trips and make filtering trivial.
+// All read-only: write operations (commit, push, branch, merge) stay
+// in run_command where the user can see and approve the exact arg
+// list. The model can still propose them via run_command; these tools
+// just remove ambiguity for the diagnostic 80% of git use.
+// ──────────────────────────────────────────────────────────────────────────
+
+// Shared helper: spawn git inside the working directory, collect
+// stdout, return it as a string (or throw on non-zero exit). The
+// run_command shell flags (allowlist, denylist) don't apply here —
+// we control the binary + args directly, so there's no surface for
+// shell injection from caller args.
+function runGit(args, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const { workingDirectory } = requireProMode();
+    const cwd = opts.cwd
+      ? validatePath(opts.cwd, workingDirectory)
+      : workingDirectory;
+    const child = spawn("git", args, {
+      cwd, shell: false, windowsHide: true, timeout: opts.timeout || 15_000,
+    });
+    let stdout = ""; let stderr = "";
+    child.stdout.on("data", (d) => { stdout += d.toString("utf-8"); });
+    child.stderr.on("data", (d) => { stderr += d.toString("utf-8"); });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(stderr.trim() || `git exited with ${code}`));
+      } else {
+        resolve(stdout);
+      }
+    });
+  });
+}
+
+server.tool("git_status",
+  "Get a structured view of `git status`. Returns the current branch, ahead/behind counts vs upstream, and three lists: staged, modified (unstaged changes to tracked files), untracked. " +
+  "Pro Mode required. Working dir is the configured working directory.",
+  {},
+  async () => {
+    try {
+      const out = await runGit(["status", "--porcelain=v1", "-b"]);
+      const lines = out.split("\n").filter(Boolean);
+      let branch = ""; let ahead = 0; let behind = 0;
+      const staged = []; const modified = []; const untracked = [];
+      for (const line of lines) {
+        if (line.startsWith("##")) {
+          // "## main...origin/main [ahead 2, behind 1]"
+          const m = line.match(/^##\s+([^\s.]+)(?:\.\.\.[^\s]+)?(?:\s+\[([^\]]+)\])?/);
+          if (m) {
+            branch = m[1];
+            const tag = m[2] || "";
+            const a = tag.match(/ahead (\d+)/);
+            const b = tag.match(/behind (\d+)/);
+            ahead = a ? parseInt(a[1], 10) : 0;
+            behind = b ? parseInt(b[1], 10) : 0;
+          }
+          continue;
+        }
+        // XY <space> path  (X = staged status, Y = unstaged status)
+        const X = line[0]; const Y = line[1]; const path = line.slice(3);
+        if (X === "?" && Y === "?") { untracked.push(path); continue; }
+        if (X !== " " && X !== "?") staged.push({ path, status: X });
+        if (Y !== " " && Y !== "?") modified.push({ path, status: Y });
+      }
+      return { content: [{ type: "text", text: JSON.stringify({ branch, ahead, behind, staged, modified, untracked }, null, 2) }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+server.tool("git_diff",
+  "Get a unified diff. Without args, shows unstaged changes (everything `git diff` would show). " +
+  "With `staged: true`, shows what's about to be committed. " +
+  "With `path`, restricts to one file. " +
+  "Output truncated at 32 KB to keep the model's context manageable.",
+  {
+    staged: z.boolean().optional().describe("Show staged-but-not-committed diff (default: unstaged)."),
+    path: z.string().optional().describe("Restrict to one file (relative to working dir)."),
+  },
+  async (a) => {
+    try {
+      const args = ["diff"];
+      if (a.staged) args.push("--cached");
+      if (a.path) args.push("--", a.path);
+      const out = await runGit(args);
+      const MAX = 32 * 1024;
+      const truncated = out.length > MAX;
+      const text = truncated
+        ? out.slice(0, MAX) + `\n\n…(truncated at ${MAX} bytes — narrow with \`path\`)`
+        : (out || "(no changes)");
+      return { content: [{ type: "text", text }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+server.tool("git_log",
+  "List recent commits. Returns an array of {sha, author, date, subject} objects. " +
+  "Default: 20 entries, all branches reachable from HEAD. " +
+  "Use `path` to restrict to commits touching one file.",
+  {
+    limit: z.number().int().min(1).max(200).optional().describe("Number of commits to return (default 20, max 200)."),
+    path: z.string().optional().describe("Show only commits touching this file."),
+    author: z.string().optional().describe("Filter by author (substring match on name or email)."),
+  },
+  async (a) => {
+    try {
+      const limit = a.limit || 20;
+      // Use a sentinel separator unlikely to appear in real commit
+      // messages so we can split safely. \x1f is Unit Separator.
+      const args = [
+        "log", `-n`, String(limit),
+        "--pretty=format:%H\x1f%an\x1f%ae\x1f%aI\x1f%s",
+      ];
+      if (a.author) args.push(`--author=${a.author}`);
+      if (a.path) args.push("--", a.path);
+      const out = await runGit(args);
+      const commits = out.split("\n").filter(Boolean).map((line) => {
+        const [sha, author, email, date, subject] = line.split("\x1f");
+        return { sha, author, email, date, subject };
+      });
+      return { content: [{ type: "text", text: JSON.stringify({ count: commits.length, commits }, null, 2) }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+server.tool("git_blame",
+  "Show line-by-line authorship for a file. Returns {path, lines: [{line, sha, author, date, content}]}. " +
+  "Use `from`/`to` (1-indexed line numbers) to restrict to a range — full-file blame is large.",
+  {
+    path: z.string().min(1).describe("File to blame (relative to working dir)."),
+    from: z.number().int().min(1).optional().describe("First line (1-indexed)."),
+    to: z.number().int().min(1).optional().describe("Last line (1-indexed)."),
+  },
+  async (a) => {
+    try {
+      const args = ["blame", "--line-porcelain"];
+      if (a.from && a.to) args.push("-L", `${a.from},${a.to}`);
+      else if (a.from) args.push("-L", `${a.from},+200`);  // default a 200-line slice
+      args.push("--", a.path);
+      const out = await runGit(args);
+      // line-porcelain is a multi-block format. Each chunk:
+      //   <sha> <orig> <final> [count]
+      //   author Foo Bar
+      //   author-mail <foo@bar>
+      //   author-time 1234567890
+      //   author-tz +0300
+      //   ...
+      //   <TAB>actual content
+      const lines = [];
+      const blocks = out.split(/^(?=[0-9a-f]{40} )/m).filter(Boolean);
+      for (const block of blocks) {
+        const lns = block.split("\n");
+        const head = lns[0].split(" ");
+        const sha = head[0];
+        const final = parseInt(head[2], 10);
+        let author = ""; let date = ""; let content = "";
+        for (const ln of lns) {
+          if (ln.startsWith("author ")) author = ln.slice(7).trim();
+          else if (ln.startsWith("author-time ")) date = new Date(parseInt(ln.slice(12), 10) * 1000).toISOString();
+          else if (ln.startsWith("\t")) content = ln.slice(1);
+        }
+        lines.push({ line: final, sha: sha.slice(0, 7), author, date, content });
+      }
+      return { content: [{ type: "text", text: JSON.stringify({ path: a.path, lineCount: lines.length, lines }, null, 2) }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+server.tool("git_branches",
+  "List local branches with their upstream tracking and last commit. Returns {current, branches: [{name, upstream, lastCommit, isCurrent}]}. " +
+  "Use this before checkout / merge / rebase decisions to see what's available.",
+  {},
+  async () => {
+    try {
+      // %(refname:short)\t%(upstream:short)\t%(objectname:short)\t%(subject)\t%(HEAD)
+      const out = await runGit([
+        "for-each-ref", "refs/heads/",
+        "--format=%(refname:short)\x1f%(upstream:short)\x1f%(objectname:short)\x1f%(subject)\x1f%(HEAD)",
+      ]);
+      let current = "";
+      const branches = out.split("\n").filter(Boolean).map((line) => {
+        const [name, upstream, sha, subject, head] = line.split("\x1f");
+        const isCurrent = head === "*";
+        if (isCurrent) current = name;
+        return { name, upstream: upstream || null, lastCommit: { sha, subject }, isCurrent };
+      });
+      return { content: [{ type: "text", text: JSON.stringify({ current, count: branches.length, branches }, null, 2) }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+// ──────────────────────────────────────────────────────────────────────────
 // Pro Mode — Documents (Layer 2 / Phase 5)
 //
 // PDF generation runs the user's already-installed Chrome in headless
