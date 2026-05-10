@@ -8,8 +8,11 @@ import {
 } from "./tool-registry.js";
 
 describe("TOOL_REGISTRY — shape invariants", () => {
-  it("exposes exactly the 22 tools we ship today", () => {
-    expect(Object.keys(TOOL_REGISTRY)).toHaveLength(22);
+  it("exposes exactly the 28 tools we ship today (22 browser + 6 devtools)", () => {
+    // 22 original (interaction + reading + tabs + nav + scripting + waiting + upload)
+    // + 6 DevTools (read_console_messages, read_network_requests, read_page_errors,
+    //                inspect_element, read_storage, read_performance)
+    expect(Object.keys(TOOL_REGISTRY)).toHaveLength(28);
   });
 
   it("every entry's key matches its `name` field", () => {
@@ -100,8 +103,8 @@ describe("MUTATING_TOOLS derived set", () => {
 });
 
 describe("getAllToolNames", () => {
-  it("returns 22 names", () => {
-    expect(getAllToolNames()).toHaveLength(22);
+  it("returns 28 names", () => {
+    expect(getAllToolNames()).toHaveLength(28);
   });
 
   it("returns the names sorted alphabetically", () => {

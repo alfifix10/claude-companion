@@ -577,6 +577,85 @@ server.tool("file_upload", "Upload local file(s) to an <input type=\"file\"> ele
 }, async (a) => ({ content: [{ type: "text", text: String(await request("file_upload", a)) }] }));
 
 // ──────────────────────────────────────────────────────────────────────────
+// DevTools — read-only access to the browser's debug data
+//
+// All six tools surface state the extension is ALREADY collecting via
+// chrome.debugger event listeners (consoleMessages, networkRequests,
+// pageErrors maps live in extension/src/core/state.js). Buffers cap
+// at 1000 (console), 200 (errors), 1000 (network) entries per tab and
+// roll forward — older entries drop off as new ones arrive.
+//
+// `read_storage` is the one Pro-Mode-gated entry: localStorage on a
+// logged-in tab routinely contains auth tokens, and we don't expose
+// that read surface in default mode. The gate runs in the executor
+// (it has access to chrome.storage); the tool definition here doesn't
+// need to repeat the check.
+// ──────────────────────────────────────────────────────────────────────────
+
+server.tool("read_console_messages",
+  "Read console.log / console.warn / console.error / console.info messages from the active tab. " +
+  "Use this to debug page behaviour — what errors did JavaScript log? what warnings fired? " +
+  "Filter by level when you only care about errors. " +
+  "Note: messages are captured from the moment the extension first attached to the tab; earlier output is not retroactive.",
+  {
+    level: z.enum(["log", "warn", "error", "info", "debug"]).optional()
+      .describe("Filter to one level only. Omit for all levels."),
+    limit: z.number().int().min(1).max(500).optional()
+      .describe("Most-recent N messages (default 100, max 500)."),
+  },
+  async (a) => ({ content: [{ type: "text", text: String(await request("read_console_messages", a)) }] }));
+
+server.tool("read_network_requests",
+  "Read HTTP requests captured for the active tab — URL, method, status code, resource type, timestamp. " +
+  "Use to diagnose API failures, find authentication problems, see what XHR / fetch / image / script loads happened. " +
+  "Captured from the moment the extension attached.",
+  {
+    url_contains: z.string().optional().describe("Substring filter on URL (case-sensitive)."),
+    method: z.string().optional().describe("Filter by HTTP method (GET, POST, PUT, DELETE, ...). Case-insensitive."),
+    status_min: z.number().int().min(0).max(999).optional().describe("Minimum status code (default 0)."),
+    status_max: z.number().int().min(0).max(999).optional().describe("Maximum status code (default 999). Use 400/599 for errors only."),
+    limit: z.number().int().min(1).max(200).optional().describe("Most-recent N (default 50)."),
+  },
+  async (a) => ({ content: [{ type: "text", text: String(await request("read_network_requests", a)) }] }));
+
+server.tool("read_page_errors",
+  "Read uncaught JavaScript exceptions thrown on the active tab. " +
+  "Distinct from console.error (which is just a log call). These are real exceptions — TypeError, ReferenceError, network failures bubbling up to window.onerror. " +
+  "Use when a page is broken and you want to know WHY.",
+  {
+    limit: z.number().int().min(1).max(100).optional().describe("Most-recent N errors (default 50)."),
+  },
+  async (a) => ({ content: [{ type: "text", text: String(await request("read_page_errors", a)) }] }));
+
+server.tool("inspect_element",
+  "Get full details of one DOM element: tag name, id, classes, attributes, computed style (curated subset), bounding rect, visibility. " +
+  "Identify the element by `ref` (preferred — from read_page or find), CSS `selector`, or screen `coordinate` [x, y]. " +
+  "Returns a JSON object — the keys are stable, so you can drill in without re-querying.",
+  {
+    ref: z.string().optional().describe("Element ref from read_page or find."),
+    selector: z.string().optional().describe("CSS selector (alternative to ref)."),
+    coordinate: z.array(z.number()).length(2).optional().describe("[x, y] in CSS pixels (alternative to ref/selector)."),
+  },
+  async (a) => ({ content: [{ type: "text", text: String(await request("inspect_element", a)) }] }));
+
+server.tool("read_storage",
+  "Read localStorage or sessionStorage entries for the active tab. " +
+  "Returns all key-value pairs as a JSON object, OR a single value when `key` is supplied. " +
+  "PRO MODE REQUIRED: storage commonly holds auth tokens; this read surface is gated to prevent silent harvesting in default mode.",
+  {
+    area: z.enum(["local", "session"]).describe("Which storage area to read."),
+    key: z.string().optional().describe("Read just this one key. Omit to dump all entries."),
+  },
+  async (a) => ({ content: [{ type: "text", text: String(await request("read_storage", a)) }] }));
+
+server.tool("read_performance",
+  "Read the active tab's performance timing — TTFB, DOMContentLoaded, full-load, first paint, first-contentful paint, JS heap size. " +
+  "Useful for diagnosing slow pages. Values are ms since navigationStart; null when not yet reached. " +
+  "Memory metrics are Chromium-specific (other engines return null).",
+  {},
+  async (a) => ({ content: [{ type: "text", text: String(await request("read_performance", a)) }] }));
+
+// ──────────────────────────────────────────────────────────────────────────
 // Pro Mode — Filesystem (read-only, Layer 1 / Phase 2)
 //
 // All tools below gate on the user-set Pro Mode flag and confine paths

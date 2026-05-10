@@ -10,7 +10,7 @@ import {
   dialogNote, getActiveTab, modifiersBitmask,
 } from "../core/cdp.js";
 import { sleep, parseKeyCombo } from "../core/utils.js";
-import { activeTask, broadcastToPanels } from "../core/state.js";
+import { activeTask, broadcastToPanels, consoleMessages, networkRequests, pageErrors } from "../core/state.js";
 import { refusalMessage } from "../lib/file-upload-denylist.js";
 
 // Keep the task-locked tab in sync when Claude creates or switches tabs.
@@ -771,7 +771,238 @@ export async function executeTool(name, input, tabId) {
       }
     }
 
+    // ───────────────────────────────────────────────────────────────
+    // DevTools (read-only browser internals)
+    // ───────────────────────────────────────────────────────────────
+
+    case "read_console_messages": {
+      // Pull the rolling buffer of console messages collected by the
+      // background CDP listener. Ensure the tab is attached so future
+      // messages get captured even if the user just opened it.
+      await ensureAttached(tabId);
+      const all = consoleMessages.get(tabId) || [];
+      const wantLevel = typeof input.level === "string" ? input.level.toLowerCase() : "";
+      const limit = Number.isFinite(input.limit) ? Math.max(1, Math.min(500, input.limit)) : 100;
+      let filtered = all;
+      if (wantLevel) {
+        filtered = all.filter((m) => String(m.level || "").toLowerCase() === wantLevel);
+      }
+      // Most-recent N — slice from the end.
+      const slice = filtered.slice(-limit);
+      if (slice.length === 0) {
+        return wantLevel
+          ? `No "${wantLevel}" console messages on this tab.`
+          : "No console messages captured. Note: messages emitted before the extension attached are not retroactive.";
+      }
+      const lines = slice.map((m) => {
+        const ts = new Date(m.timestamp).toISOString().slice(11, 19);
+        const where = m.url ? ` (${m.url})` : "";
+        return `[${ts}] [${m.level}] ${m.text}${where}`;
+      });
+      return `${slice.length} message(s) (newest last):\n` + lines.join("\n");
+    }
+
+    case "read_network_requests": {
+      await ensureAttached(tabId);
+      const all = networkRequests.get(tabId) || [];
+      const limit = Number.isFinite(input.limit) ? Math.max(1, Math.min(200, input.limit)) : 50;
+      const urlFilter = typeof input.url_contains === "string" ? input.url_contains : "";
+      const methodFilter = typeof input.method === "string" ? input.method.toUpperCase() : "";
+      const statusMin = Number.isFinite(input.status_min) ? input.status_min : 0;
+      const statusMax = Number.isFinite(input.status_max) ? input.status_max : 999;
+      let filtered = all;
+      if (urlFilter) filtered = filtered.filter((r) => (r.url || "").includes(urlFilter));
+      if (methodFilter) filtered = filtered.filter((r) => (r.method || "").toUpperCase() === methodFilter);
+      filtered = filtered.filter((r) => {
+        const s = Number.isFinite(r.status) ? r.status : 0;
+        return s >= statusMin && s <= statusMax;
+      });
+      const slice = filtered.slice(-limit);
+      if (slice.length === 0) return "No network requests match the filter.";
+      const lines = slice.map((r) => {
+        const ts = new Date(r.timestamp).toISOString().slice(11, 19);
+        const status = r.status > 0 ? r.status : "—";
+        return `[${ts}] ${r.method || "GET"} ${status} ${r.type || ""} ${r.url}`;
+      });
+      return `${slice.length} request(s) (newest last):\n` + lines.join("\n");
+    }
+
+    case "read_page_errors": {
+      await ensureAttached(tabId);
+      const all = pageErrors.get(tabId) || [];
+      const limit = Number.isFinite(input.limit) ? Math.max(1, Math.min(100, input.limit)) : 50;
+      const slice = all.slice(-limit);
+      if (slice.length === 0) {
+        return "No uncaught exceptions captured on this tab.";
+      }
+      const lines = slice.map((e) => {
+        const ts = new Date(e.timestamp).toISOString().slice(11, 19);
+        const loc = e.url ? ` ${e.url}${e.lineNumber != null ? `:${e.lineNumber}` : ""}` : "";
+        return `[${ts}] ${e.message}${loc}`;
+      });
+      return `${slice.length} error(s) (newest last):\n` + lines.join("\n");
+    }
+
+    case "inspect_element": {
+      await ensureAttached(tabId);
+      // Resolve the target — by ref, selector, or coordinate. We only
+      // need a CSS selector to evaluate against, so the resolution
+      // path collapses everything down to that.
+      let selector = typeof input.selector === "string" ? input.selector : "";
+      if (!selector && input.ref) {
+        const resp = await sendContentMessage(tabId, { type: "selectorForRef", ref: input.ref });
+        const r = resp?.result;
+        if (r?.error) return `Error: ${r.error}`;
+        selector = r?.selector || "";
+      }
+      if (!selector && Array.isArray(input.coordinate) && input.coordinate.length === 2) {
+        // Pick the topmost element at (x, y) and ask the page for a
+        // CSS selector path. Rough but adequate for inspection.
+        const [x, y] = input.coordinate;
+        const r = await cdp(tabId, "Runtime.evaluate", {
+          expression: `(() => {
+            const el = document.elementFromPoint(${x}, ${y});
+            if (!el) return null;
+            const path = [];
+            let cur = el;
+            while (cur && cur.nodeType === 1 && path.length < 5) {
+              let n = cur.tagName.toLowerCase();
+              if (cur.id) { n += '#' + cur.id; path.unshift(n); break; }
+              if (cur.className && typeof cur.className === 'string') {
+                n += '.' + cur.className.trim().split(/\\s+/).slice(0,2).join('.');
+              }
+              path.unshift(n);
+              cur = cur.parentElement;
+            }
+            return path.join(' > ');
+          })()`,
+          returnByValue: true,
+        });
+        selector = r?.result?.value || "";
+      }
+      if (!selector) return "Error: provide ref, selector, or coordinate.";
+
+      // Build a single Runtime.evaluate that returns everything we want
+      // in one round trip — much cheaper than 5 separate CDP calls.
+      const expr = `(() => {
+        const el = document.querySelector(${JSON.stringify(selector)});
+        if (!el) return { ok: false, error: 'No element matched ' + ${JSON.stringify(selector)} };
+        const cs = window.getComputedStyle(el);
+        const r = el.getBoundingClientRect();
+        // Pick a curated subset of computed styles — full dump is
+        // hundreds of properties and almost always noise.
+        const wantedStyles = [
+          'display','position','visibility','opacity','color','backgroundColor',
+          'fontSize','fontWeight','lineHeight','width','height','margin','padding',
+          'border','zIndex','overflow','cursor','pointerEvents'
+        ];
+        const styles = {};
+        for (const k of wantedStyles) styles[k] = cs.getPropertyValue(k.replace(/[A-Z]/g, m => '-' + m.toLowerCase()));
+        const attrs = {};
+        for (const a of el.attributes) attrs[a.name] = a.value;
+        return {
+          ok: true,
+          tagName: el.tagName.toLowerCase(),
+          id: el.id || null,
+          classes: (el.className && typeof el.className === 'string') ? el.className.split(/\\s+/).filter(Boolean) : [],
+          attrs,
+          textPreview: (el.textContent || '').trim().slice(0, 200),
+          rect: { x: r.x, y: r.y, width: r.width, height: r.height },
+          styles,
+          isVisible: r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && parseFloat(cs.opacity) > 0,
+        };
+      })()`;
+      const res = await cdp(tabId, "Runtime.evaluate", { expression: expr, returnByValue: true });
+      const v = res?.result?.value;
+      if (!v) return "Error: failed to inspect element.";
+      if (v.ok === false) return `Error: ${v.error}`;
+      return JSON.stringify(v, null, 2);
+    }
+
+    case "read_storage": {
+      // Pro Mode gate. localStorage / sessionStorage on a logged-in
+      // tab routinely contain auth tokens — exposing reads in default
+      // mode would let the agent harvest them silently. With Pro Mode
+      // the user has explicitly accepted that risk surface.
+      const proMode = await checkProModeFromUserData();
+      if (!proMode) {
+        return "Error: Pro Mode required (storage often contains auth tokens). Enable in extension settings.";
+      }
+      await ensureAttached(tabId);
+      const area = String(input.area || "local").toLowerCase();
+      if (area !== "local" && area !== "session") {
+        return 'Error: area must be "local" or "session".';
+      }
+      const target = area === "session" ? "sessionStorage" : "localStorage";
+      const key = typeof input.key === "string" ? input.key : "";
+      const expr = key
+        ? `(() => { const v = window.${target}.getItem(${JSON.stringify(key)}); return { ok:true, key: ${JSON.stringify(key)}, value: v }; })()`
+        : `(() => {
+            const out = {};
+            for (let i = 0; i < window.${target}.length; i++) {
+              const k = window.${target}.key(i);
+              if (k != null) out[k] = window.${target}.getItem(k);
+            }
+            return { ok: true, area: ${JSON.stringify(area)}, count: Object.keys(out).length, entries: out };
+          })()`;
+      const res = await cdp(tabId, "Runtime.evaluate", { expression: expr, returnByValue: true });
+      const v = res?.result?.value;
+      if (!v) return "Error: failed to read storage.";
+      return JSON.stringify(v, null, 2);
+    }
+
+    case "read_performance": {
+      await ensureAttached(tabId);
+      const expr = `(() => {
+        const t = performance.timing || {};
+        const nav = (performance.getEntriesByType && performance.getEntriesByType('navigation')[0]) || null;
+        const paints = (performance.getEntriesByType && performance.getEntriesByType('paint')) || [];
+        const mem = performance.memory ? {
+          usedJSHeapSize: performance.memory.usedJSHeapSize,
+          totalJSHeapSize: performance.memory.totalJSHeapSize,
+          jsHeapSizeLimit: performance.memory.jsHeapSizeLimit,
+        } : null;
+        const out = {
+          // ms since navigationStart (legacy timing API — widely supported)
+          domContentLoaded: t.domContentLoadedEventEnd && t.navigationStart
+            ? t.domContentLoadedEventEnd - t.navigationStart : null,
+          loadComplete: t.loadEventEnd && t.navigationStart
+            ? t.loadEventEnd - t.navigationStart : null,
+          // Modern navigation entry — more accurate when present
+          ttfb: nav && nav.responseStart ? Math.round(nav.responseStart) : null,
+          domInteractive: nav && nav.domInteractive ? Math.round(nav.domInteractive) : null,
+          // Paint timings — null when page hasn't painted yet
+          firstPaint: (paints.find(p => p.name === 'first-paint') || {}).startTime || null,
+          firstContentfulPaint: (paints.find(p => p.name === 'first-contentful-paint') || {}).startTime || null,
+          memory: mem,
+          url: location.href,
+        };
+        // Round float timings for readability
+        for (const k of ['firstPaint','firstContentfulPaint']) {
+          if (typeof out[k] === 'number') out[k] = Math.round(out[k]);
+        }
+        return out;
+      })()`;
+      const res = await cdp(tabId, "Runtime.evaluate", { expression: expr, returnByValue: true });
+      const v = res?.result?.value;
+      if (!v) return "Error: failed to read performance.";
+      return JSON.stringify(v, null, 2);
+    }
+
     default:
       return `Unknown tool: ${name}`;
+  }
+}
+
+// Pro Mode gate — read the user-data file the host writes. Async
+// because we go through the native messaging round-trip (no direct
+// fs access from the service worker context). Falls back to false
+// (= Pro Mode off) on any error so the gate fails closed.
+async function checkProModeFromUserData() {
+  try {
+    const stored = await chrome.storage.local.get("proMode");
+    return stored?.proMode === true;
+  } catch {
+    return false;
   }
 }

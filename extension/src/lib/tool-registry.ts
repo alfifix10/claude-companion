@@ -35,7 +35,8 @@ export type ToolCategory =
   | "interaction" // click, type_text, drag, hover, ...
   | "scripting" // run_javascript
   | "waiting" // wait_for
-  | "upload"; // file_upload
+  | "upload" // file_upload
+  | "devtools"; // read_console_messages, read_network_requests, ...
 
 export interface ToolMetadata {
   /** Tool name as Claude sees it (matches mcp-server.js registration). */
@@ -206,6 +207,49 @@ export const TOOL_REGISTRY: Record<string, ToolMetadata> = {
     mutating: false,
     category: "waiting",
     description: "Wait for text / selector / DOM stability (max 10 s).",
+  },
+
+  // ───── DevTools — read-only browser internals ─────
+  // All non-mutating: they read state the browser already collected
+  // (console messages, network log, exception trace) or call read-only
+  // APIs (window.localStorage, performance.timing). The repeat-call
+  // detector treats them as "reads" so a debugging task that polls
+  // console output every few seconds isn't flagged as a loop.
+  read_console_messages: {
+    name: "read_console_messages",
+    mutating: false,
+    category: "devtools",
+    description: "Read console.log / warn / error / info messages collected from the active tab.",
+  },
+  read_network_requests: {
+    name: "read_network_requests",
+    mutating: false,
+    category: "devtools",
+    description: "Read HTTP requests captured for the active tab — URL, method, status, type.",
+  },
+  read_page_errors: {
+    name: "read_page_errors",
+    mutating: false,
+    category: "devtools",
+    description: "Read uncaught JavaScript exceptions thrown on the active tab.",
+  },
+  inspect_element: {
+    name: "inspect_element",
+    mutating: false,
+    category: "devtools",
+    description: "Get tag name, attributes, computed style, and bounding rect for one element.",
+  },
+  read_storage: {
+    name: "read_storage",
+    mutating: false,
+    category: "devtools",
+    description: "Read localStorage or sessionStorage entries for the active tab. Pro Mode required (auth tokens often live there).",
+  },
+  read_performance: {
+    name: "read_performance",
+    mutating: false,
+    category: "devtools",
+    description: "Read the active tab's performance timing — navigation, paint, memory.",
   },
 };
 

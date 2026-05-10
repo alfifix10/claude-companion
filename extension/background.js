@@ -12,7 +12,7 @@
  *   and let it sleep cleanly when idle.
  */
 
-import { attachedTabs, consoleMessages, networkRequests, pendingDialogs, tabGroupTabs, nativePort } from "./src/core/state.js";
+import { attachedTabs, consoleMessages, networkRequests, pageErrors, pendingDialogs, tabGroupTabs, nativePort } from "./src/core/state.js";
 import { cdp, clearLastMousePos } from "./src/core/cdp.js";
 import { invalidatePageTextCache } from "./src/tools/executor.js";
 import { recoverTabGroupState } from "./src/core/tabs.js";
@@ -81,6 +81,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   }
   consoleMessages.delete(tabId);
   networkRequests.delete(tabId);
+  pageErrors.delete(tabId);
   // Was missing: a dialog open at the moment of close leaves a stale entry.
   // Chromium sometimes recycles tab IDs, so this can mislead later dialogs.
   pendingDialogs.delete(tabId);
@@ -108,6 +109,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   // relevant.
   consoleMessages.delete(tabId);
   networkRequests.delete(tabId);
+  pageErrors.delete(tabId);
   // Any open dialog belonged to the unloading page.
   pendingDialogs.delete(tabId);
   // Cursor path for the human-click model belonged to a DOM that no
@@ -137,6 +139,26 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
     msgs.push({ level: params.type || "log", text, url: params.stackTrace?.callFrames?.[0]?.url || "", timestamp: Date.now() });
     if (msgs.length > 1000) msgs.splice(0, msgs.length - 1000);
     consoleMessages.set(tabId, msgs);
+  }
+  // Uncaught exceptions on the page. Captured separately from console
+  // messages because they have richer structure (stack trace, file
+  // location) and the DevTools MCP `read_page_errors` tool surfaces
+  // them as a distinct stream — "errors only", not noise mixed with
+  // console.log spam. Cap at 200 to bound memory on error-heavy pages.
+  if (method === "Runtime.exceptionThrown" && params.exceptionDetails) {
+    const ex = params.exceptionDetails;
+    const errs = pageErrors.get(tabId) || [];
+    const description = ex.exception?.description || ex.text || "(unknown error)";
+    errs.push({
+      message: String(description).split("\n")[0],
+      stack: typeof description === "string" ? description : "",
+      url: ex.url || ex.scriptId || "",
+      lineNumber: typeof ex.lineNumber === "number" ? ex.lineNumber : null,
+      columnNumber: typeof ex.columnNumber === "number" ? ex.columnNumber : null,
+      timestamp: Date.now(),
+    });
+    if (errs.length > 200) errs.splice(0, errs.length - 200);
+    pageErrors.set(tabId, errs);
   }
   if (method === "Network.responseReceived" && params.response) {
     const reqs = networkRequests.get(tabId) || [];

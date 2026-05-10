@@ -42,6 +42,15 @@ export async function ensureAttached(tabId) {
   await chrome.debugger.attach({ tabId }, "1.3");
   attachedTabs.set(tabId, { enabledDomains: new Set() });
   await ensureDomain(tabId, "Page");
+  // Enable the data-collection domains eagerly so the DevTools MCP
+  // tools (read_console_messages, read_network_requests,
+  // read_page_errors) always have data — not just data captured AFTER
+  // the first Runtime.evaluate happens to enable Runtime as a side
+  // effect. Enable failures are non-fatal: the listeners in
+  // background.js silently no-op when no events arrive.
+  for (const dom of ["Runtime", "Console", "Network"]) {
+    try { await ensureDomain(tabId, dom); } catch {}
+  }
   // Lock devicePixelRatio so screenshots match CSS coordinates the AI sees.
   try {
     const tab = await chrome.tabs.get(tabId);

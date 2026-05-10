@@ -10,9 +10,14 @@ export function setNativePort(p) { nativePort = p; }
 // CDP debugger attachments
 export const attachedTabs = new Map(); // tabId → { enabledDomains: Set }
 
-// Console + network capture per tab
+// Console + network + uncaught-exception capture per tab.
+// All three are populated by CDP event listeners in background.js as
+// soon as the corresponding domain is enabled (which ensureAttached
+// now does eagerly). Read by the new DevTools MCP tools
+// (read_console_messages, read_network_requests, read_page_errors).
 export const consoleMessages = new Map();
 export const networkRequests = new Map();
+export const pageErrors = new Map();  // tabId → [{message, stack, url, lineNumber, columnNumber, timestamp}]
 
 // Screenshot ring-buffer
 export const screenshotStore = new Map();
