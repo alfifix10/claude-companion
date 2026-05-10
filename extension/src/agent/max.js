@@ -319,6 +319,56 @@ async function handleImageQA(messages) {
   }
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Smart conversation history
+//
+// Replaces the naive last-6-turns slice with a strategy that survives
+// long sessions:
+//   • Always keep the FIRST 2 turns — the user's opening message
+//     usually defines the goal ("اجمع التغريدات…", "اكتب سكربت…").
+//     Losing it means the agent forgets WHY it's here once the chat
+//     extends past 6 turns.
+//   • Always keep the LAST 12 turns — preserves the immediate flow
+//     so the agent feels continuous.
+//   • For anything beyond first-2 + last-12, insert a one-line
+//     marker so the model knows context was elided and points it to
+//     _STATE.md (auto-loaded by native-host) for the back-story.
+//   • Past COMPACTION_THRESHOLD, append a one-time hint nudging the
+//     agent to refresh _STATE.md via update_project_state. The two
+//     mechanisms compose: marker tells the model "look at _STATE.md",
+//     compaction keeps _STATE.md fresh enough to be useful.
+//
+// Token impact (Max sub = $0; relevant for context-window planning):
+//   • Bounded — even at 200 turns, history block stays ~14 entries.
+//   • _STATE.md absorbs older state, capped at 4 KB by the auto-load
+//     reader in native-host.js.
+// ──────────────────────────────────────────────────────────────────────────
+
+const KEEP_FIRST = 2;
+const KEEP_LAST = 12;
+// Threshold at which we nudge the model to call update_project_state.
+// Counted in raw messages (user+assistant interleaved), not in
+// "rounds". 30 messages ≈ 15 rounds, which is "this is a real
+// session now, time to checkpoint state".
+const COMPACTION_THRESHOLD = 30;
+
+function buildSmartHistory(messages) {
+  const fmt = (m) =>
+    `${m.role === "user" ? "USER" : "ASSISTANT"}: ${typeof m.content === "string" ? m.content : "(structured content)"}`;
+  const N = messages.length;
+  if (N <= KEEP_FIRST + KEEP_LAST) {
+    return messages.map(fmt).join("\n");
+  }
+  const head = messages.slice(0, KEEP_FIRST).map(fmt);
+  const tail = messages.slice(-KEEP_LAST).map(fmt);
+  const skipped = N - KEEP_FIRST - KEEP_LAST;
+  // Bilingual marker — Arabic for the human reader scrolling the
+  // chat, English for the model (more reliable instruction-following
+  // when the meta-text is in English).
+  const marker = `[ELIDED: ${skipped} earlier turn(s) folded for brevity. Read _STATE.md for the back-story if needed. — تمّ طيّ ${skipped} رسالة سابقة.]`;
+  return [...head, marker, ...tail].join("\n");
+}
+
 function buildDynamicUser({ history, tab, memories }) {
   // Browser-agent turns only — image turns are routed through
   // handleImageQA above and never reach this function. So the dead
@@ -372,12 +422,26 @@ export async function handleMaxChat(messages) {
   let tab = null;
   try { tab = await getActiveTab(); } catch {}
 
-  // Short conversation tail so Claude can follow multi-turn context
-  const history = messages.slice(-6).map((m) =>
-    `${m.role === "user" ? "USER" : "ASSISTANT"}: ${typeof m.content === "string" ? m.content : "(structured content)"}`
-  ).join("\n");
+  // Conversation tail for multi-turn context. buildSmartHistory keeps
+  // the first 2 turns (goal-setting) AND last 12 turns (current flow),
+  // dropping the middle with a "see _STATE.md" marker. Bounded in
+  // size even for 200-turn marathons — the project memory layer
+  // (CLAUDE.md / _STATE.md auto-loaded by native-host) carries the
+  // older state forward instead.
+  const history = buildSmartHistory(messages);
 
-  const userPrompt = buildDynamicUser({ history, tab, memories });
+  let userPrompt = buildDynamicUser({ history, tab, memories });
+
+  // Long-session compaction nudge. When the conversation has run
+  // long enough that the elision marker is firing, gently ask the
+  // agent to refresh _STATE.md so the next session (or the next
+  // elision) has a fresh summary to fall back on. The hint repeats
+  // each turn past the threshold, but Claude won't redundantly
+  // call update_project_state — it'll act once meaningfully and
+  // skip on subsequent turns until something else changes.
+  if (messages.length > COMPACTION_THRESHOLD) {
+    userPrompt += `\n\n[SYSTEM HINT: this conversation has ${messages.length} messages. If you've made meaningful progress since the last \`update_project_state\` call, consider refreshing it now so future sessions can resume cleanly. If state hasn't changed materially, ignore this hint.]`;
+  }
 
   broadcastToPanels({ type: "provider_info", provider: "Claude Max" });
 
