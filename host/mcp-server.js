@@ -1501,6 +1501,145 @@ server.tool("code_outline",
   });
 
 // ──────────────────────────────────────────────────────────────────────────
+// Pro Mode — HTTP (2 tools)
+//
+// Direct outbound HTTP from the host (Node fetch). Useful for testing
+// APIs without spinning up a tab. Pro Mode required because:
+//   • exfiltration vector (could POST page content to an attacker host)
+//   • internal-network probe (could hit 127.0.0.1 / 192.168.* services)
+// We cap response body at 1 MB to keep the model's context manageable
+// and the runtime memory bounded.
+// ──────────────────────────────────────────────────────────────────────────
+
+const HTTP_RESPONSE_CAP = 1024 * 1024; // 1 MB
+const HTTP_DEFAULT_TIMEOUT = 30_000;
+
+server.tool("http_fetch",
+  "Make an HTTP request and return the response (status, headers, body). " +
+  "Body can be a string (sent as-is) or an object (auto-JSON-stringified with content-type set). " +
+  "Response body is capped at 1 MB. Pro Mode required.",
+  {
+    url: z.string().url().describe("Full URL (https://...). http:// is allowed but https is preferred."),
+    method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]).optional().describe("Default GET."),
+    headers: z.record(z.string(), z.string()).optional().describe("Object of header name → value. Common: Authorization, Content-Type, User-Agent."),
+    body: z.union([z.string(), z.record(z.string(), z.unknown()), z.array(z.unknown())]).optional()
+      .describe("Request body. Object/array auto-JSON; string sent verbatim. Ignored for GET/HEAD."),
+    timeout_ms: z.number().int().min(100).max(120_000).optional().describe("Default 30000."),
+  },
+  async (a) => {
+    try {
+      requireProMode();
+      const method = a.method || "GET";
+      /** @type {Record<string, string>} */
+      const headers = { ...(a.headers || {}) };
+      let bodyToSend;
+      if (a.body !== undefined && method !== "GET" && method !== "HEAD") {
+        if (typeof a.body === "string") {
+          bodyToSend = a.body;
+        } else {
+          bodyToSend = JSON.stringify(a.body);
+          // Set content-type only if caller didn't.
+          const hasCT = Object.keys(headers).some((k) => k.toLowerCase() === "content-type");
+          if (!hasCT) headers["Content-Type"] = "application/json";
+        }
+      }
+      // AbortController so we honour the timeout cleanly.
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), a.timeout_ms || HTTP_DEFAULT_TIMEOUT);
+      let res;
+      try {
+        res = await fetch(a.url, { method, headers, body: bodyToSend, signal: ctrl.signal });
+      } finally {
+        clearTimeout(timer);
+      }
+      // Read up to HTTP_RESPONSE_CAP bytes — slice if larger.
+      const reader = res.body?.getReader?.();
+      let bodyText = "";
+      let truncated = false;
+      if (reader) {
+        const decoder = new TextDecoder();
+        let total = 0;
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          total += value.length;
+          if (total > HTTP_RESPONSE_CAP) {
+            truncated = true;
+            // Decode just up to the cap.
+            const overshoot = total - HTTP_RESPONSE_CAP;
+            bodyText += decoder.decode(value.slice(0, value.length - overshoot), { stream: false });
+            try { reader.cancel(); } catch {}
+            break;
+          }
+          bodyText += decoder.decode(value, { stream: true });
+        }
+        bodyText += decoder.decode();
+      } else {
+        bodyText = await res.text();
+        if (bodyText.length > HTTP_RESPONSE_CAP) {
+          truncated = true;
+          bodyText = bodyText.slice(0, HTTP_RESPONSE_CAP);
+        }
+      }
+      const headersObj = {};
+      res.headers.forEach((v, k) => { headersObj[k] = v; });
+      const out = {
+        url: res.url,
+        status: res.status,
+        statusText: res.statusText,
+        ok: res.ok,
+        headers: headersObj,
+        body: bodyText,
+        truncated,
+      };
+      return {
+        content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
+        isError: !res.ok,
+      };
+    } catch (e) {
+      const msg = e?.name === "AbortError" ? "Request timed out." : (e?.message || String(e));
+      return { content: [{ type: "text", text: `Error: ${msg}` }], isError: true };
+    }
+  });
+
+server.tool("http_get_json",
+  "GET a URL that returns JSON, parse it, and return the parsed value. " +
+  "Convenience wrapper over http_fetch — saves a JSON.parse step and gives clearer error messages on parse failure. Pro Mode required.",
+  {
+    url: z.string().url().describe("Full URL returning JSON."),
+    headers: z.record(z.string(), z.string()).optional().describe("Optional headers (Authorization, Accept, ...)."),
+    timeout_ms: z.number().int().min(100).max(120_000).optional(),
+  },
+  async (a) => {
+    try {
+      requireProMode();
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), a.timeout_ms || HTTP_DEFAULT_TIMEOUT);
+      let res;
+      try {
+        res = await fetch(a.url, {
+          method: "GET",
+          headers: { Accept: "application/json", ...(a.headers || {}) },
+          signal: ctrl.signal,
+        });
+      } finally { clearTimeout(timer); }
+      const text = await res.text();
+      if (!res.ok) {
+        return { content: [{ type: "text", text: `HTTP ${res.status} ${res.statusText}\n${text.slice(0, 1000)}` }], isError: true };
+      }
+      let parsed;
+      try { parsed = JSON.parse(text); }
+      catch (e) {
+        return { content: [{ type: "text", text: `Response is not JSON: ${e.message}\nFirst 500 chars: ${text.slice(0, 500)}` }], isError: true };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(parsed, null, 2) }] };
+    } catch (e) {
+      const msg = e?.name === "AbortError" ? "Request timed out." : (e?.message || String(e));
+      return { content: [{ type: "text", text: `Error: ${msg}` }], isError: true };
+    }
+  });
+
+// ──────────────────────────────────────────────────────────────────────────
 // Pro Mode — Documents (Layer 2 / Phase 5)
 //
 // PDF generation runs the user's already-installed Chrome in headless
