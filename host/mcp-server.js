@@ -931,8 +931,11 @@ const COMMAND_ALLOWLIST = new Set([
   "which", "where", "whoami", "date",
   // Safe-ish creates
   "mkdir", "touch",
-  // Inspection of binaries / processes (read-only)
-  "node", "type",
+  // Inspection (read-only). `type` is the Windows equivalent of `cat`.
+  // (`node` was duplicated here historically — already listed under
+  // Runtimes above; Set semantics meant it was a no-op, but readers
+  // got confused into thinking it had two distinct purposes.)
+  "type",
 ]);
 
 // Hard refusal regardless of allowlist position. Substrings, not whole-token.

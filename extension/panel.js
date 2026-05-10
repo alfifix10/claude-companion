@@ -179,7 +179,14 @@ const TOOL_LABELS = {
 };
 
 let conversation = [];
-const MAX_HISTORY = 50;
+// Cap for how many turns we keep in panel-side state (chat replay,
+// edit-and-resend, history persistence). Independent of what the
+// AGENT sees per-turn — that's governed by buildSmartHistory() in
+// agent/max.js (first-2 + last-12 + marker). 100 here gives the user
+// generous scrollback in marathon sessions without bloating
+// chrome.storage. If you raise this, also revisit history.js
+// chunking limits.
+const MAX_HISTORY = 100;
 let isLoading = false;
 let streamingBubble = null;
 
@@ -1101,14 +1108,6 @@ async function send() {
   startTaskStats();
 
   if (!bgPort) connectBg();
-  // Diagnostic: log image count + payload size at dispatch time.
-  // Lets us verify the images array actually made it through the
-  // async thumbnail-generation gap before hitting bgPort. Remove
-  // once the "Claude doesn't see pasted images" bug is closed.
-  try {
-    const payloadBytes = images.reduce((n, im) => n + (im.base64?.length || 0), 0);
-    console.log("[panel->bg] chat_send images:", images.length, "bytes(base64):", payloadBytes);
-  } catch {}
   bgPort.postMessage({
     type: "chat_send",
     // Strip the stored thumbnails from history before it goes to

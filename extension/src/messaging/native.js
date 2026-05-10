@@ -237,9 +237,6 @@ export function sendMaxQuery(id, prompt, opts = {}) {
   if (!nativePort) return false;
   try {
     const images = opts.images || [];
-    console.log("[native->host] sendMaxQuery images:", images.length,
-      "totalBase64Bytes:", images.reduce((n, i) => n + (i?.base64?.length || 0), 0),
-      "pureMode:", opts.pureMode === true);
     nativePort.postMessage({
       type: "max_query",
       id,
