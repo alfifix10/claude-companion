@@ -1640,6 +1640,222 @@ server.tool("http_get_json",
   });
 
 // ──────────────────────────────────────────────────────────────────────────
+// Pro Mode — Code Quality (3 tools)
+//
+// Smart wrappers over the appropriate tool for the file's language:
+//   • lint:        biome → eslint → ruff
+//   • format:      biome → prettier → ruff format → black
+//   • type-check:  tsc (project-level) → mypy (file-level)
+// All three try the FIRST tool that's available for the language, in
+// the order most projects use today. Output is the tool's own stderr/
+// stdout — the model is good at reading lint output. Pro Mode required
+// (these spawn binaries inside the working directory).
+// ──────────────────────────────────────────────────────────────────────────
+
+// Spawn a binary and resolve with {stdout, stderr, exitCode}. Single
+// helper so the three tools below stay terse. No retry logic — the
+// model can choose to fix and re-run.
+function runTool(cmd, args, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const { workingDirectory } = requireProMode();
+    const cwd = opts.cwd
+      ? validatePath(opts.cwd, workingDirectory)
+      : workingDirectory;
+    let child;
+    try {
+      child = spawn(cmd, args, {
+        cwd, shell: false, windowsHide: true, timeout: opts.timeout || 60_000,
+      });
+    } catch (e) {
+      reject(e);
+      return;
+    }
+    let stdout = ""; let stderr = "";
+    const MAX = 32 * 1024;
+    child.stdout.on("data", (d) => { if (stdout.length < MAX) stdout += d.toString("utf-8"); });
+    child.stderr.on("data", (d) => { if (stderr.length < MAX) stderr += d.toString("utf-8"); });
+    child.on("error", (e) => reject(e));
+    child.on("close", (code) => resolve({ stdout, stderr, exitCode: code }));
+  });
+}
+
+// Detect language from extension. Returns one of:
+// 'js' | 'ts' | 'py' | 'rs' | 'go' | 'unknown'
+function detectLanguage(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  if ([".ts", ".tsx", ".mts", ".cts"].includes(ext)) return "ts";
+  if ([".js", ".jsx", ".mjs", ".cjs"].includes(ext)) return "js";
+  if (ext === ".py") return "py";
+  if (ext === ".rs") return "rs";
+  if (ext === ".go") return "go";
+  return "unknown";
+}
+
+// Try a list of [cmd, args] pairs in order; first one whose process
+// starts (no ENOENT) wins. Returns the result of that one. Used so
+// e.g. lint can prefer biome → eslint without each tool defining
+// its own fallback ladder.
+async function tryTools(candidates) {
+  for (const [cmd, args] of candidates) {
+    try {
+      const r = await runTool(cmd, args);
+      return { cmd, ...r };
+    } catch (e) {
+      // ENOENT: tool not installed → try next
+      // Other errors: also fall through (e.g. bad shim) — last
+      // candidate's error surfaces below.
+      if (candidates.indexOf([cmd, args]) === candidates.length - 1) throw e;
+    }
+  }
+  throw new Error("No suitable tool found.");
+}
+
+server.tool("lint_file",
+  "Lint one source file. Picks the right tool for the language: " +
+  "biome → eslint for JS/TS, ruff → pylint for Python. " +
+  "Returns the linter's own output (warnings + errors with line numbers). " +
+  "Pro Mode required.",
+  {
+    path: z.string().min(1).describe("Path to the file (relative to working dir)."),
+  },
+  async (a) => {
+    try {
+      const { workingDirectory } = requireProMode();
+      const safePath = validatePath(a.path, workingDirectory);
+      const lang = detectLanguage(safePath);
+      const rel = path.relative(workingDirectory, safePath);
+      let candidates;
+      if (lang === "js" || lang === "ts") {
+        candidates = [
+          ["biome", ["check", rel]],
+          ["eslint", [rel]],
+        ];
+      } else if (lang === "py") {
+        candidates = [
+          ["ruff", ["check", rel]],
+          ["pylint", [rel]],
+        ];
+      } else if (lang === "go") {
+        candidates = [["go", ["vet", rel]]];
+      } else if (lang === "rs") {
+        candidates = [["cargo", ["clippy", "--", rel]]];
+      } else {
+        return { content: [{ type: "text", text: `No linter configured for extension "${path.extname(safePath)}".` }], isError: true };
+      }
+      const r = await tryTools(candidates);
+      const summary = `$ ${r.cmd} (exit ${r.exitCode})`;
+      const body = (r.stdout + r.stderr).trim() || "(no output — file is clean)";
+      return {
+        content: [{ type: "text", text: `${summary}\n\n${body}` }],
+        isError: r.exitCode !== 0,
+      };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+server.tool("format_file",
+  "Format one source file. By default prints the proposed formatting (no write). " +
+  "Set `write: true` to overwrite the file in place. " +
+  "Picks the right tool: biome → prettier for JS/TS, ruff format → black for Python, gofmt for Go, rustfmt for Rust. " +
+  "Pro Mode required.",
+  {
+    path: z.string().min(1).describe("Path to the file (relative to working dir)."),
+    write: z.boolean().optional().describe("Apply changes in-place (default false: report diff only)."),
+  },
+  async (a) => {
+    try {
+      const { workingDirectory } = requireProMode();
+      const safePath = validatePath(a.path, workingDirectory);
+      const lang = detectLanguage(safePath);
+      const rel = path.relative(workingDirectory, safePath);
+      const write = a.write === true;
+      let candidates;
+      if (lang === "js" || lang === "ts") {
+        candidates = [
+          ["biome", write ? ["format", "--write", rel] : ["format", rel]],
+          ["prettier", write ? ["--write", rel] : ["--check", rel]],
+        ];
+      } else if (lang === "py") {
+        candidates = [
+          ["ruff", write ? ["format", rel] : ["format", "--diff", rel]],
+          ["black", write ? [rel] : ["--diff", rel]],
+        ];
+      } else if (lang === "go") {
+        candidates = write
+          ? [["gofmt", ["-w", rel]]]
+          : [["gofmt", ["-d", rel]]];
+      } else if (lang === "rs") {
+        candidates = write
+          ? [["rustfmt", [rel]]]
+          : [["rustfmt", ["--check", rel]]];
+      } else {
+        return { content: [{ type: "text", text: `No formatter configured for extension "${path.extname(safePath)}".` }], isError: true };
+      }
+      const r = await tryTools(candidates);
+      const action = write ? "formatted in place" : "diff-only (no write)";
+      const summary = `$ ${r.cmd} — ${action} (exit ${r.exitCode})`;
+      const body = (r.stdout + r.stderr).trim() || (write ? "(file written)" : "(no changes needed)");
+      return {
+        content: [{ type: "text", text: `${summary}\n\n${body}` }],
+        isError: !write && r.exitCode !== 0,  // diff mode reports non-zero when changes needed; that's not an error
+      };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+server.tool("type_check",
+  "Run the type checker. For TypeScript projects: tsc --noEmit (whole project — TS doesn't really do per-file). " +
+  "For Python: mypy on the given path (or whole working dir if path omitted). " +
+  "Pro Mode required.",
+  {
+    path: z.string().optional().describe("Optional file/dir to focus on. Omit for project-wide."),
+    language: z.enum(["ts", "py", "auto"]).optional().describe("Force language. Default 'auto' (detects from path or project files)."),
+  },
+  async (a) => {
+    try {
+      const { workingDirectory } = requireProMode();
+      let lang = a.language || "auto";
+      if (lang === "auto") {
+        if (a.path) {
+          const det = detectLanguage(a.path);
+          if (det === "ts" || det === "py") lang = det;
+        }
+        if (lang === "auto") {
+          // Look at the project for a tsconfig or pyproject
+          if (fs.existsSync(path.join(workingDirectory, "tsconfig.json"))) lang = "ts";
+          else if (fs.existsSync(path.join(workingDirectory, "pyproject.toml"))) lang = "py";
+          else if (fs.existsSync(path.join(workingDirectory, "mypy.ini"))) lang = "py";
+        }
+      }
+      let candidates;
+      if (lang === "ts") {
+        candidates = [["tsc", ["--noEmit"]]];
+      } else if (lang === "py") {
+        const target = a.path || ".";
+        const safeTarget = validatePath(target, workingDirectory);
+        const rel = path.relative(workingDirectory, safeTarget);
+        candidates = [
+          ["mypy", [rel || "."]],
+          ["pyright", [rel || "."]],
+        ];
+      } else {
+        return { content: [{ type: "text", text: "Could not detect language. Pass `language: 'ts' | 'py'` explicitly, or run from a project with tsconfig.json or pyproject.toml." }], isError: true };
+      }
+      const r = await tryTools(candidates);
+      const summary = `$ ${r.cmd} (exit ${r.exitCode})`;
+      const body = (r.stdout + r.stderr).trim() || "(no output — clean)";
+      return {
+        content: [{ type: "text", text: `${summary}\n\n${body}` }],
+        isError: r.exitCode !== 0,
+      };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  });
+
+// ──────────────────────────────────────────────────────────────────────────
 // Pro Mode — Documents (Layer 2 / Phase 5)
 //
 // PDF generation runs the user's already-installed Chrome in headless
