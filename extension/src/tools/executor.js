@@ -12,6 +12,7 @@ import {
 import { sleep, parseKeyCombo } from "../core/utils.js";
 import { activeTask, broadcastToPanels, consoleMessages, networkRequests, pageErrors } from "../core/state.js";
 import { refusalMessage } from "../lib/file-upload-denylist.js";
+import { fenceUntrusted } from "../lib/untrusted-fence.js";
 
 // Keep the task-locked tab in sync when Claude creates or switches tabs.
 function retargetTaskTab(newTabId) {
@@ -278,7 +279,7 @@ export async function executeTool(name, input, tabId) {
       const tab = await chrome.tabs.get(tabId);
       if (resp?.mode === "unchanged") return `Page unchanged since last read_page — refs still valid.`;
       const tag = resp?.mode === "diff" ? " (diff)" : "";
-      return `Page${tag}: ${tab.title}\nURL: ${tab.url}\n\n${resp?.result || "(error reading page)"}`;
+      return `Page${tag}: ${tab.title}\nURL: ${tab.url}\n\n${fenceUntrusted(resp?.result || "(error reading page)")}`;
     }
     case "get_page_text": {
       const tab = await chrome.tabs.get(tabId);
@@ -286,7 +287,7 @@ export async function executeTool(name, input, tabId) {
       if (cached
           && cached.url === tab.url
           && Date.now() - cached.ts < PAGE_TEXT_TTL_MS) {
-        return `Title: ${cached.title}\nURL: ${cached.url}\n\n${cached.text.slice(0, 15000)}`;
+        return `Title: ${cached.title}\nURL: ${cached.url}\n\n${fenceUntrusted(cached.text.slice(0, 15000))}`;
       }
       const resp = await sendContentMessage(tabId, { type: "getPageText" });
       if (!resp?.result) return "Error extracting text";
@@ -298,7 +299,7 @@ export async function executeTool(name, input, tabId) {
           text: d.text || "",
           ts: Date.now(),
         });
-        return `Title: ${d.title}\nURL: ${d.url}\n\n${(d.text || "").slice(0, 15000)}`;
+        return `Title: ${d.title}\nURL: ${d.url}\n\n${fenceUntrusted((d.text || "").slice(0, 15000))}`;
       } catch { return resp.result; }
     }
     case "find": {
@@ -688,7 +689,7 @@ export async function executeTool(name, input, tabId) {
         return header + (trimmed ? `\n    ${trimmed}${snip.length > 300 ? "…" : ""}` : "\n    (empty)");
       });
       const truncatedNote = all.length > cap ? `\n\n(${all.length - cap} more tabs not shown — raise max_tabs to include them)` : "";
-      return `Overview of ${tabs.length} tab(s):\n\n${lines.join("\n\n")}${truncatedNote}`;
+      return `Overview of ${tabs.length} tab(s):\n\n${fenceUntrusted(lines.join("\n\n"))}${truncatedNote}`;
     }
     case "switch_tab": {
       await chrome.tabs.update(input.tabId, { active: true });
