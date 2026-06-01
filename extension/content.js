@@ -63,6 +63,11 @@
     el.id = BORDER_ID;
     el.style.cssText = `
       position: fixed; inset: 0; z-index: 2147483647;
+      /* box-sizing: border-box keeps the 3 px border INSIDE the viewport.
+         Without it (content-box) the border is laid outside the inset:0 box,
+         so its outer half is clipped by the window edges and the frame looks
+         cut on every side. border-box draws the full line just inside. */
+      box-sizing: border-box;
       pointer-events: none;
       border: 3px solid ${CLAUDE_COLOR};
       border-radius: 4px;
