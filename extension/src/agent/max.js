@@ -156,7 +156,7 @@ RULES:
     Use them freely to understand the page before acting.
   • You have a tighter budget for ACTIONS (click, type_text, press_key,
     form_input, drag, navigate, tabs_create, switch_tab, select_option,
-    hover, run_javascript) — about 40 per task. Plan before you click.
+    hover, run_javascript) — about 100 per task. Plan before you click.
 
   SPEED DISCIPLINE (read this CAREFULLY — most user complaints are slowness):
   Each tool call costs ~10-30 seconds of Claude API roundtrip latency,
@@ -502,8 +502,8 @@ export async function handleMaxChat(messages) {
   let consecutiveErrors = 0;
   let lastErrorTool = null;
   const loopDetector = new LoopDetector();
-  const MAX_ACTIONS = 40;
-  const MAX_TOTAL = 150;       // absolute ceiling — reads + actions combined
+  const MAX_ACTIONS = 100;
+  const MAX_TOTAL = 300;       // absolute ceiling — reads + actions combined
   const MAX_CONSECUTIVE_ERRORS = 6;
 
   // Transient-error retry. Real-world long sessions hit network
@@ -660,8 +660,8 @@ export async function handleMaxChat(messages) {
             const loopResult = loopDetector.record(name, inputKey);
             if (loopResult.loop) {
               timeoutCancel(
-                `توقّفت: تكرّرت الأداة "${name}" بنفس المُدخلات ${loopResult.identical} مرّات — `
-                + `حلقة واضحة. جرّب مقاربة مختلفة.`
+                `يبدو أنّي علِقتُ عند هذه النقطة — كرّرت "${name}" ${loopResult.identical} مرّات بلا تقدّم. `
+                + `أوقفتُ المهمة حفاظًا على وقتك. وضّح لي الخطوة التالية أو اضغط «اكمل».`
               );
               return;
             }

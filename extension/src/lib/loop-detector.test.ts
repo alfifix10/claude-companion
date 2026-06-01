@@ -56,39 +56,80 @@ describe("LoopDetector — mutating tools (3-repeat threshold)", () => {
   });
 });
 
-describe("LoopDetector — read-only tools (6-repeat threshold)", () => {
+describe("LoopDetector — read-only tools (8-repeat threshold)", () => {
   let d: LoopDetector;
   beforeEach(() => {
     d = new LoopDetector();
   });
 
-  it("5 identical screenshots — not yet a loop", () => {
-    for (let i = 0; i < 5; i++) d.record("screenshot", "{}");
+  it("7 identical screenshots with no progress — not yet a loop", () => {
+    for (let i = 0; i < 7; i++) {
+      const r = d.record("screenshot", "{}");
+      expect(r.loop).toBe(false);
+    }
     const r = d.record("screenshot", "{}");
-    expect(r.loop).toBe(true); // 6th is exactly the threshold
-    expect(r.identical).toBe(6);
-    expect(r.threshold).toBe(6);
+    expect(r.loop).toBe(true); // 8th is exactly the threshold
+    expect(r.identical).toBe(8);
+    expect(r.threshold).toBe(8);
   });
 
   it("interleaved screenshot+scroll stays below threshold", () => {
-    // Progress pattern: shot → scroll → shot → scroll → shot → scroll
+    // scroll is read-only (not progress), so screenshots accumulate —
+    // the 8-repeat threshold is what keeps this from tripping.
     d.record("screenshot", "{}");
     d.record("scroll", "down");
     d.record("screenshot", "{}");
     d.record("scroll", "down");
     d.record("screenshot", "{}");
     d.record("scroll", "down");
-    // 3 screenshots in 6-wide window, threshold is 6 → NOT a loop
     const r = d.record("screenshot", "{}");
     expect(r.loop).toBe(false);
     expect(r.identical).toBe(4);
   });
 
   it("wait_for repeats legitimately", () => {
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 7; i++) {
       const r = d.record("wait_for", "selector=button.primary");
       expect(r.loop).toBe(false);
     }
+  });
+});
+
+describe("LoopDetector — progress-aware reset", () => {
+  let d: LoopDetector;
+  beforeEach(() => {
+    d = new LoopDetector();
+  });
+
+  it("a mutating action between observations resets the read-only count", () => {
+    // The real-world Stripe-cancellation pattern: screenshot, click,
+    // screenshot, click, … Each click is genuine progress, so the
+    // screenshots must never accumulate toward a loop.
+    for (let i = 0; i < 10; i++) {
+      const shot = d.record("screenshot", "{}");
+      expect(shot.loop).toBe(false);
+      expect(shot.identical).toBe(1); // reset by the previous click
+      d.record("click", `ref_${i}`); // distinct, real progress
+    }
+  });
+
+  it("dead-ref click loop is still caught even with screenshots between", () => {
+    // Same click ref repeated — clicks are mutating and stay in the
+    // window, so the 3-repeat mutating threshold still fires.
+    d.record("click", "ref_dead");
+    d.record("screenshot", "{}");
+    d.record("click", "ref_dead");
+    d.record("screenshot", "{}");
+    const r = d.record("click", "ref_dead");
+    expect(r.loop).toBe(true);
+    expect(r.identical).toBe(3);
+  });
+
+  it("pure observation with zero actions still trips at the threshold", () => {
+    let last = d.record("read_page", "{}");
+    for (let i = 0; i < 7; i++) last = d.record("read_page", "{}");
+    expect(last.loop).toBe(true);
+    expect(last.identical).toBe(8);
   });
 });
 

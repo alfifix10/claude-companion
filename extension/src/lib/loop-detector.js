@@ -9,8 +9,19 @@
  *
  * Per-class thresholds solve both:
  *   • Mutating tools: 3 identical = loop (dead-ref click pattern).
- *   • Read-only tools: 6 identical = loop (genuine stuck state, not
+ *   • Read-only tools: 8 identical = loop (genuine stuck state, not
  *                                          paginated browsing).
+ *
+ * Progress-aware counting (the key refinement): a "loop" means repeated
+ * calls WITH NO PROGRESS BETWEEN THEM — not just repeated calls in a
+ * window. When a mutating action runs, the page advanced, so the
+ * read-only observations that preceded it (screenshot, read_page, ...)
+ * are no longer evidence of a stall and get dropped from the window.
+ * This stops the false positive where a legitimate observe→act→observe
+ * cycle ("screenshot, click, screenshot, click, …") tripped the
+ * read-only threshold even though the agent was clearly making headway.
+ * Repeated *mutating* calls stay in the window, so a genuine dead-action
+ * loop (same click ×3) is still caught.
  *
  * Stateful — one detector per task. Caller should construct a fresh
  * one when handleMaxChat starts a new run.
@@ -23,7 +34,7 @@ export const DEFAULT_LOOP_CONFIG = {
     // threshold — effectively disabling loop detection for that tool.
     window: 16,
     mutatingRepeats: 3,
-    readonlyRepeats: 6,
+    readonlyRepeats: 8,
 };
 /**
  * Stateful detector. Construct one per task; call `record` on every
@@ -43,6 +54,16 @@ export class LoopDetector {
         this.recent.push({ name, inputKey });
         if (this.recent.length > this.config.window) {
             this.recent.shift();
+        }
+        // Progress reset — see the module header. A mutating action advanced
+        // the page, so the read-only observations that came before it are no
+        // longer evidence of a stall. Drop them. Mutating entries stay, so
+        // dead-action loops (same click ×3) are still caught.
+        if (isMutating(name)) {
+            for (let i = this.recent.length - 2; i >= 0; i--) {
+                if (!isMutating(this.recent[i].name))
+                    this.recent.splice(i, 1);
+            }
         }
         const identical = this.recent.filter((c) => c.name === name && c.inputKey === inputKey).length;
         // Per-tool override > class default. The override exists for tools
