@@ -61,7 +61,8 @@ export class LoopDetector {
         // dead-action loops (same click ×3) are still caught.
         if (isMutating(name)) {
             for (let i = this.recent.length - 2; i >= 0; i--) {
-                if (!isMutating(this.recent[i].name))
+                const entry = this.recent[i];
+                if (entry && !isMutating(entry.name))
                     this.recent.splice(i, 1);
             }
         }

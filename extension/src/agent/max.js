@@ -21,6 +21,7 @@ import { rejectToolsFor, clearToolRejection } from "../tools/native-tool-handler
 import { isMutating } from "../lib/tool-registry.js";
 import { LoopDetector } from "../lib/loop-detector.js";
 import { safeInputKey } from "../lib/safe-input-key.js";
+import { buildSmartHistory } from "../lib/conversation-history.js";
 
 // Stable key for a tool-call input so we can detect exact repeats. Uses
 // safeInputKey lives in src/lib/safe-input-key.ts — 16 unit tests
@@ -344,30 +345,14 @@ async function handleImageQA(messages) {
 //     reader in native-host.js.
 // ──────────────────────────────────────────────────────────────────────────
 
-const KEEP_FIRST = 2;
-const KEEP_LAST = 12;
 // Threshold at which we nudge the model to call update_project_state.
 // Counted in raw messages (user+assistant interleaved), not in
 // "rounds". 30 messages ≈ 15 rounds, which is "this is a real
 // session now, time to checkpoint state".
 const COMPACTION_THRESHOLD = 30;
 
-function buildSmartHistory(messages) {
-  const fmt = (m) =>
-    `${m.role === "user" ? "USER" : "ASSISTANT"}: ${typeof m.content === "string" ? m.content : "(structured content)"}`;
-  const N = messages.length;
-  if (N <= KEEP_FIRST + KEEP_LAST) {
-    return messages.map(fmt).join("\n");
-  }
-  const head = messages.slice(0, KEEP_FIRST).map(fmt);
-  const tail = messages.slice(-KEEP_LAST).map(fmt);
-  const skipped = N - KEEP_FIRST - KEEP_LAST;
-  // Bilingual marker — Arabic for the human reader scrolling the
-  // chat, English for the model (more reliable instruction-following
-  // when the meta-text is in English).
-  const marker = `[ELIDED: ${skipped} earlier turn(s) folded for brevity. Read _STATE.md for the back-story if needed. — تمّ طيّ ${skipped} رسالة سابقة.]`;
-  return [...head, marker, ...tail].join("\n");
-}
+// buildSmartHistory now lives in src/lib/conversation-history.js — pivot
+// rescue + per-message clipping + a character budget, all unit-tested.
 
 function buildDynamicUser({ history, tab, memories }) {
   // Browser-agent turns only — image turns are routed through
@@ -498,12 +483,22 @@ export async function handleMaxChat(messages) {
   // source files for full rationale (single-source-of-truth, per-class
   // thresholds) plus 38 unit tests guarding the behaviour.
   let actionCount = 0;
+  let actionsSinceProgress = 0;
   let totalCount = 0;
   let consecutiveErrors = 0;
   let lastErrorTool = null;
   const loopDetector = new LoopDetector();
-  const MAX_ACTIONS = 100;
-  const MAX_TOTAL = 300;       // absolute ceiling — reads + actions combined
+  // Two-tier, progress-aware mutating-action guard. The old flat cap
+  // (MAX_ACTIONS=100) guillotined legitimate batch loops: "process these
+  // 40 rows" = ~3 mutating actions/row = 120 actions, so the task died at
+  // row ~33. Now a NEW distinct action (advancing to the next item) resets
+  // actionsSinceProgress, so varied loops run to completion, while genuine
+  // spinning is still caught early by the LoopDetector (3 mutating / 8 read
+  // repeats) and bounded absolutely by MAX_ACTIONS / MAX_TOTAL / the 60-min
+  // ceiling.
+  const MAX_ACTIONS = 250;
+  const MAX_ACTIONS_NO_PROGRESS = 50;
+  const MAX_TOTAL = 600;       // absolute ceiling — reads + actions combined
   const MAX_CONSECUTIVE_ERRORS = 6;
 
   // Transient-error retry. Real-world long sessions hit network
@@ -636,13 +631,39 @@ export async function handleMaxChat(messages) {
               setBorder(activeTask?.tabId, true);
             }
 
-            // ── Anti-stuck: budget + loop detection ──
+            // ── Anti-stuck: loop detection + progress-aware budget ──
+            // Record the call FIRST so the budget can tell "varied work"
+            // (a new distinct call = progress through a batch) apart from
+            // "spinning" (the same call repeated).
             totalCount++;
-            if (isMutating(name)) actionCount++;
+            const inputKey = safeInputKey(block.input);
+            const loopResult = loopDetector.record(name, inputKey);
+            if (loopResult.loop) {
+              timeoutCancel(
+                `يبدو أنّي علِقتُ عند هذه النقطة — كرّرت "${name}" ${loopResult.identical} مرّات بلا تقدّم. `
+                + `أوقفتُ المهمة حفاظًا على وقتك. وضّح لي الخطوة التالية أو اضغط «اكمل».`
+              );
+              return;
+            }
+            if (isMutating(name)) {
+              actionCount++;
+              // identical <= 1 → this (tool,input) is new in the window, i.e.
+              // the agent advanced to a new step. Reset the no-progress
+              // budget so a long legitimate loop isn't capped mid-way.
+              if (loopResult.identical <= 1) actionsSinceProgress = 0;
+              else actionsSinceProgress++;
+            }
+            if (actionsSinceProgress > MAX_ACTIONS_NO_PROGRESS) {
+              timeoutCancel(
+                `كرّرتُ إجراءات متشابهة دون تقدّم واضح (${actionsSinceProgress}). `
+                + `أوقفتُ المهمة حفاظًا على وقتك — وضّح الخطوة التالية أو اضغط «اكمل».`
+              );
+              return;
+            }
             if (actionCount > MAX_ACTIONS) {
               timeoutCancel(
                 `بلغتُ حدّ ${MAX_ACTIONS} إجراء (نقر/كتابة/تنقّل) في هذه المهمّة. `
-                + `لو تريد الاستمرار، أعد الطلب بخطوات أوضح أو حدّد الجزء المتبقّي.`
+                + `حفظتُ ما أُنجِز — اضغط «اكمل» لإكمال الجزء المتبقّي.`
               );
               return;
             }
@@ -651,17 +672,6 @@ export async function handleMaxChat(messages) {
               // hasn't finished. Unusual — stop just in case.
               timeoutCancel(
                 `بلغتُ ${MAX_TOTAL} استدعاء أداة دون انتهاء. المهمّة أوسع من المتوقّع — قسّمها.`
-              );
-              return;
-            }
-            // Loop detection delegated to src/lib/loop-detector.ts —
-            // per-class thresholds, 19 unit tests guarding behaviour.
-            const inputKey = safeInputKey(block.input);
-            const loopResult = loopDetector.record(name, inputKey);
-            if (loopResult.loop) {
-              timeoutCancel(
-                `يبدو أنّي علِقتُ عند هذه النقطة — كرّرت "${name}" ${loopResult.identical} مرّات بلا تقدّم. `
-                + `أوقفتُ المهمة حفاظًا على وقتك. وضّح لي الخطوة التالية أو اضغط «اكمل».`
               );
               return;
             }
