@@ -83,8 +83,32 @@ function validatePath(inputPath, workingDirectory) {
     }
     return real;
   } catch (e) {
-    if (e.code === "ENOENT") return abs;   // file doesn't exist yet — return lexical
-    throw e;
+    if (e.code !== "ENOENT") throw e;
+    // The leaf doesn't exist yet (e.g. write_file to a brand-new path).
+    // The lexical check above only guards the *spelled* path — it can't
+    // see an intermediate symlink. Resolve the nearest existing ancestor's
+    // real path and re-validate, so e.g. `wd/link/new.txt` where
+    // `wd/link` -> /etc is rejected instead of silently writing THROUGH
+    // the symlink to outside the sandbox.
+    let probe = abs;
+    for (;;) {
+      const parent = path.dirname(probe);
+      if (parent === probe) break;            // reached the filesystem root
+      let realParent;
+      try {
+        realParent = fs.realpathSync(parent);
+      } catch (e2) {
+        if (e2.code === "ENOENT") { probe = parent; continue; }  // walk up
+        throw e2;
+      }
+      if (realParent !== wd && !realParent.startsWith(wd + sep)) {
+        throw new Error(`Path resolves outside the working directory via a symlinked parent: ${inputPath}`);
+      }
+      // Ancestor is real and inside the sandbox — rebuild the not-yet-
+      // existing tail under the resolved ancestor.
+      return path.join(realParent, path.relative(parent, abs));
+    }
+    return abs;   // nothing along the path exists yet — lexical check stands
   }
 }
 // Gate every Pro-Mode tool with this. Throws (Claude sees the message)
@@ -964,6 +988,13 @@ server.tool("run_command",
   async (a) => {
     try {
       const { workingDirectory } = requireProMode();
+      // The allowlist check normalises to basename, but spawn() below runs
+      // the RAW a.cmd. Reject any path separator so a basename of "git"
+      // can't smuggle an arbitrary executable like "C:\evil\git" or
+      // "./node" past the allowlist.
+      if (/[\\/]/.test(a.cmd)) {
+        throw new Error(`Command must be a bare executable name, not a path: "${a.cmd}"`);
+      }
       // Normalise cmd — basename only (no path traversal in the cmd itself).
       const cmdName = path.basename(a.cmd).toLowerCase().replace(/\.(exe|cmd|bat|sh|ps1)$/i, "");
       if (!COMMAND_ALLOWLIST.has(cmdName)) {
