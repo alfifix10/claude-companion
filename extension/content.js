@@ -304,12 +304,33 @@
   // ─────────────────────────────────────────────────────────────────────
   let lastSnapshot = null; // { url, lines, ts }
 
+  // Structural diff keyed on the element ref each line carries (`[ref_N]`).
+  // The old line-set diff reported a counter tick or an aria-expanded toggle
+  // as remove+add (two lines) because the line TEXT changed; keying on the
+  // stable ref instead reports it as a single "changed" line. Fewer tokens,
+  // and the signal ("this existing control updated") is clearer than churn.
+  // Lines with no ref (shouldn't normally happen — every emitted node gets
+  // one) fall back to set semantics so nothing is silently dropped.
+  function lineRef(line) {
+    const m = line.match(/\[(ref_\d+)\]/);
+    return m ? m[1] : null;
+  }
   function diffSnapshots(prev, curr) {
-    const p = new Set(prev), c = new Set(curr);
-    return {
-      added: curr.filter((l) => !p.has(l)),
-      removed: prev.filter((l) => !c.has(l)),
-    };
+    const prevByRef = new Map(), currByRef = new Map();
+    const prevNoRef = [], currNoRef = [];
+    for (const l of prev) { const r = lineRef(l); r ? prevByRef.set(r, l) : prevNoRef.push(l); }
+    for (const l of curr) { const r = lineRef(l); r ? currByRef.set(r, l) : currNoRef.push(l); }
+    const added = [], removed = [], changed = [];
+    for (const [r, l] of currByRef) {
+      if (!prevByRef.has(r)) added.push(l);
+      else if (prevByRef.get(r) !== l) changed.push(l);
+    }
+    for (const [r, l] of prevByRef) { if (!currByRef.has(r)) removed.push(l); }
+    // No-ref lines: set semantics (defensive — normally empty).
+    const pSet = new Set(prevNoRef), cSet = new Set(currNoRef);
+    for (const l of currNoRef) if (!pSet.has(l)) added.push(l);
+    for (const l of prevNoRef) if (!cSet.has(l)) removed.push(l);
+    return { added, removed, changed };
   }
 
   function generateAccessibilityTreeDiff(options = {}) {
@@ -322,19 +343,21 @@
       return { mode: "full", tree: full };
     }
 
-    const { added, removed } = diffSnapshots(lastSnapshot.lines, lines);
+    const { added, removed, changed } = diffSnapshots(lastSnapshot.lines, lines);
     lastSnapshot = { url, lines, ts: Date.now() };
 
-    if (added.length === 0 && removed.length === 0) {
+    if (added.length === 0 && removed.length === 0 && changed.length === 0) {
       return { mode: "unchanged", tree: "" };
     }
-    const diffSize = added.reduce((s, l) => s + l.length, 0) + removed.reduce((s, l) => s + l.length, 0);
+    const sumLen = (arr) => arr.reduce((s, l) => s + l.length, 0);
+    const diffSize = sumLen(added) + sumLen(removed) + sumLen(changed);
     if (diffSize > full.length * 0.7) {
       return { mode: "full", tree: full };
     }
     let body = `DIFF (same URL, ${lines.length} elements total):\n`;
     if (added.length) body += `\n+ added (${added.length}):\n` + added.map((l) => "  " + l).join("\n");
     if (removed.length) body += `\n- removed (${removed.length}):\n` + removed.map((l) => "  " + l).join("\n");
+    if (changed.length) body += `\n~ changed (${changed.length}):\n` + changed.map((l) => "  " + l).join("\n");
     return { mode: "diff", tree: body };
   }
 
