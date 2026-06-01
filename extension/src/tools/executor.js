@@ -925,7 +925,7 @@ export async function executeTool(name, input, tabId) {
       // tab routinely contain auth tokens — exposing reads in default
       // mode would let the agent harvest them silently. With Pro Mode
       // the user has explicitly accepted that risk surface.
-      const proMode = await checkProModeFromUserData();
+      const proMode = await checkProModeEnabled();
       if (!proMode) {
         return "Error: Pro Mode required (storage often contains auth tokens). Enable in extension settings.";
       }
@@ -1064,11 +1064,14 @@ export async function executeTool(name, input, tabId) {
   }
 }
 
-// Pro Mode gate — read the user-data file the host writes. Async
-// because we go through the native messaging round-trip (no direct
-// fs access from the service worker context). Falls back to false
-// (= Pro Mode off) on any error so the gate fails closed.
-async function checkProModeFromUserData() {
+// Pro Mode gate (extension side). chrome.storage.local is the LIVE source of
+// truth while the extension runs; the host's user-data.json is only a
+// best-effort backup mirror of it (see core/user-data.js). The host-side
+// tools (mcp-server's requireProMode) read that mirror instead, because they
+// have no access to chrome.storage from the Node context. Both read paths are
+// intentional — they live in different process contexts. This one reads
+// storage directly (no native round-trip). Fails closed on any error.
+async function checkProModeEnabled() {
   try {
     const stored = await chrome.storage.local.get("proMode");
     return stored?.proMode === true;
