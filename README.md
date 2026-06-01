@@ -9,7 +9,7 @@
 ## What it does
 
 - Chat with Claude in a side panel of any Chromium browser (Chrome, Brave, Edge, Opera, Vivaldi, Arc).
-- Claude can **read, click, type, navigate, and screenshot** the page on your behalf — 18 MCP tools, all routed through your Max subscription.
+- Claude can **read, click, type, navigate, and screenshot** the page on your behalf — 58 MCP tools, all routed through your Max subscription.
 - **Zero API spend.** Every call goes through the `claude` CLI locally, which uses your Max plan.
 - Ships with Arabic and English voice input (Web Speech API) and a local "shortcut parser" that catches `click X`, `open youtube`, etc. without calling the model at all.
 
@@ -26,7 +26,7 @@
                                                                     ▼
                                                            ┌─────────────────┐
                                                            │   MCP Server    │
-                                                           │  (18 tools)     │
+                                                           │  (58 tools)     │
                                                            └────────┬────────┘
                                                                     │ stdio
                                                                     ▼
@@ -114,9 +114,10 @@ Key points:
 
 Public-release hardening applied:
 
-- Tool allowlist is **hard-coded** in the native host — `mcp__claude-companion__*` + a small set of read-only built-ins (Read, Grep, Glob, WebFetch, WebSearch). Anything else is denied and, since we run headless, blocked.
-- `--dangerously-skip-permissions` is **NOT** used — the allowlist alone drives authorization. Unknown tools fail closed.
-- Destructive built-ins (`Bash`, `Write`, `Edit`, `NotebookEdit`) are explicitly in the disallowlist as a belt-and-suspenders.
+- The agent runs the CLI with `--dangerously-skip-permissions` — it runs headless, so there is no human to answer a permission prompt. Authorization is therefore enforced by a **denylist**: `Bash`, `Write`, `Edit`, `NotebookEdit` are passed to `--disallowedTools`, and `run_javascript` is added to that denylist unless **Pro Mode** is enabled.
+- Be aware this is a denylist, not an allowlist: it **fails open** for any *new* built-in a future CLI version might add. Moving to an explicit allowlist is tracked in `ROADMAP.md` (Phase 1). Treat the working directory you point Pro Mode at as fully trusted.
+- The image-Q&A path runs with `--tools ""` (no tools at all).
+- Pro Mode tools (filesystem / shell / sqlite) are sandboxed to the configured working directory and gated behind an explicit user toggle.
 - JavaScript dialogs auto-dismiss `confirm()` and `prompt()` (cancel). `alert()` and `beforeunload` are accepted.
 - Markdown links rendered in the UI are limited to safe URL schemes (`https`, `http`, `mailto`, `tel`, relative). `javascript:` and `data:` are stripped.
 - Native messaging and TCP bridge enforce a 16 MB payload cap to block length-prefix DoS.
@@ -131,7 +132,7 @@ If you find a security issue, please open a private report rather than a public 
 claude-companion/
 ├── host/
 │   ├── native-host.js          # stdio ↔ TCP ↔ spawn claude
-│   ├── mcp-server.js           # MCP server, 18 browser tools
+│   ├── mcp-server.js           # MCP server, 58 browser tools
 │   └── package.json
 ├── extension/
 │   ├── manifest.json           # Manifest V3
