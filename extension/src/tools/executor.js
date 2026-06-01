@@ -48,6 +48,22 @@ function pulseBorder(tabId) {
 const pageTextCache = new Map(); // tabId → { url, title, text, ts }
 const PAGE_TEXT_TTL_MS = 60_000;
 
+// Vision fallback escalation. Self-healing refs (content.js) recover most
+// stale refs; when an ACTION still can't resolve its target, the element is
+// genuinely gone or never had a name, and re-reading often hands back the same
+// dead ref. After two such misses in a row we tell Claude to take a labelled
+// screenshot — the Set-of-Mark image locates controls that the DOM tree can't.
+// Counter is per-tab; read_page clears it (a fresh read is a clean slate).
+const refFailStreak = new Map(); // tabId → consecutive ref-resolution failures
+function noteRefMiss(tabId) {
+  const n = (refFailStreak.get(tabId) || 0) + 1;
+  refFailStreak.set(tabId, n);
+  return n >= 2
+    ? " — تعذّر تحديد العنصر مرّتين؛ استدعِ screenshot مع labels=true لتحديده بصريًّا."
+    : "";
+}
+function clearRefMiss(tabId) { refFailStreak.delete(tabId); }
+
 export function invalidatePageTextCache(tabId) {
   if (tabId == null) return;
   pageTextCache.delete(tabId);
@@ -271,6 +287,7 @@ export async function executeTool(name, input, tabId) {
       return `Navigated to ${url}`;
     }
     case "read_page": {
+      clearRefMiss(tabId); // fresh read — reset the vision-fallback streak
       const diff = input.full !== true;
       const resp = await sendContentMessage(tabId, {
         type: "generateAccessibilityTree",
@@ -325,7 +342,7 @@ export async function executeTool(name, input, tabId) {
       if (!ref && input.text) {
         const resp = await sendContentMessage(tabId, { type: "findElements", query: input.text });
         const results = resp?.result || [];
-        if (!results.length) return `act: no element matching "${input.text}". Call read_page to see what's available.`;
+        if (!results.length) return `act: no element matching "${input.text}". Call read_page to see what's available.${noteRefMiss(tabId)}`;
         ref = results[0].ref; // top-ranked match — see find() relevance scoring
       }
       if (!ref) return "act: provide either 'ref' or 'text' to target an element.";
@@ -340,7 +357,7 @@ export async function executeTool(name, input, tabId) {
     }
     case "click": {
       const [x, y] = await resolveClickTarget(tabId, input);
-      if (x == null) return "Element not found (ref may have expired — call read_page again)";
+      if (x == null) return "Element not found (ref may have expired — call read_page again)" + noteRefMiss(tabId);
       await ensureAttached(tabId);
       invalidatePageTextCache(tabId);
       const button = input.button || "left";
