@@ -469,6 +469,27 @@
   // ─────────────────────────────────────────────────────────────────────
   // Find elements (CSS selector first, then fuzzy text match)
   // ─────────────────────────────────────────────────────────────────────
+  // Relevance score of an element's text against the query. Higher = closer.
+  // Tiers (exact > prefix > word-start > substring) are script-agnostic (the
+  // word-start check uses a leading space, so it works for Arabic too). A
+  // closeness bonus favours shorter, more-specific text. Returns 0 for no
+  // match. Pure function — unit-tested.
+  function scoreMatch(name, text, q) {
+    let best = 0;
+    for (const raw of [name, text]) {
+      if (!raw) continue;
+      const t = String(raw).toLowerCase().trim();
+      if (!t.includes(q)) continue;
+      let s;
+      if (t === q) s = 100;
+      else if (t.startsWith(q)) s = 80;
+      else if (t.includes(" " + q)) s = 60;       // q starts a word
+      else s = 40;                                 // q somewhere inside
+      s += Math.max(0, 20 - Math.floor((t.length - q.length) / 4));
+      if (s > best) best = s;
+    }
+    return best;
+  }
   function findElements(query) {
     const results = [];
     // Try CSS first when query looks like a selector
@@ -491,14 +512,22 @@
       }
     } catch {}
 
-    // Fuzzy text search
-    const q = query.toLowerCase();
+    // Fuzzy text search — collect all matches, RANK by relevance, take top 25.
+    // The old code returned the first 25 in DOM order, so "حفظ" / "Save" could
+    // be buried under "حفظ كمسودة" / "Autosave". Ranking surfaces the closest
+    // match first — which is the one Claude clicks.
+    const q = query.toLowerCase().trim();
     const all = document.querySelectorAll("a, button, input, textarea, select, [role]");
+    const scored = [];
     for (const el of all) {
-      if (results.length >= 25) break;
+      if (scored.length >= 200) break;            // bound work on huge pages
       if (!isVisible(el)) continue;
-      const name = (getAccessibleName(el) + " " + (el.textContent || "")).toLowerCase();
-      if (!name.includes(q)) continue;
+      const score = scoreMatch(getAccessibleName(el), el.textContent || "", q);
+      if (score <= 0) continue;
+      scored.push({ el, score });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    for (const { el } of scored.slice(0, 25)) {
       const ref = getOrAssignRef(el);
       const r = el.getBoundingClientRect();
       results.push({
