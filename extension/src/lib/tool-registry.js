@@ -35,6 +35,17 @@
  * tool we don't handle locally (or vice versa).
  */
 export const TOOL_REGISTRY = {
+    act: {
+        name: "act",
+        mutating: true,
+        // act-by-text can legitimately repeat with the SAME input across a
+        // paginated loop ("click Next" page after page): the page changes even
+        // though the args don't. Same rationale as run_javascript — bump the
+        // loop threshold so honest pagination isn't flagged as a stuck loop.
+        loopThreshold: 10,
+        category: "interaction",
+        description: "Target an element by text or ref and click/fill it in one call.",
+    },
     click: {
         name: "click",
         mutating: true,

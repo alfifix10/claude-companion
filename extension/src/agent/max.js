@@ -165,6 +165,14 @@ RULES:
   20 small tool calls takes 5+ minutes; the same task in 3 well-shaped
   calls takes under a minute. Optimise for FEWER, BIGGER calls.
 
+  • PREFER \`act\` FOR TARGET-AND-CLICK / TARGET-AND-FILL.
+    To click or fill a control whose label you already know, call
+    act({text:"تسجيل الدخول", action:"click"}) or
+    act({text:"البريد", action:"fill", value:"a@b.com"}) in ONE call — it
+    finds the closest-matching element, scrolls it into view, and acts. This
+    replaces the read_page → find the ref → click sequence (3 turns → 1).
+    Use read_page first only when you need to UNDERSTAND the page layout.
+
   • PREFER ONE BIG SCRIPT OVER MANY SMALL ONES.
     For scraping, scrolling, polling, batch DOM queries: write a SINGLE
     run_javascript whose body is an async IIFE containing the entire

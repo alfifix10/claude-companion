@@ -9,7 +9,7 @@
 ## What it does
 
 - Chat with Claude in a side panel of any Chromium browser (Chrome, Brave, Edge, Opera, Vivaldi, Arc).
-- Claude can **read, click, type, navigate, and screenshot** the page on your behalf — 58 MCP tools, all routed through your Max subscription.
+- Claude can **read, click, type, navigate, and screenshot** the page on your behalf — 59 MCP tools, all routed through your Max subscription.
 - **Zero API spend.** Every call goes through the `claude` CLI locally, which uses your Max plan.
 - Ships with Arabic and English voice input (Web Speech API) and a local "shortcut parser" that catches `click X`, `open youtube`, etc. without calling the model at all.
 
@@ -26,7 +26,7 @@
                                                                     ▼
                                                            ┌─────────────────┐
                                                            │   MCP Server    │
-                                                           │  (58 tools)     │
+                                                           │  (59 tools)     │
                                                            └────────┬────────┘
                                                                     │ stdio
                                                                     ▼
@@ -132,7 +132,7 @@ If you find a security issue, please open a private report rather than a public 
 claude-companion/
 ├── host/
 │   ├── native-host.js          # stdio ↔ TCP ↔ spawn claude
-│   ├── mcp-server.js           # MCP server, 58 browser tools
+│   ├── mcp-server.js           # MCP server, 59 browser tools
 │   └── package.json
 ├── extension/
 │   ├── manifest.json           # Manifest V3

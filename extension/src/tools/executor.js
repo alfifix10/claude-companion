@@ -314,6 +314,30 @@ export async function executeTool(name, input, tabId) {
       try { sendContentMessage(tabId, { type: "highlightElements", refs: results.map((r) => r.ref) }); } catch {}
       return out;
     }
+    case "act": {
+      // Compound action: target + scroll-into-view + click/fill in ONE call,
+      // so Claude doesn't need read_page → extract ref → click as three
+      // separate turns. Target by `ref` (self-healing) OR by `text` (ranked
+      // find picks the closest match). Delegates to the existing click /
+      // form_input handlers so all their hardening — JS click fallback, delta
+      // trailer, React-safe value set — applies unchanged.
+      let ref = input.ref;
+      if (!ref && input.text) {
+        const resp = await sendContentMessage(tabId, { type: "findElements", query: input.text });
+        const results = resp?.result || [];
+        if (!results.length) return `act: no element matching "${input.text}". Call read_page to see what's available.`;
+        ref = results[0].ref; // top-ranked match — see find() relevance scoring
+      }
+      if (!ref) return "act: provide either 'ref' or 'text' to target an element.";
+      await sendContentMessage(tabId, { type: "scrollToRef", ref });
+      const action = String(input.action || "click").toLowerCase();
+      if (action === "click") return await executeTool("click", { ref }, tabId);
+      if (action === "fill" || action === "type") {
+        if (input.value == null) return "act: 'value' is required for a fill action.";
+        return await executeTool("form_input", { ref, value: String(input.value) }, tabId);
+      }
+      return `act: unknown action "${action}". Use "click" or "fill".`;
+    }
     case "click": {
       const [x, y] = await resolveClickTarget(tabId, input);
       if (x == null) return "Element not found (ref may have expired — call read_page again)";

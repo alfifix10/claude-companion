@@ -510,6 +510,19 @@ server.tool("find", "Find elements by text or CSS selector.", {
   query: z.string(),
 }, async (a) => ({ content: [{ type: "text", text: String(await request("find", a)) }] }));
 
+server.tool("act",
+  "Target an element AND act on it in ONE call — saves the read_page → find ref → click round-trip. " +
+  "Give `text` (the visible label/name; the closest match is chosen automatically) OR a `ref` from read_page, " +
+  "plus an `action`. action='click' clicks it; action='fill' types `value` into it. The element is scrolled " +
+  "into view first. Use read_page first only when you need to UNDERSTAND the page, not just act on a known label.",
+  {
+    text: z.string().optional().describe("Visible label/name of the target element (closest match wins)."),
+    ref: z.string().optional().describe("Element ref from read_page (alternative to text)."),
+    action: z.enum(["click", "fill"]).describe("click the element, or fill it with `value`."),
+    value: z.string().optional().describe("Text to enter when action='fill'."),
+  },
+  async (a) => ({ content: [{ type: "text", text: String(await request("act", a)) }] }));
+
 server.tool("click", "Click an element by ref or coordinates. Set button to 'right' for context menu, 'middle' to open link in new tab. Use modifiers like ['ctrl'] for Ctrl+click (open in new tab on links).", {
   ref: z.string().optional(),
   coordinate: coord.optional(),
