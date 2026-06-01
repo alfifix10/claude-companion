@@ -380,6 +380,10 @@ function handleMaxQuery(msg) {
   // → text, like calling claude.ai directly.
   const pureMode = msg.pureMode === true;
 
+  // Path of the temp file holding the system prompt (see below). Declared
+  // here so the post-spawn close handler can delete it. null when unused.
+  let spFile = null;
+
   const args = ["-p", "--output-format", "stream-json", "--verbose"];
   if (!pureMode) {
     args.push("--dangerously-skip-permissions");
@@ -433,13 +437,26 @@ function handleMaxQuery(msg) {
     // that never changes between turns hits Anthropic's server-side
     // prompt cache (5 min TTL, ~90% discount on cached tokens).
     const systemPrompt = typeof msg.system === "string" ? msg.system : "";
-    // 16 KB cap — well under Windows' 32 K cmd.exe arg limit (which we
-    // share with --model and a couple of --disallowedTools entries) but
-    // generous enough for a verbose rule set. Older code capped at 8 K
-    // and silently dropped the entire prompt when it grew past that —
-    // the rules vanished and Claude reverted to default behaviour.
-    if (systemPrompt && systemPrompt.length < 16_000) {
-      args.push("--system-prompt", systemPrompt);
+    // Pass the system prompt via a TEMP FILE (--system-prompt-file), NOT as a
+    // command-line arg. On Windows we launch through `cmd.exe /d /s /c
+    // claude.cmd …`, and cmd.exe SILENTLY TRUNCATES any command line over
+    // ~8191 chars. A verbose system prompt (~9 KB) pushed the whole command
+    // line past that limit, so claude received a mangled invocation and
+    // returned nothing — the user saw "لم يُرجع النموذج نصّاً" on every turn.
+    // (The old "32 K cmd.exe limit" assumption was wrong: 32 K is the raw
+    // CreateProcess limit; cmd.exe's own parser caps at ~8191.) A file path
+    // is a short arg, so the limit never bites and large prompts are fine.
+    // Caching is unaffected — the CLI reads the file content as the system
+    // prompt and caches it server-side exactly as before. 32 KB sanity cap.
+    if (systemPrompt && systemPrompt.length < 32_768) {
+      try {
+        const safeId = String(msg.id || Date.now()).replace(/[^a-zA-Z0-9_-]/g, "");
+        spFile = path.join(os.tmpdir(), `cc-sys-${safeId}.txt`);
+        fs.writeFileSync(spFile, systemPrompt, "utf-8");
+        args.push("--system-prompt-file", spFile);
+      } catch {
+        spFile = null; // fall back to the default system prompt, never crash
+      }
     }
   }
   // pureMode intentionally leaves the system prompt empty — the model's
@@ -473,6 +490,9 @@ function handleMaxQuery(msg) {
     });
     activeProcs.set(msg.id, proc);
     streamClaude(msg.id, proc);
+    // Delete the system-prompt temp file once claude exits (it has been read
+    // by then). Best-effort — a leftover temp file is harmless.
+    if (spFile) proc.on("close", () => { try { fs.unlinkSync(spFile); } catch {} });
     try {
       if (images.length > 0) {
         // stream-json user message with text + image content blocks.
