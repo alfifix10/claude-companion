@@ -286,6 +286,21 @@
       const tag = el.tagName.toLowerCase();
       if (["script", "style", "noscript", "template", "svg"].includes(tag)) return;
 
+      // Same-origin iframes: recurse into the child document so its controls
+      // (Stripe-like embeds, sandboxed editors, comment widgets) appear in the
+      // tree under their host. contentDocument is null / throws for
+      // cross-origin frames — we silently skip those (full cross-origin
+      // support needs frame-routed refs, a later phase). The element refs we
+      // assign inside still resolve, because same-origin nodes live in the
+      // same JS world; getRefCoordinates() adds the iframe offset for clicks.
+      if (tag === "iframe") {
+        try {
+          const fdoc = el.contentDocument;
+          if (fdoc && fdoc.body) walk(fdoc.body, depth + 1, indent);
+        } catch {}
+        return;
+      }
+
       const role = getRole(el);
       const name = getAccessibleName(el);
       const interactive = isInteractive(el);
@@ -646,11 +661,28 @@
     }
   }
 
+  // Sum the offsets of every ancestor iframe so a getBoundingClientRect()
+  // taken inside a (same-origin) frame becomes a TOP-PAGE coordinate that CDP
+  // can click. Returns {0,0} for top-frame elements (frameElement is null), so
+  // the normal path is unchanged. Stops at the first cross-origin boundary.
+  function frameOffset(el) {
+    let ox = 0, oy = 0;
+    try {
+      let win = el.ownerDocument && el.ownerDocument.defaultView;
+      while (win && win.frameElement) {
+        const fr = win.frameElement.getBoundingClientRect();
+        ox += fr.left; oy += fr.top;
+        win = win.parent !== win ? win.parent : null;
+      }
+    } catch {} // cross-origin ancestor — stop summing
+    return { ox, oy };
+  }
   function getRefCoordinates(ref) {
     const el = resolveRefOrHeal(ref);
     if (!el) return null;
     const r = el.getBoundingClientRect();
-    return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+    const { ox, oy } = frameOffset(el);
+    return { x: Math.round(r.x + r.width / 2 + ox), y: Math.round(r.y + r.height / 2 + oy) };
   }
 
   function scrollToRef(ref) {
