@@ -133,6 +133,47 @@
     return null;
   }
 
+  // ── Self-healing refs ──────────────────────────────────────────────────
+  // SPAs (Twitter, Gmail, Reddit) re-render constantly, so a ref handed to
+  // Claude moments ago can be detached by the time it clicks — the classic
+  // "ref expired" loop. We remember a tiny fingerprint (role + accessible
+  // name) for every ref we emit, and when a dead ref is used for an ACTION
+  // we re-resolve it to a live element with the SAME role and the EXACT same
+  // accessible name. Exact-name + role match only — never a fuzzy guess —
+  // so we recover the re-rendered same control without ever clicking the
+  // wrong thing. No name → no heal (falls back to the normal not-found path).
+  const refFingerprints = new Map(); // ref → { role, name }
+  const MAX_FINGERPRINTS = 3000;
+  function rememberFingerprint(ref, role, name, tag) {
+    refFingerprints.set(ref, { role: role || tag, name: name || "" });
+    if (refFingerprints.size > MAX_FINGERPRINTS) {
+      // Map keeps insertion order — drop the oldest entry.
+      refFingerprints.delete(refFingerprints.keys().next().value);
+    }
+  }
+  function findByFingerprint(fp) {
+    if (!fp || !fp.name) return null; // need a name to match safely
+    const sel = 'a,button,input,textarea,select,summary,[role],[tabindex],[contenteditable="true"]';
+    for (const el of document.querySelectorAll(sel)) {
+      if (!el.isConnected || !isVisible(el)) continue;
+      const role = getRole(el) || el.tagName.toLowerCase();
+      if (role === fp.role && getAccessibleName(el) === fp.name) return el;
+    }
+    return null;
+  }
+  // Action paths use this instead of resolveRef: live ref first, then heal.
+  function resolveRefOrHeal(ref) {
+    const live = resolveRef(ref);
+    if (live) return live;
+    const healed = findByFingerprint(refFingerprints.get(ref));
+    if (healed) {
+      healed.__ccRef = ref;
+      elementMap.set(ref, healed); // re-register so the next call is a hit
+      return healed;
+    }
+    return null;
+  }
+
   // ─────────────────────────────────────────────────────────────────────
   // Visibility + role + accessible-name (ARIA-aware)
   // ─────────────────────────────────────────────────────────────────────
@@ -259,6 +300,7 @@
 
       if (show && visible) {
         const ref = getOrAssignRef(el);
+        rememberFingerprint(ref, role, name, tag);
         let line = indent;
         if (role) line += role;
         if (name) line += ` "${name.slice(0, 100)}"`;
@@ -534,7 +576,7 @@
   }
 
   function setFormValue(ref, value) {
-    const el = resolveRef(ref);
+    const el = resolveRefOrHeal(ref);
     if (!el) return { error: `Element ${ref} not found` };
     const tag = el.tagName.toLowerCase();
     try {
@@ -576,14 +618,14 @@
   }
 
   function getRefCoordinates(ref) {
-    const el = resolveRef(ref);
+    const el = resolveRefOrHeal(ref);
     if (!el) return null;
     const r = el.getBoundingClientRect();
     return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
   }
 
   function scrollToRef(ref) {
-    const el = resolveRef(ref);
+    const el = resolveRefOrHeal(ref);
     if (!el) return false;
     el.scrollIntoView({ behavior: "instant", block: "center" });
     return true;
@@ -595,7 +637,7 @@
   // Returns a throwaway selector that matches ONLY this element; the
   // caller is responsible for removing the attribute afterward.
   function markRefForUpload(ref) {
-    const el = resolveRef(ref);
+    const el = resolveRefOrHeal(ref);
     if (!el) return { error: `Element ${ref} not found` };
     const tag = (el.tagName || "").toLowerCase();
     if (tag !== "input" || el.type !== "file") {
@@ -649,7 +691,7 @@
   ];
 
   function captureElementSnapshot(ref) {
-    const el = resolveRef(ref);
+    const el = resolveRefOrHeal(ref);
     if (!el) return { error: `Element ${ref} not found` };
     const attrs = {};
     for (const name of CLICK_ATTRS_OF_INTEREST) {
@@ -666,7 +708,7 @@
   }
 
   function clickRefViaJS(ref) {
-    const el = resolveRef(ref);
+    const el = resolveRefOrHeal(ref);
     if (!el) return { error: `Element ${ref} not found` };
     // Prefer .click() when available — it dispatches a trusted-looking
     // click to ALL DOM event handlers, including React-registered ones.
