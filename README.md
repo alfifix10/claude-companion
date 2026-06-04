@@ -11,7 +11,7 @@
 - Chat with Claude in a side panel of any Chromium browser (Chrome, Brave, Edge, Opera, Vivaldi, Arc).
 - Claude can **read, click, type, navigate, and screenshot** the page on your behalf — 59 MCP tools, all routed through your Max subscription.
 - **Zero API spend.** Every call goes through the `claude` CLI locally, which uses your Max plan.
-- Ships with Arabic and English voice input (Web Speech API) and a local "shortcut parser" that catches `click X`, `open youtube`, etc. without calling the model at all.
+- Ships with Arabic and English voice input (Web Speech API), plus one-tap quick-action chips (screenshot, read elements, extract text) that run locally without calling the model.
 
 ---
 
@@ -91,7 +91,7 @@ Click the toolbar icon to open the side panel, then try:
 
 - `Summarize this page`
 - `Open youtube and search for "lo-fi beats"`
-- `Click "Sign in"` — executed locally, no round-trip to Claude
+- `Click "Sign in"` — Claude finds and clicks it (or use `act` under the hood, one call)
 - `Read the article and translate to Arabic`
 - `Fill this form with my details` — requires memories set in Settings
 
