@@ -13,6 +13,7 @@ import { sleep, parseKeyCombo } from "../core/utils.js";
 import { activeTask, broadcastToPanels, consoleMessages, networkRequests, pageErrors } from "../core/state.js";
 import { refusalMessage } from "../lib/file-upload-denylist.js";
 import { fenceUntrusted } from "../lib/untrusted-fence.js";
+import { capText } from "../lib/cap-text.js";
 
 // Keep the task-locked tab in sync when Claude creates or switches tabs.
 function retargetTaskTab(newTabId) {
@@ -808,7 +809,10 @@ export async function executeTool(name, input, tabId) {
       if (r.exceptionDetails) return `Error: ${r.exceptionDetails.text || JSON.stringify(r.exceptionDetails)}`;
       const v = r.result;
       if (v.type === "undefined") return "undefined";
-      return v.value !== undefined ? JSON.stringify(v.value) : v.description || String(v);
+      const jsOut = v.value !== undefined ? JSON.stringify(v.value) : (v.description || String(v));
+      // Bound the payload so a scrape that returns megabytes can't blow up the
+      // context. Generous cap; if hit, tell the model to persist via a file.
+      return capText(jsOut, 20000, "If you need the full data, write it to a file (save_json/write_file) from inside the script instead of returning it.");
     }
     case "wait_for": {
       const timeout = Math.min(input.timeout || 5000, 10000);
