@@ -1612,7 +1612,7 @@ async function openSettings() {
   // Pull the latest values at open time so edits made elsewhere (e.g. a
   // restore from the native-host backup that ran while the panel was open)
   // are reflected.
-  const { memories = "", tasks = "", proMode = false, workingDirectory = "", modelSpeed = "balanced" } =
+  const { memories = "", tasks = "", proMode = false, workingDirectory = "", modelSpeed = "powerful" } =
     await chrome.storage.local.get(["memories", "tasks", "proMode", "workingDirectory", "modelSpeed"]);
   $memoriesInput.value = memories;
   if ($modelSelect) $modelSelect.value = modelSpeed;
@@ -1635,7 +1635,7 @@ async function saveSettings() {
   const tasks = $tasksInput.value.trim();
   const proMode = !!$proModeToggle.checked;
   const workingDirectory = $workingDirInput.value.trim();
-  const modelSpeed = $modelSelect?.value || "balanced";
+  const modelSpeed = $modelSelect?.value || "powerful";
 
   // ALWAYS save — never block on validation. The previous version
   // refused the save when Pro Mode was on without a working directory,

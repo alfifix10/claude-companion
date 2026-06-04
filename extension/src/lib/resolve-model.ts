@@ -21,9 +21,10 @@ export const MODEL_BY_SPEED: Record<ModelSpeed, string> = {
   powerful: "opus",
 };
 
-// Default to balanced: noticeably faster than the CLI's opus default while
-// staying high quality. Applied for unset/unknown values too.
-export const DEFAULT_MODEL_SPEED: ModelSpeed = "balanced";
+// Default to powerful (opus): never degrade intelligence silently. The user
+// opts INTO a faster model when they decide a task doesn't need full power —
+// quality is the safe default. Applied for unset/unknown values too.
+export const DEFAULT_MODEL_SPEED: ModelSpeed = "powerful";
 
 export function resolveModel(speed: unknown): string {
   if (speed === "fast" || speed === "balanced" || speed === "powerful") {
