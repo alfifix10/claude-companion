@@ -385,8 +385,11 @@ export async function executeTool(name, input, tabId) {
       invalidatePageTextCache(tabId);
       if (input.direction === "back" || input.direction === "forward") {
         await cdp(tabId, input.direction === "back" ? "Page.goBack" : "Page.goForward", {});
-        const t = await waitForTabComplete(tabId);
+        await waitForTabComplete(tabId);
+        await waitForDomStable(tabId, 2000); // let SPA content settle (see navigate)
         schedulePageTextPrefetch(tabId);
+        let t = null;
+        try { t = await chrome.tabs.get(tabId); } catch {}
         const word = input.direction === "back" ? "back" : "forward";
         return t ? `Went ${word} → ${t.url}\nTitle: ${t.title || ""}` : `Went ${word}`;
       }
@@ -394,11 +397,20 @@ export async function executeTool(name, input, tabId) {
       if (!url) return "url or direction required";
       if (!/^https?:\/\//i.test(url)) url = "https://" + url;
       await chrome.tabs.update(tabId, { url });
-      // Wait for the page to actually settle, then report the FINAL url +
-      // title (captures redirects, e.g. authuser → u/0). The agent now knows
-      // where it landed without a separate tabs_context/screenshot round-trip.
-      const t = await waitForTabComplete(tabId);
+      await waitForTabComplete(tabId);
+      // SPAs (Gmail, Twitter, Reddit, …) load their list/feed via XHR AFTER the
+      // load event fires, so the tab is "complete" but the content isn't
+      // rendered yet — an immediate read_page sees an EMPTY page and the agent
+      // wrongly concludes "nothing here" or stalls. Wait a bounded settle for
+      // the content to paint: ~150 ms on a static page (DOM already quiet), up
+      // to 2 s on a busy SPA. This is the single biggest reliability win for
+      // app-style sites.
+      await waitForDomStable(tabId, 2000);
       schedulePageTextPrefetch(tabId);
+      // Re-fetch AFTER the settle so the title reflects the LOADED content
+      // (Gmail flips from "Gmail" to "Inbox - …" once its list renders).
+      let t = null;
+      try { t = await chrome.tabs.get(tabId); } catch {}
       return t ? `Navigated to ${t.url}\nTitle: ${t.title || ""}` : `Navigated to ${url}`;
     }
     case "read_page": {
