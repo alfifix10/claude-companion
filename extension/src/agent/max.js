@@ -23,6 +23,7 @@ import { LoopDetector } from "../lib/loop-detector.js";
 import { safeInputKey } from "../lib/safe-input-key.js";
 import { buildSmartHistory } from "../lib/conversation-history.js";
 import { buildScratchpad } from "../lib/entity-scratchpad.js";
+import { getPlaybook } from "../lib/site-playbooks.js";
 
 // Stable key for a tool-call input so we can detect exact repeats. Uses
 // safeInputKey lives in src/lib/safe-input-key.ts — 16 unit tests
@@ -388,6 +389,10 @@ function buildDynamicUser({ history, tab, memories }) {
   const title = tab?.title || "";
   const url = tab?.url || "";
   let ctx = `ACTIVE TAB:\n  title: ${title}\n  url:   ${url}`;
+  // Site playbook (4.4): inject tough-site interaction tips only when the
+  // active tab matches a known domain. Empty for everything else.
+  const playbook = getPlaybook(url);
+  if (playbook) ctx += `\n\n${playbook}`;
   if (memories) ctx += `\n\nUSER MEMORIES:\n${memories.slice(0, 500)}`;
   ctx += `\n\nCONVERSATION:\n${history}`;
   return ctx;
