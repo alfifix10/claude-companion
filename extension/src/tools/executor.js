@@ -470,6 +470,25 @@ export async function executeTool(name, input, tabId) {
       if (!ref) return "act: provide either 'ref' or 'text' to target an element.";
       await sendContentMessage(tabId, { type: "scrollToRef", ref });
       const action = String(input.action || "click").toLowerCase();
+
+      // Actionability gate: clicking/filling a DISABLED control is a silent
+      // no-op that loops the agent ("click had no effect" → retry the same
+      // click). If the target is disabled, wait briefly — forms often enable
+      // Submit only after async validation — and re-check once; if it's still
+      // disabled, report it so the agent fixes the prerequisite instead of
+      // re-clicking nothing. Gates ONLY on disabled state, never on
+      // visibility/occlusion (the Excalidraw dogfood proved that drops real
+      // opacity:0 controls).
+      let probe = (await sendContentMessage(tabId, { type: "checkActionability", ref }))?.result;
+      if (probe?.found && probe.disabled) {
+        await waitForDomStable(tabId, 1200);
+        probe = (await sendContentMessage(tabId, { type: "checkActionability", ref }))?.result;
+      }
+      if (probe?.found && probe.disabled) {
+        const label = probe.name || input.text || ref;
+        return `act: "${label}" is disabled right now (e.g. a form that isn't valid yet, or a button awaiting a prerequisite). Satisfy what it needs — fill required fields, check a box, finish a prior step — then try again.`;
+      }
+
       if (action === "click") return await executeTool("click", { ref }, tabId);
       if (action === "fill" || action === "type") {
         if (input.value == null) return "act: 'value' is required for a fill action.";

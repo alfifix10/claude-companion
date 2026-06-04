@@ -25,6 +25,7 @@ import path from "node:path";
 import os from "node:os";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { isModelAllowed } from "./security.js";
 
 // ──────────────────────────────────────────────────────────────────────────
 // Config
@@ -394,10 +395,10 @@ function handleMaxQuery(msg) {
   }
   // msg.model is validated against a strict allowlist before reaching the
   // CLI — a crafted "model" field like "foo & calc.exe" would otherwise
-  // ride into cmd.exe when we go through a shell on Windows.
-  const MODEL_ALLOWED = /^[A-Za-z0-9._:/-]{1,64}$/;
+  // ride into cmd.exe when we go through a shell on Windows. isModelAllowed
+  // lives in ./security.js (shared, unit-tested).
   if (msg.model) {
-    if (!MODEL_ALLOWED.test(String(msg.model))) {
+    if (!isModelAllowed(msg.model)) {
       write({ id: msg.id, type: "max_error", error: "invalid model name" });
       return;
     }

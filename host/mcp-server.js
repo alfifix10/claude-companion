@@ -27,6 +27,7 @@ import os from "node:os";
 import { spawn } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
+import { validatePath, validateCommand } from "./security.js";
 
 // ──────────────────────────────────────────────────────────────────────────
 // Config
@@ -52,65 +53,9 @@ function loadProModeSettings() {
     return { proMode: false, workingDirectory: "" };
   }
 }
-// Validate that `inputPath` resolves inside `workingDirectory` (and only
-// inside — symlinks pointing out are rejected). Throws on violations so
-// the MCP tool returns an error to Claude. Path arg may be absolute or
-// relative — we resolve against workingDirectory in either case.
-function validatePath(inputPath, workingDirectory) {
-  if (!workingDirectory) {
-    throw new Error("Working directory not configured. Open settings → Pro Mode.");
-  }
-  const wd = path.resolve(workingDirectory);
-  let abs;
-  if (path.isAbsolute(inputPath)) {
-    abs = path.resolve(inputPath);
-  } else {
-    abs = path.resolve(wd, inputPath);
-  }
-  // First check the lexical path — defends against `../` traversal even
-  // when the resolved file doesn't exist.
-  const sep = path.sep;
-  if (abs !== wd && !abs.startsWith(wd + sep)) {
-    throw new Error(`Path is outside the working directory: ${inputPath}`);
-  }
-  // Then resolve any symlinks. If the file exists and points outside, refuse.
-  // If it doesn't exist (write_file new path), realpath throws — that's fine,
-  // we already validated the lexical path above.
-  try {
-    const real = fs.realpathSync(abs);
-    if (real !== wd && !real.startsWith(wd + sep)) {
-      throw new Error(`Symlink points outside the working directory: ${inputPath}`);
-    }
-    return real;
-  } catch (e) {
-    if (e.code !== "ENOENT") throw e;
-    // The leaf doesn't exist yet (e.g. write_file to a brand-new path).
-    // The lexical check above only guards the *spelled* path — it can't
-    // see an intermediate symlink. Resolve the nearest existing ancestor's
-    // real path and re-validate, so e.g. `wd/link/new.txt` where
-    // `wd/link` -> /etc is rejected instead of silently writing THROUGH
-    // the symlink to outside the sandbox.
-    let probe = abs;
-    for (;;) {
-      const parent = path.dirname(probe);
-      if (parent === probe) break;            // reached the filesystem root
-      let realParent;
-      try {
-        realParent = fs.realpathSync(parent);
-      } catch (e2) {
-        if (e2.code === "ENOENT") { probe = parent; continue; }  // walk up
-        throw e2;
-      }
-      if (realParent !== wd && !realParent.startsWith(wd + sep)) {
-        throw new Error(`Path resolves outside the working directory via a symlinked parent: ${inputPath}`);
-      }
-      // Ancestor is real and inside the sandbox — rebuild the not-yet-
-      // existing tail under the resolved ancestor.
-      return path.join(realParent, path.relative(parent, abs));
-    }
-    return abs;   // nothing along the path exists yet — lexical check stands
-  }
-}
+// validatePath (filesystem sandbox) now lives in ./security.js so it can be
+// unit-tested without importing this server. Imported at the top of the file.
+
 // Gate every Pro-Mode tool with this. Throws (Claude sees the message)
 // if Pro Mode is off or working directory isn't set.
 function requireProMode() {
@@ -967,38 +912,8 @@ server.tool("create_directory",
 // arrives as one literal arg "status; rm -rf" — git ignores it.
 // ──────────────────────────────────────────────────────────────────────────
 
-const COMMAND_ALLOWLIST = new Set([
-  // Version control
-  "git",
-  // Package managers
-  "npm", "pnpm", "yarn", "bun", "pip", "pip3", "pipx", "poetry", "uv",
-  // Runtimes / interpreters
-  "node", "python", "python3", "deno",
-  // Test / lint / build
-  "tsc", "vitest", "jest", "pytest", "mocha", "eslint", "prettier", "biome",
-  "rollup", "esbuild", "webpack", "vite",
-  // POSIX-y read-only utilities (Windows has them via Git Bash / WSL)
-  "ls", "cat", "head", "tail", "wc", "grep", "find", "echo", "pwd",
-  "which", "where", "whoami", "date",
-  // Safe-ish creates
-  "mkdir", "touch",
-  // Inspection (read-only). `type` is the Windows equivalent of `cat`.
-  // (`node` was duplicated here historically — already listed under
-  // Runtimes above; Set semantics meant it was a no-op, but readers
-  // got confused into thinking it had two distinct purposes.)
-  "type",
-]);
-
-// Hard refusal regardless of allowlist position. Substrings, not whole-token.
-const COMMAND_DENY_SUBSTR = [
-  "rm -rf", "rm -fr", "rmdir /s",   // recursive deletes
-  "sudo", "doas", "su ",            // privilege escalation
-  "chmod 777", "chown ",            // perm changes
-  "format ", "mkfs",                 // filesystem destruction
-  "dd if=", "> /dev/",               // disk overwrites
-  ":(){",                            // fork bomb shorthand
-  "curl http", "wget http",          // discourage random downloads (allow inside scripts via npm/python though)
-];
+// COMMAND_ALLOWLIST + COMMAND_DENY_SUBSTR + the validateCommand check now
+// live in ./security.js (single source of truth, unit-tested). Imported above.
 
 server.tool("run_command",
   "Run a shell command from the allowlist (git, npm, python, node, pip, etc). " +
@@ -1015,28 +930,10 @@ server.tool("run_command",
   async (a) => {
     try {
       const { workingDirectory } = requireProMode();
-      // The allowlist check normalises to basename, but spawn() below runs
-      // the RAW a.cmd. Reject any path separator so a basename of "git"
-      // can't smuggle an arbitrary executable like "C:\evil\git" or
-      // "./node" past the allowlist.
-      if (/[\\/]/.test(a.cmd)) {
-        throw new Error(`Command must be a bare executable name, not a path: "${a.cmd}"`);
-      }
-      // Normalise cmd — basename only (no path traversal in the cmd itself).
-      const cmdName = path.basename(a.cmd).toLowerCase().replace(/\.(exe|cmd|bat|sh|ps1)$/i, "");
-      if (!COMMAND_ALLOWLIST.has(cmdName)) {
-        const allowed = [...COMMAND_ALLOWLIST].sort().join(", ");
-        throw new Error(`Command "${a.cmd}" is not on the Pro Mode allowlist. Allowed: ${allowed}`);
-      }
-      // Reconstruct what the user/Claude would have invoked and check the
-      // full string against the denylist. This catches cases where args
-      // smuggle a destructive verb (e.g. `git`, args=['!','rm','-rf','.']).
-      const fullCmd = (a.cmd + " " + (a.args || []).join(" ")).toLowerCase();
-      for (const bad of COMMAND_DENY_SUBSTR) {
-        if (fullCmd.includes(bad.toLowerCase())) {
-          throw new Error(`Command rejected: contains banned substring "${bad}".`);
-        }
-      }
+      // Allowlist + path-separator + denylist checks (throws on violation).
+      // The RAW a.cmd is what spawn() runs below, so validateCommand rejects
+      // any path separator and any banned substring in cmd+args.
+      validateCommand(a.cmd, a.args);
       const cwd = a.cwd ? validatePath(a.cwd, workingDirectory) : workingDirectory;
       const timeout = a.timeout_ms || 30_000;
       // shell: false is the security spine here. Passing args as an array

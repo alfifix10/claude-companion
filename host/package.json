@@ -5,7 +5,8 @@
   "description": "Native messaging host + MCP server bridging the Claude Companion extension with Claude Code.",
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1"

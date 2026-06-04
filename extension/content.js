@@ -213,9 +213,16 @@
       const names = lb.split(/\s+/).map((id) => document.getElementById(id)?.textContent?.trim()).filter(Boolean);
       if (names.length) return names.join(" ");
     }
-    if (el.placeholder) return el.placeholder.trim();
-    if (el.alt) return el.alt.trim();
-    if (el.title) return el.title.trim();
+    // Read these via getAttribute, not the IDL property: on a <form> that
+    // contains a control named/id'd "title"/"alt"/"placeholder", DOM clobbering
+    // makes el.title return that control ELEMENT, not a string, so .trim()
+    // throws and crashes the whole tree. getAttribute always yields string|null.
+    const ph = el.getAttribute?.("placeholder");
+    if (ph) return ph.trim();
+    const alt = el.getAttribute?.("alt");
+    if (alt) return alt.trim();
+    const title = el.getAttribute?.("title");
+    if (title) return title.trim();
     if (el.id) {
       const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
       if (lbl) return lbl.textContent?.trim() || "";
@@ -268,22 +275,46 @@
     }
   }
 
+  // Is the element within (or near) its OWN frame's viewport? Used to decide
+  // which lines win the char budget on overflow. Reads dimensions from the
+  // element's own defaultView so same-origin iframe content is judged against
+  // the iframe's viewport, not the top window's. A 100px margin keeps
+  // just-off-screen controls (sticky bars, the next row) in the "visible" tier.
+  function isInViewport(el) {
+    try {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) return false;
+      const win = el.ownerDocument?.defaultView || window;
+      const vh = win.innerHeight || document.documentElement.clientHeight;
+      const vw = win.innerWidth || document.documentElement.clientWidth;
+      const m = 100;
+      return r.bottom > -m && r.top < vh + m && r.right > -m && r.left < vw + m;
+    } catch {
+      return false;
+    }
+  }
+
   function generateAccessibilityTree(options = {}) {
     pruneDeadRefs();
     const filter = options.filter || "interactive";
     const maxChars = options.max_chars || 12000;
-    let out = "", chars = 0, truncated = false;
 
-    function append(line) {
-      if (truncated) return false;
-      if (chars + line.length > maxChars) {
-        out += line.substring(0, maxChars - chars) + "\n... (truncated)";
-        truncated = true;
-        return false;
-      }
-      out += line;
-      chars += line.length;
-      return true;
+    // Pass 1 collects every qualifying line in document order, tagged with
+    // whether it's in the viewport — without truncating. Pass 2 assembles the
+    // output: if it all fits, document order is preserved (structure intact,
+    // zero behaviour change for normal pages). Only when the content overflows
+    // maxChars do we go viewport-first — emit what the user actually sees, then
+    // off-screen lines under a marker until the budget runs out. This stops a
+    // giant page's top-of-document chrome from blindly eating the budget and
+    // truncating away the elements in view.
+    const collected = []; // { line, inViewport }
+    let totalChars = 0, capped = false;
+    const HARD_CAP = maxChars * 6; // bound pass-1 work on pathological pages
+
+    function emit(line, inViewport) {
+      collected.push({ line, inViewport });
+      totalChars += line.length;
+      if (totalChars > HARD_CAP) capped = true;
     }
 
     function walk(el, depth, indent) {
@@ -294,7 +325,7 @@
       // literally couldn't "click the video about X". 40 covers real apps
       // with margin; cost stays ~O(nodes) since the walk already visited the
       // shallower nodes, and max_chars still bounds the emitted output.
-      if (truncated || depth > 40 || !el || el.nodeType !== 1) return;
+      if (capped || depth > 40 || !el || el.nodeType !== 1) return;
       const tag = el.tagName.toLowerCase();
       if (["script", "style", "noscript", "template", "svg"].includes(tag)) return;
 
@@ -354,7 +385,8 @@
           const href = el.href.split("?")[0].slice(0, 60);
           line += ` href="${href}"`;
         }
-        if (!append(line + "\n")) return;
+        emit(line + "\n", isInViewport(el));
+        if (capped) return;
       }
 
       const nextIndent = show && visible ? indent + "  " : indent;
@@ -365,6 +397,34 @@
     }
 
     walk(options.root || document.body, 0, "");
+
+    // Fits the budget → emit in document order (structure preserved, identical
+    // to the old behaviour for the common case).
+    if (totalChars <= maxChars && !capped) {
+      return collected.map((c) => c.line).join("");
+    }
+
+    // Overflow → viewport-first. In-viewport lines (document order) win the
+    // budget; off-screen lines follow under a marker until the budget is spent.
+    let out = "", chars = 0, offShown = 0, offTotal = 0, visDropped = 0;
+    for (const c of collected) {
+      if (!c.inViewport) { offTotal++; continue; }
+      if (chars + c.line.length > maxChars) { visDropped++; continue; }
+      out += c.line; chars += c.line.length;
+    }
+    if (offTotal > 0 && chars < maxChars) {
+      const marker = "--- off-screen (scroll to reveal) ---\n";
+      out += marker; chars += marker.length;
+      for (const c of collected) {
+        if (c.inViewport) continue;
+        if (chars + c.line.length > maxChars) break;
+        out += c.line; chars += c.line.length; offShown++;
+      }
+    }
+    const omitted = (offTotal - offShown) + visDropped;
+    if (omitted > 0 || capped) {
+      out += `... (${omitted}+ more element(s) off-screen — scroll or narrow the task)`;
+    }
     return out;
   }
 
@@ -780,6 +840,25 @@
     };
   }
 
+  // Report whether a ref is currently actionable. We probe ONLY the disabled
+  // state — the one authoritative, unambiguous signal — and deliberately NOT
+  // visibility or occlusion: the Excalidraw dogfood proved real controls are
+  // often opacity:0 inputs sitting behind a styled label, so gating on those
+  // drops legitimate targets. Clicking a disabled control, by contrast, is a
+  // guaranteed silent no-op that loops the agent, so catching it is pure win.
+  function getActionability(ref) {
+    const el = resolveRefOrHeal(ref);
+    if (!el) return { found: false };
+    const ariaDisabled = el.getAttribute?.("aria-disabled") === "true";
+    const nativeDisabled = el.disabled === true || el.hasAttribute?.("disabled");
+    const inDisabledFieldset = !!el.closest?.("fieldset[disabled]");
+    return {
+      found: true,
+      disabled: ariaDisabled || nativeDisabled || inDisabledFieldset,
+      name: getAccessibleName(el) || "",
+    };
+  }
+
   function clickRefViaJS(ref) {
     const el = resolveRefOrHeal(ref);
     if (!el) return { error: `Element ${ref} not found` };
@@ -944,6 +1023,7 @@
     if (msg.type === "markRefForUpload") { sendResponse({ result: markRefForUpload(msg.ref) }); return true; }
     if (msg.type === "clearUploadMark") { sendResponse({ result: clearUploadMark(msg.token) }); return true; }
     if (msg.type === "captureElementSnapshot") { sendResponse({ result: captureElementSnapshot(msg.ref) }); return true; }
+    if (msg.type === "checkActionability") { sendResponse({ result: getActionability(msg.ref) }); return true; }
     if (msg.type === "clickRefViaJS") { sendResponse({ result: clickRefViaJS(msg.ref) }); return true; }
     if (msg.type === "highlightElements") { highlightElements(msg.refs || []); sendResponse({ result: true }); return true; }
     if (msg.type === "addScreenshotLabels") { sendResponse({ result: addScreenshotLabels(msg.max || 40) }); return true; }
