@@ -318,6 +318,14 @@ async function enumerateClickablesAllFrames(tabId, max = 40) {
     if (n.shadowRoots) for (const c of n.shadowRoots) walk(c);
     if (n.contentDocument) walk(n.contentDocument);
   })(doc?.root);
+  // Viewport bounds so we only surface ON-SCREEN controls (the cross-frame
+  // candidate list includes off-screen skip-links and below-fold content).
+  let vw = 1e9, vh = 1e9;
+  try {
+    const m = await cdp(tabId, "Page.getLayoutMetrics", {});
+    vw = m?.cssLayoutViewport?.clientWidth || m?.layoutViewport?.clientWidth || vw;
+    vh = m?.cssLayoutViewport?.clientHeight || m?.layoutViewport?.clientHeight || vh;
+  } catch {}
   const items = [];
   for (const c of cand) {
     if (items.length >= max) break;
@@ -326,14 +334,14 @@ async function enumerateClickablesAllFrames(tabId, max = 40) {
     const q = bm?.model?.content;
     if (!q || q.length < 8) continue;
     if ((bm.model.width || 0) < 6 || (bm.model.height || 0) < 6) continue;
-    items.push({
-      role: c.role,
-      name: c.name.slice(0, 60),
-      x: Math.round((q[0] + q[2] + q[4] + q[6]) / 4),
-      y: Math.round((q[1] + q[3] + q[5] + q[7]) / 4),
-    });
+    const x = Math.round((q[0] + q[2] + q[4] + q[6]) / 4);
+    const y = Math.round((q[1] + q[3] + q[5] + q[7]) / 4);
+    if (x < 0 || y < 0 || x > vw || y > vh) continue; // off-screen — skip
+    // Trim verbose ARIA names ("الحساب، الصف رقم 1 من أصل 3…" → "الحساب").
+    const name = c.name.split(/[،,\n]/)[0].trim().slice(0, 50);
+    items.push({ role: c.role, name, x, y });
   }
-  return { items, diag: `nodes=${totalNodes} candidates=${cand.length} resolved=${items.length}` };
+  return { items, diag: `nodes=${totalNodes} candidates=${cand.length} onscreen=${items.length}` };
 }
 
 export async function executeTool(name, input, tabId) {
