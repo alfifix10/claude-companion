@@ -250,6 +250,26 @@ function rippleAt(tabId, x, y) {
   sendContentMessage(tabId, { type: "showClickRipple", x, y }).catch(() => {});
 }
 
+// Wait for a tab to finish loading after a navigation, then return its SETTLED
+// state. Fixes the stale-read trap: chrome.tabs.get can return the PRE-nav
+// url/title (or the old page's "complete") before the new page commits — which
+// made navigate/tabs_context report the wrong location and cost the agent
+// extra screenshots to figure out where it actually landed. Bounded so a
+// never-finishing page (infinite spinner / long-poll) can't hang the tool.
+async function waitForTabComplete(tabId, timeoutMs = 8000) {
+  // Let the navigation commit first (status flips complete→loading) so we
+  // don't immediately read the OLD page's "complete".
+  await sleep(300);
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    let tab;
+    try { tab = await chrome.tabs.get(tabId); } catch { return null; }
+    if (tab.status === "complete") return tab;
+    await sleep(150);
+  }
+  try { return await chrome.tabs.get(tabId); } catch { return null; }
+}
+
 export async function executeTool(name, input, tabId) {
   if (!tabId) {
     const tab = await getActiveTab();
@@ -262,7 +282,13 @@ export async function executeTool(name, input, tabId) {
 
   switch (name) {
     case "tabs_context": {
-      const tab = await chrome.tabs.get(tabId);
+      let tab = await chrome.tabs.get(tabId);
+      // If a navigation is still in flight, wait briefly so we report the
+      // CURRENT page, not a stale loading url/title. Bounded.
+      if (tab.status === "loading") {
+        const settled = await waitForTabComplete(tabId, 4000);
+        if (settled) tab = settled;
+      }
       return { tabId: tab.id, windowId: tab.windowId, url: tab.url, title: tab.title };
     }
     case "tabs_create": {
@@ -276,15 +302,23 @@ export async function executeTool(name, input, tabId) {
     }
     case "navigate": {
       invalidatePageTextCache(tabId);
-      if (input.direction === "back") { await cdp(tabId, "Page.goBack", {}); return "Went back"; }
-      if (input.direction === "forward") { await cdp(tabId, "Page.goForward", {}); return "Went forward"; }
+      if (input.direction === "back" || input.direction === "forward") {
+        await cdp(tabId, input.direction === "back" ? "Page.goBack" : "Page.goForward", {});
+        const t = await waitForTabComplete(tabId);
+        schedulePageTextPrefetch(tabId);
+        const word = input.direction === "back" ? "back" : "forward";
+        return t ? `Went ${word} → ${t.url}\nTitle: ${t.title || ""}` : `Went ${word}`;
+      }
       let url = input.url;
       if (!url) return "url or direction required";
       if (!/^https?:\/\//i.test(url)) url = "https://" + url;
       await chrome.tabs.update(tabId, { url });
-      await sleep(1200);
+      // Wait for the page to actually settle, then report the FINAL url +
+      // title (captures redirects, e.g. authuser → u/0). The agent now knows
+      // where it landed without a separate tabs_context/screenshot round-trip.
+      const t = await waitForTabComplete(tabId);
       schedulePageTextPrefetch(tabId);
-      return `Navigated to ${url}`;
+      return t ? `Navigated to ${t.url}\nTitle: ${t.title || ""}` : `Navigated to ${url}`;
     }
     case "read_page": {
       clearRefMiss(tabId); // fresh read — reset the vision-fallback streak
