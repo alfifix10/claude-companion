@@ -19,6 +19,9 @@ import { formatRelative } from "./src/lib/format-relative.js";
 // Phase-6 leaf harvests: derive-title + search-snippet.
 import { deriveTitle } from "./src/lib/derive-title.js";
 import { buildSnippet } from "./src/lib/search-snippet.js";
+// actionTrace: compact one-line summary of tools an assistant turn ran, so the
+// model remembers what it did across turns (C1). 7 unit tests. src/lib.
+import { actionTrace } from "./src/lib/action-trace.js";
 
 // ─────────────────────────────────────────────────────────────────────
 // DOM refs
@@ -334,7 +337,9 @@ function onBgMessage(msg) {
       streamingBubble = null;
       if (!bubble && text) appendAssistantBubble(text);
       if (msg.toolActions?.length) appendToolActions(msg.toolActions);
-      if (text) conversation.push({ role: "assistant", content: text });
+      // Keep the turn's tool actions on the message so the next turn's history
+      // can remind the model what it already did (C1 — see actionTrace).
+      if (text) conversation.push({ role: "assistant", content: text, toolActions: msg.toolActions || [] });
       endTaskStats();
       setLoading(false);
       saveHistory();
@@ -1115,7 +1120,15 @@ async function send() {
     // would waste vision tokens on every subsequent turn AND
     // double-count images we already forwarded at full resolution
     // on the turn they were pasted.
-    messages: conversation.map((m) => ({ role: m.role, content: m.content })),
+    messages: conversation.map((m) => ({
+      role: m.role,
+      // Append a compact trace of the tools an assistant turn ran, so the
+      // model remembers across turns what it already did (C1). UI bubbles are
+      // unaffected — they render m.content; the trace only rides the history.
+      content: m.role === "assistant" && typeof m.content === "string"
+        ? m.content + actionTrace(m.toolActions)
+        : m.content,
+    })),
     images,  // current turn's full-resolution images go here
   });
 }
@@ -1176,7 +1189,7 @@ async function runLocal(hit, myCancel) {
       }
       if (r?.text) {
         appendAssistantBubble(r.text);
-        conversation.push({ role: "assistant", content: r.text });
+        conversation.push({ role: "assistant", content: r.text, toolActions: r.toolActions || [] });
       }
     }
     saveHistory();
