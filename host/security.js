@@ -145,3 +145,28 @@ export const MODEL_ALLOWED = /^[A-Za-z0-9._:/-]{1,64}$/;
 export function isModelAllowed(name) {
   return MODEL_ALLOWED.test(String(name));
 }
+
+// ── Confirmation gate (1.3) ───────────────────────────────────────────────
+// The Pro-Mode shell/file tools that can MODIFY the machine (and, via the
+// interpreters on the run_command allowlist, run arbitrary code). The denylist
+// can't fully contain `node -e ...` / `python -c ...`, so instead of removing
+// those interpreters (which would gut the capability) we require an explicit
+// human approval before each such action runs. Read-only tools (read_file,
+// list_directory, grep_files, git_*, …) are NOT gated — they can't harm.
+export const CONFIRM_REQUIRED = new Set([
+  "write_file",
+  "edit_file",
+  "delete_file",
+  "run_command",
+]);
+
+export function requiresConfirmation(tool) {
+  return CONFIRM_REQUIRED.has(String(tool));
+}
+
+// Fail-safe interpreter for the gate's answer: ONLY the exact token "approved"
+// counts as approval. Anything else — "denied", "", null, a timeout, a dropped
+// channel — is treated as a refusal, so the action is blocked by default.
+export function isApprovalToken(answer) {
+  return answer === "approved";
+}

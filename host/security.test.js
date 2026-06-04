@@ -17,6 +17,8 @@ import {
   validatePath,
   validateCommand,
   isModelAllowed,
+  requiresConfirmation,
+  isApprovalToken,
 } from "./security.js";
 
 // A real temp directory as the sandbox root. realpath it up front because
@@ -107,5 +109,24 @@ test("isModelAllowed: accepts real model aliases and ids", () => {
 test("isModelAllowed: rejects shell-injection and out-of-range values", () => {
   for (const bad of ["foo & calc.exe", "a b", "x;y", "$(whoami)", "model`id`", "", "a".repeat(65)]) {
     assert.equal(isModelAllowed(bad), false, JSON.stringify(bad));
+  }
+});
+
+// ── confirmation gate (1.3) ───────────────────────────────────────────────
+test("requiresConfirmation: gates the machine-modifying Pro tools only", () => {
+  for (const t of ["write_file", "edit_file", "delete_file", "run_command"]) {
+    assert.equal(requiresConfirmation(t), true, t);
+  }
+  // Read-only / browser tools must NOT be gated — they can't harm.
+  for (const t of ["read_file", "list_directory", "grep_files", "git_status", "navigate", "read_page", "find_files"]) {
+    assert.equal(requiresConfirmation(t), false, t);
+  }
+});
+
+test("isApprovalToken: only the exact 'approved' string passes (fail-safe deny)", () => {
+  assert.equal(isApprovalToken("approved"), true);
+  // Everything else is a refusal — timeout, dropped channel, typo, casing.
+  for (const x of ["denied", "Approved", "APPROVED", "approve", "yes", "true", "", " approved", null, undefined, 0, 1, true, {}]) {
+    assert.equal(isApprovalToken(x), false, JSON.stringify(x));
   }
 });

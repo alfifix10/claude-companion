@@ -19,6 +19,7 @@
 import { nativePort, setNativePort } from "../core/state.js";
 import { nativeToolHandlers } from "../tools/native-tool-handlers.js";
 import { scheduleDetachAll } from "../core/cdp.js";
+import { requestConfirm } from "./confirm.js";
 
 const HOST_NAME = "com.anthropic.claude_companion";
 
@@ -49,6 +50,15 @@ function sendToolError(id, error) {
 }
 
 async function handleToolRequest(id, tool, args) {
+  // Confirmation gate (1.3): not a browser tool — the mcp-server asks the user
+  // to approve a destructive Pro-Mode action. Show the panel a prompt and reply
+  // with "approved"/"denied". Never throws; a refusal is a normal response.
+  if (tool === "__confirm__") {
+    let approved = false;
+    try { approved = await requestConfirm(args?.summary || "", args?.tool || ""); } catch {}
+    sendResponse(id, approved ? "approved" : "denied");
+    return;
+  }
   const handler = nativeToolHandlers[tool];
   if (!handler) { sendToolError(id, `Unknown tool: ${tool}`); return; }
   try {

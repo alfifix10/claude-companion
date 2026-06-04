@@ -121,6 +121,39 @@ body {
 }
 .token-meter.is-heavy { color: var(--accent); opacity: 1; }
 
+/* Pro-Mode confirmation gate (1.3) — modal overlay + card */
+.confirm-overlay {
+  position: fixed; inset: 0; z-index: 2147483646;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, .55); padding: 20px;
+}
+.confirm-card {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 14px;
+  padding: 18px 18px 14px; max-width: 360px; width: 100%;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .5);
+}
+.confirm-head { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 12px; }
+.confirm-tool {
+  display: inline-block; font: 600 11px ui-monospace, monospace;
+  background: var(--bg); color: var(--accent);
+  border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; margin-bottom: 8px;
+}
+.confirm-summary {
+  font-size: 13px; color: var(--text); word-break: break-word;
+  background: var(--bg); border-radius: 8px; padding: 10px; margin-bottom: 10px;
+  font-family: ui-monospace, monospace; line-height: 1.5;
+}
+.confirm-note { font-size: 12px; color: var(--text2); margin-bottom: 14px; line-height: 1.5; }
+.confirm-actions { display: flex; gap: 10px; }
+.confirm-actions button {
+  flex: 1; padding: 9px 12px; border-radius: 9px; font-size: 13px; font-weight: 600;
+  cursor: pointer; border: 1px solid var(--border);
+}
+.confirm-deny { background: var(--bg); color: var(--text); }
+.confirm-deny:hover { background: var(--border); }
+.confirm-approve { background: var(--accent); color: #fff; border-color: var(--accent); }
+.confirm-approve:hover { filter: brightness(1.08); }
+
 /* Quick action chips */
 .quick-row {
   display: flex; gap: 4px; padding: 6px 10px;

@@ -372,6 +372,12 @@ function onBgMessage(msg) {
     case "provider_info":
       // We don't display this anywhere — status header was removed.
       break;
+    case "confirm_request":
+      // Pro-Mode confirmation gate (1.3): the agent wants to run a
+      // machine-modifying tool. Show a modal; the decision goes back over
+      // the same port. No click within the timeout → host denies (fail-safe).
+      showConfirmDialog(msg.confirmId, msg.summary, msg.tool);
+      break;
     case "done": {
       // Make sure any coalesced render that was waiting for the next
       // animation frame lands synchronously — otherwise the bubble
@@ -406,6 +412,52 @@ function onBgMessage(msg) {
     case "no_task":
       break;
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Pro-Mode confirmation dialog (1.3)
+//
+// A modal that blocks on a human decision before a machine-modifying Pro
+// tool (write_file / edit_file / delete_file / run_command) runs. The
+// summary/tool come from the host; render them with textContent (never
+// innerHTML) so a crafted path or command string can't inject markup.
+// Deny is the safe default: it gets focus, Esc denies, and if the user
+// never answers the host's gate times out and denies anyway.
+// ─────────────────────────────────────────────────────────────────────
+function showConfirmDialog(confirmId, summary, tool) {
+  document.getElementById("confirmOverlay")?.remove();
+  const overlay = document.createElement("div");
+  overlay.id = "confirmOverlay";
+  overlay.className = "confirm-overlay";
+  overlay.setAttribute("role", "alertdialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.innerHTML = `
+    <div class="confirm-card">
+      <div class="confirm-head">🔒 تأكيد إجراء Pro Mode</div>
+      <div class="confirm-tool"></div>
+      <div class="confirm-summary"></div>
+      <div class="confirm-note">طلبت الإضافة تنفيذ إجراء يُعدّل جهازك. وافق فقط إذا كنت تتوقّعه.</div>
+      <div class="confirm-actions">
+        <button class="confirm-deny" type="button">رفض</button>
+        <button class="confirm-approve" type="button">موافقة</button>
+      </div>
+    </div>`;
+  overlay.querySelector(".confirm-tool").textContent = tool || "";
+  overlay.querySelector(".confirm-summary").textContent = summary || "";
+
+  let settled = false;
+  const decide = (approved) => {
+    if (settled) return;
+    settled = true;
+    try { bgPort?.postMessage({ type: "confirm_decision", confirmId, approved }); } catch {}
+    overlay.remove();
+  };
+  overlay.querySelector(".confirm-approve").addEventListener("click", () => decide(true));
+  overlay.querySelector(".confirm-deny").addEventListener("click", () => decide(false));
+  overlay.addEventListener("keydown", (e) => { if (e.key === "Escape") decide(false); });
+
+  document.body.appendChild(overlay);
+  overlay.querySelector(".confirm-deny").focus(); // focus the SAFE option
 }
 
 // ─────────────────────────────────────────────────────────────────────

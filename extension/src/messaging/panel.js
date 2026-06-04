@@ -20,6 +20,7 @@ import { handleMaxChat, cancelActiveMaxTask } from "../agent/max.js";
 import { executeLocal } from "../tools/local.js";
 import { rejectToolsFor } from "../tools/native-tool-handlers.js";
 import { cancelAllHost } from "./native.js";
+import { resolveConfirm } from "./confirm.js";
 
 export function setupPanelListener() {
   chrome.runtime.onConnect.addListener((port) => {
@@ -51,6 +52,10 @@ export function setupPanelListener() {
         // longer than typical tool execution + native-messaging queue flush,
         // so lagging requests from the killed process can't sneak through.
         rejectToolsFor(10000);
+      }
+      if (msg.type === "confirm_decision") {
+        // User clicked Approve/Deny on a Pro-Mode confirmation prompt (1.3).
+        resolveConfirm(msg.confirmId, msg.approved === true);
       }
       if (msg.type === "get_status") {
         if (activeTask && activeTask.running) {

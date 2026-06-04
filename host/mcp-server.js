@@ -27,7 +27,7 @@ import os from "node:os";
 import { spawn } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
-import { validatePath, validateCommand } from "./security.js";
+import { validatePath, validateCommand, requiresConfirmation, isApprovalToken } from "./security.js";
 
 // ──────────────────────────────────────────────────────────────────────────
 // Config
@@ -67,6 +67,29 @@ function requireProMode() {
     throw new Error("Pro Mode is on but working directory is empty. Set it in extension settings.");
   }
   return settings;
+}
+
+// Confirmation gate (1.3). For machine-modifying Pro-Mode tools, ask the user
+// (via the browser panel) to approve BEFORE the action runs. The interpreters
+// on the run_command allowlist make a pure denylist insufficient against RCE;
+// rather than drop them (gutting capability), we require an explicit human OK.
+// Fail-safe: any non-"approved" answer — a refusal, a 2-minute timeout, a
+// closed panel, a dropped channel — throws, so the action never executes.
+async function confirmGate(tool, summary) {
+  if (!requiresConfirmation(tool)) return;
+  let answer = null;
+  try {
+    answer = await request("__confirm__", { tool, summary }, 125_000);
+  } catch {
+    answer = null; // channel error / timeout → treat as refusal
+  }
+  if (!isApprovalToken(answer)) {
+    throw new Error(
+      `Action not approved. "${summary}" needs the user to approve it in the ` +
+      `confirmation prompt (Pro-Mode writes and shell commands require explicit ` +
+      `approval). It was declined or timed out — not executed.`
+    );
+  }
 }
 
 // Locate a Chrome (or Chromium-flavoured) binary we can drive headlessly
@@ -817,6 +840,7 @@ server.tool("write_file",
     try {
       const { workingDirectory } = requireProMode();
       const safePath = validatePath(a.path, workingDirectory);
+      await confirmGate("write_file", `write file: ${path.relative(workingDirectory, safePath)} (${Buffer.byteLength(a.content, "utf-8")} bytes)`);
       // Auto-create parent directory chain — convenient for Claude that
       // wants to write `data/exports/foo.json` in one shot.
       fs.mkdirSync(path.dirname(safePath), { recursive: true });
@@ -855,6 +879,7 @@ server.tool("edit_file",
       if (occurrences > 1) {
         throw new Error(`old_string appears ${occurrences} times. Make it unique by including more context.`);
       }
+      await confirmGate("edit_file", `edit file: ${path.relative(workingDirectory, safePath)} (1 replacement)`);
       const updated = original.replace(a.old_string, a.new_string);
       const tmp = safePath + ".tmp";
       fs.writeFileSync(tmp, updated, "utf-8");
@@ -874,6 +899,7 @@ server.tool("delete_file",
       const safePath = validatePath(a.path, workingDirectory);
       const stat = fs.statSync(safePath);
       if (stat.isDirectory()) throw new Error("Path is a directory. delete_file only removes files.");
+      await confirmGate("delete_file", `delete file: ${path.relative(workingDirectory, safePath)} (irreversible)`);
       fs.unlinkSync(safePath);
       return { content: [{ type: "text", text: `Deleted ${path.relative(workingDirectory, safePath)}.` }] };
     } catch (e) {
@@ -935,6 +961,7 @@ server.tool("run_command",
       // any path separator and any banned substring in cmd+args.
       validateCommand(a.cmd, a.args);
       const cwd = a.cwd ? validatePath(a.cwd, workingDirectory) : workingDirectory;
+      await confirmGate("run_command", `run command: ${a.cmd} ${(a.args || []).join(" ")}`.trim());
       const timeout = a.timeout_ms || 30_000;
       // shell: false is the security spine here. Passing args as an array
       // means user-controlled strings can't be re-parsed as commands.
