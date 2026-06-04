@@ -97,6 +97,17 @@ Click the toolbar icon to open the side panel, then try:
 
 Most Arabic verbs work too: `افتح يوتيوب`, `اضغط على تسجيل الدخول`, `لخّص المقال`.
 
+### Hide the "debugging this browser" bar
+
+CDP automation makes Chrome show a `…started debugging this browser` bar that
+steals ~36 px from the top of every page — hiding part of the page and the top
+of the orange automation border. To remove it permanently, launch the browser
+with `--silent-debugger-extension-api`. That flag only takes effect on a fresh
+browser process, so run **`launch-clean-browser.bat`** (it closes the browser,
+then relaunches it with the flag; your tabs restore if "Continue where you left
+off" is on). Pin it / make a desktop shortcut and use it to start the browser
+for automation — the page and border then show in full.
+
 ---
 
 ## Privacy
