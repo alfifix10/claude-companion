@@ -55,6 +55,7 @@
 - [x] **6.3** لا عمل (ملفات Skills الميتة محذوفة سابقاً).
 - [x] **3.2** شجرة a11y **viewport-first**: مرور أوّل يجمع الأسطر مع وسم «داخل/خارج الشاشة»؛ إن اتّسع المحتوى للميزانية → ترتيب المستند كما هو (صفر تغيير للصفحات العادية)، وإن تجاوزها → العناصر المرئية أولًا ثم وسم `--- off-screen ---` ثم الباقي حتّى نفاد الميزانية. بديل القصّ الأعمى عند 12K. · `content.js` · *مُتحقَّق ضدّ DOM حيّ: ويكيبيديا 6355 رابطًا، 130 داخل الشاشة فقط — viewport-first يُبقيها بدل قصّها.*
 - [x] **🐞 إصلاح انهيار `read_page`** (مكتشَف بالـ dogfooding): `el.title.trim()` كان ينهار على أي صفحة فيها `<form>` يحوي عنصرًا اسمه/مُعرَّفه `title` (DOM clobbering يجعل `el.title` عنصرًا لا نصًّا). الإصلاح: قراءة `title/alt/placeholder` عبر `getAttribute` (نصّ أو null دائمًا). · `content.js:208` · *ثُبِّت على ويكيبيديا: عنصران مُكلوبَران فعلًا.*
+- [x] **✍️ إصلاح الكتابة في المحرّرات الغنيّة (`contenteditable`)** (مكتشَف بالـ dogfooding): `setFormValue` كان يستدعي `setNativeValue` على div محرّر → لا value setter → `el.value=...` no-op **صامت** على كلّ محرّر غنيّ (Slack/Discord/Notion/ProseMirror/Lexical/Slate/Draft). الإصلاح: فرع `isContentEditable` → select-all + `execCommand("insertText")` (يُطلق beforeinput/input فيلتقطه نموذج المحرّر)، مع احتياط `textContent`. · `content.js` setFormValue · *مُتحقَّق حيّاً: `act(fill)` على contenteditable كتب «Hello — مرحبا» فعليّاً؛ المسار القديم كان لا يغيّر شيئاً.*
 
 ---
 

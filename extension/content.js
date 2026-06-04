@@ -705,6 +705,29 @@
             break;
           }
         }
+      } else if (el.isContentEditable) {
+        // Rich editors (ProseMirror, Lexical, Slate, Draft, Slack, Discord,
+        // Notion text blocks) are contenteditable, NOT <input>. setNativeValue
+        // finds no `value` setter and silently no-ops. Set the text through the
+        // editing pipeline instead: select all, then execCommand("insertText")
+        // replaces the selection and fires beforeinput/input so the editor's
+        // own model picks the change up. Direct textContent mutation is ignored
+        // by model-based editors that re-render from their own state.
+        el.focus();
+        const sel = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        let ok = false;
+        try { ok = document.execCommand("insertText", false, String(value)); } catch {}
+        if (!ok) {
+          // execCommand unavailable/blocked — fall back to a direct set so at
+          // least plain contenteditables receive the text.
+          el.textContent = String(value);
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        return { success: true, kind: "contenteditable" };
       } else {
         el.focus();
         // Use the native setter so React's value tracker actually
