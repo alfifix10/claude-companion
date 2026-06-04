@@ -454,8 +454,15 @@ export async function executeTool(name, input, tabId) {
       // trailer, React-safe value set — applies unchanged.
       let ref = input.ref;
       if (!ref && input.text) {
-        const resp = await sendContentMessage(tabId, { type: "findElements", query: input.text });
-        const results = resp?.result || [];
+        let results = (await sendContentMessage(tabId, { type: "findElements", query: input.text }))?.result || [];
+        if (!results.length) {
+          // The target may not have rendered yet (SPA route change, lazy
+          // content, a just-opened menu). Wait for the DOM to settle, then try
+          // once more before giving up — cuts "not found" failures on dynamic
+          // pages. The wait only happens on the miss, never on the happy path.
+          await waitForDomStable(tabId, 1500);
+          results = (await sendContentMessage(tabId, { type: "findElements", query: input.text }))?.result || [];
+        }
         if (!results.length) return `act: no element matching "${input.text}". Call read_page to see what's available.${noteRefMiss(tabId)}`;
         ref = results[0].ref; // top-ranked match — see find() relevance scoring
       }
