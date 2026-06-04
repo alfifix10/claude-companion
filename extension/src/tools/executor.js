@@ -296,7 +296,6 @@ async function enumerateClickablesAllFrames(tabId, max = 40) {
     return { items: [], diag: "getDocument failed: " + (e?.message || e) };
   }
   const cand = [];
-  const parentOf = new Map(); // backendNodeId → parent backendNodeId (for the hit-test)
   let totalNodes = 0;
   // Walk the WHOLE pierced tree (shadow roots + iframe documents). We collect
   // top-frame elements too on purpose: CDP catches controls content.js's
@@ -304,11 +303,9 @@ async function enumerateClickablesAllFrames(tabId, max = 40) {
   // Excalidraw). Duplicates of already-labelled controls are removed by the
   // coordinate de-dupe in the caller, so what's left is the genuine extra:
   // cross-origin iframe controls + anything content.js missed.
-  (function walk(n, parentBackend) {
+  (function walk(n) {
     if (!n || cand.length >= 300) return;
     totalNodes++;
-    const b = n.backendNodeId;
-    if (b != null && parentBackend != null) parentOf.set(b, parentBackend);
     if (n.nodeType === 1) {
       const tag = String(n.nodeName || "").toUpperCase();
       const role = attr(n, "role");
@@ -317,26 +314,16 @@ async function enumerateClickablesAllFrames(tabId, max = 40) {
           && !(tag === "INPUT" && String(attr(n, "type") || "").toLowerCase() === "hidden")) {
         cand.push({
           nodeId: n.nodeId,
-          backendNodeId: b,
           role: role || tag.toLowerCase(),
           name: (attr(n, "aria-label") || attr(n, "value") || attr(n, "placeholder")
             || attr(n, "title") || attr(n, "alt") || "").trim(),
         });
       }
     }
-    if (n.children) for (const c of n.children) walk(c, b);
-    if (n.shadowRoots) for (const c of n.shadowRoots) walk(c, b);
-    if (n.contentDocument) walk(n.contentDocument, b);
-  })(doc?.root, null);
-  // Is `ancestor` reached by walking up from `node` (i.e. node is inside it)?
-  const isInside = (ancestor, node) => {
-    let cur = node, steps = 0;
-    while (cur != null && steps++ < 30) {
-      if (cur === ancestor) return true;
-      cur = parentOf.get(cur);
-    }
-    return false;
-  };
+    if (n.children) for (const c of n.children) walk(c);
+    if (n.shadowRoots) for (const c of n.shadowRoots) walk(c);
+    if (n.contentDocument) walk(n.contentDocument);
+  })(doc?.root);
   // Viewport bounds so we only surface ON-SCREEN controls (the cross-frame
   // candidate list includes off-screen skip-links and below-fold content).
   let vw = 1e9, vh = 1e9;
@@ -356,17 +343,6 @@ async function enumerateClickablesAllFrames(tabId, max = 40) {
     const x = Math.round((q[0] + q[2] + q[4] + q[6]) / 4);
     const y = Math.round((q[1] + q[3] + q[5] + q[7]) / 4);
     if (x < 0 || y < 0 || x > vw || y > vh) continue; // off-screen — skip
-    // Visibility hit-test: the element must be the topmost at its own centre
-    // (or contain it). If a different element is on top, this one is covered /
-    // hidden (e.g. a preloaded-but-closed Google apps grid) and clicking its
-    // coordinate would hit the wrong thing — so drop it.
-    if (c.backendNodeId != null) {
-      try {
-        const hit = await cdp(tabId, "DOM.getNodeForLocation", { x, y });
-        const hb = hit?.backendNodeId;
-        if (hb != null && hb !== c.backendNodeId && !isInside(c.backendNodeId, hb)) continue;
-      } catch {} // undetermined → keep (conservative)
-    }
     // Trim verbose ARIA names ("الحساب، الصف رقم 1 من أصل 3…" → "الحساب").
     const name = c.name.split(/[،,\n]/)[0].trim().slice(0, 50);
     items.push({ role: c.role, name, x, y });
