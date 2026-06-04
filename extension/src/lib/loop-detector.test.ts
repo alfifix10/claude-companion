@@ -133,6 +133,60 @@ describe("LoopDetector — progress-aware reset", () => {
   });
 });
 
+describe("LoopDetector — delta-aware progress (5.3)", () => {
+  let d: LoopDetector;
+  beforeEach(() => {
+    d = new LoopDetector();
+  });
+
+  it("a paginating scroll that keeps revealing new content never loops", () => {
+    // The whole point of 5.3: scrolling a long page 12 times — far past the
+    // 8-repeat read-only threshold — must NOT be flagged as stuck, because
+    // each scroll produced new content (progressed=true).
+    for (let i = 0; i < 12; i++) {
+      const r = d.record("scroll", "down");
+      expect(r.loop).toBe(false);
+      expect(r.identical).toBe(1); // every prior scroll is excluded as progress
+      d.markProgress("scroll", "down", true);
+    }
+  });
+
+  it("a stagnant read/scroll still trips at the threshold", () => {
+    // Same input, no new content each time → genuinely stuck → must trip.
+    for (let i = 0; i < 7; i++) {
+      const r = d.record("scroll", "down");
+      expect(r.loop).toBe(false);
+      d.markProgress("scroll", "down", false);
+    }
+    const r = d.record("scroll", "down"); // 8th stagnant
+    expect(r.loop).toBe(true);
+    expect(r.identical).toBe(8);
+  });
+
+  it("trips only AFTER progress stops — progress resets the effective count", () => {
+    // 6 productive scrolls (excluded), then it plateaus.
+    for (let i = 0; i < 6; i++) {
+      d.record("scroll", "down");
+      d.markProgress("scroll", "down", true);
+    }
+    // Now 7 stagnant scrolls — none should trip yet (1..7 counted).
+    for (let i = 0; i < 7; i++) {
+      const r = d.record("scroll", "down");
+      expect(r.loop).toBe(false);
+      d.markProgress("scroll", "down", false);
+    }
+    const r = d.record("scroll", "down"); // 8th stagnant → trips
+    expect(r.loop).toBe(true);
+    expect(r.identical).toBe(8);
+  });
+
+  it("markProgress is a no-op on an empty window", () => {
+    expect(() => d.markProgress("scroll", "down", true)).not.toThrow();
+    const r = d.record("read_page", "{}");
+    expect(r.identical).toBe(1);
+  });
+});
+
 describe("LoopDetector — sliding window", () => {
   let d: LoopDetector;
   beforeEach(() => {

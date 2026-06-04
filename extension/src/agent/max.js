@@ -513,6 +513,12 @@ export async function handleMaxChat(messages) {
   let consecutiveErrors = 0;
   let lastErrorTool = null;
   const loopDetector = new LoopDetector();
+  // Delta-aware loop detection (5.3): remember a cheap signature of each
+  // read-only tool's last result per (tool,input). When the same call comes
+  // back with a DIFFERENT signature it produced new content → progress; the
+  // detector then excludes it from the stuck count, so paginating a long page
+  // (scroll, scroll, …) never trips the false "you're stuck" stop.
+  const lastResultSigByKey = new Map();
   // Two-tier, progress-aware mutating-action guard. The old flat cap
   // (MAX_ACTIONS=100) guillotined legitimate batch loops: "process these
   // 40 rows" = ~3 mutating actions/row = 120 actions, so the task died at
@@ -714,6 +720,21 @@ export async function handleMaxChat(messages) {
               : String(block.content || "");
             if (toolActions.length) {
               toolActions[toolActions.length - 1].result = content.slice(0, 200);
+            }
+            // ── Delta-aware progress signal (5.3) ──
+            // Tell the loop detector whether this read-only observation
+            // produced NEW content. Compared by a cheap signature per
+            // (tool,input); a changed signature = progress (the agent is
+            // paginating/revealing more), an unchanged one = a stall that
+            // counts toward "stuck". Mutating tools keep strict counting.
+            const lastAct = toolActions[toolActions.length - 1];
+            if (lastAct && !isMutating(lastAct.tool)) {
+              const key = lastAct.tool + "::" + safeInputKey(lastAct.input);
+              const sig = content.length + "|" + content.slice(0, 120) + "|" + content.slice(-120);
+              const prevSig = lastResultSigByKey.get(key);
+              loopDetector.markProgress(lastAct.tool, safeInputKey(lastAct.input),
+                prevSig === undefined || prevSig !== sig);
+              lastResultSigByKey.set(key, sig);
             }
             // ── Anti-stuck: consecutive-error detection ──
             // is_error is the authoritative signal from the MCP layer;

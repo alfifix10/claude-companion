@@ -60,6 +60,15 @@ export interface LoopDetectionResult {
 interface Call {
   name: string;
   inputKey: string;
+  /**
+   * Delta-awareness (5.3): set after the call's result arrives. `true` means
+   * the call produced NEW content (a scroll that revealed more, a read_page
+   * that changed) — genuine progress, so it is excluded from the stuck count.
+   * A repeated read/scroll only counts toward the loop threshold once it stops
+   * producing new content. Left undefined for calls whose outcome we don't
+   * track (chiefly mutating tools, which keep their existing strict counting).
+   */
+  progressed?: boolean;
 }
 
 /**
@@ -95,7 +104,14 @@ export class LoopDetector {
       }
     }
 
-    const identical = this.recent.filter((c) => c.name === name && c.inputKey === inputKey).length;
+    // Delta-aware count (5.3): a same-(tool,input) call that produced NEW
+    // content is progress, not a stall, so exclude it. The just-pushed call
+    // has progressed === undefined (its result hasn't arrived yet) and is
+    // counted — so a genuinely stagnant streak still trips, while a paginating
+    // read/scroll that keeps revealing new content never does.
+    const identical = this.recent.filter(
+      (c) => c.name === name && c.inputKey === inputKey && c.progressed !== true,
+    ).length;
 
     // Per-tool override > class default. The override exists for tools
     // like run_javascript whose "same input, different output" pattern
@@ -110,6 +126,22 @@ export class LoopDetector {
       identical,
       threshold,
     };
+  }
+
+  /**
+   * Annotate the most-recent call matching (name, inputKey) with whether its
+   * result was progress (new content) or a stall (5.3). Keyed rather than
+   * "last" so it stays correct when the model emits several tool calls in one
+   * turn (parallel tool_use) before any result arrives. No-op if no match.
+   */
+  markProgress(name: string, inputKey: string, progressed: boolean): void {
+    for (let i = this.recent.length - 1; i >= 0; i--) {
+      const c = this.recent[i];
+      if (c && c.name === name && c.inputKey === inputKey) {
+        c.progressed = progressed;
+        return;
+      }
+    }
   }
 
   /** Manually reset the window — useful on task boundaries. */

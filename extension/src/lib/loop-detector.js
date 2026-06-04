@@ -66,7 +66,12 @@ export class LoopDetector {
                     this.recent.splice(i, 1);
             }
         }
-        const identical = this.recent.filter((c) => c.name === name && c.inputKey === inputKey).length;
+        // Delta-aware count (5.3): a same-(tool,input) call that produced NEW
+        // content is progress, not a stall, so exclude it. The just-pushed call
+        // has progressed === undefined (its result hasn't arrived yet) and is
+        // counted — so a genuinely stagnant streak still trips, while a paginating
+        // read/scroll that keeps revealing new content never does.
+        const identical = this.recent.filter((c) => c.name === name && c.inputKey === inputKey && c.progressed !== true).length;
         // Per-tool override > class default. The override exists for tools
         // like run_javascript whose "same input, different output" pattern
         // is by design (scrape → scroll → scrape again with new content).
@@ -79,6 +84,21 @@ export class LoopDetector {
             identical,
             threshold,
         };
+    }
+    /**
+     * Annotate the most-recent call matching (name, inputKey) with whether its
+     * result was progress (new content) or a stall (5.3). Keyed rather than
+     * "last" so it stays correct when the model emits several tool calls in one
+     * turn (parallel tool_use) before any result arrives. No-op if no match.
+     */
+    markProgress(name, inputKey, progressed) {
+        for (let i = this.recent.length - 1; i >= 0; i--) {
+            const c = this.recent[i];
+            if (c && c.name === name && c.inputKey === inputKey) {
+                c.progressed = progressed;
+                return;
+            }
+        }
     }
     /** Manually reset the window — useful on task boundaries. */
     reset() {
