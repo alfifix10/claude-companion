@@ -1598,6 +1598,7 @@ function updateSend() {
 const $settingsOverlay = document.getElementById("settingsOverlay");
 const $closeSettingsBtn = document.getElementById("closeSettingsBtn");
 const $memoriesInput = document.getElementById("memoriesInput");
+const $modelSelect = document.getElementById("modelSelect");
 const $tasksInput = document.getElementById("tasksInput");
 const $saveSettingsBtn = document.getElementById("saveSettingsBtn");
 const $settingsToast = document.getElementById("settingsToast");
@@ -1611,9 +1612,10 @@ async function openSettings() {
   // Pull the latest values at open time so edits made elsewhere (e.g. a
   // restore from the native-host backup that ran while the panel was open)
   // are reflected.
-  const { memories = "", tasks = "", proMode = false, workingDirectory = "" } =
-    await chrome.storage.local.get(["memories", "tasks", "proMode", "workingDirectory"]);
+  const { memories = "", tasks = "", proMode = false, workingDirectory = "", modelSpeed = "balanced" } =
+    await chrome.storage.local.get(["memories", "tasks", "proMode", "workingDirectory", "modelSpeed"]);
   $memoriesInput.value = memories;
+  if ($modelSelect) $modelSelect.value = modelSpeed;
   $tasksInput.value = tasks;
   $proModeToggle.checked = !!proMode;
   $workingDirInput.value = workingDirectory;
@@ -1633,6 +1635,7 @@ async function saveSettings() {
   const tasks = $tasksInput.value.trim();
   const proMode = !!$proModeToggle.checked;
   const workingDirectory = $workingDirInput.value.trim();
+  const modelSpeed = $modelSelect?.value || "balanced";
 
   // ALWAYS save — never block on validation. The previous version
   // refused the save when Pro Mode was on without a working directory,
@@ -1645,7 +1648,7 @@ async function saveSettings() {
   // surface a WARNING in the status line — the actual tool calls will
   // refuse with a clear message anyway, so we can't end up in an
   // unsafe state. UX > silent rejections.
-  await chrome.storage.local.set({ memories, tasks, proMode, workingDirectory });
+  await chrome.storage.local.set({ memories, tasks, proMode, workingDirectory, modelSpeed });
   // Mirror to native-host backup file so settings survive extension
   // uninstall AND so the MCP server can read them on each tool call.
   // The MCP server lives in a different process and consults

@@ -24,6 +24,7 @@ import { safeInputKey } from "../lib/safe-input-key.js";
 import { buildSmartHistory } from "../lib/conversation-history.js";
 import { buildScratchpad } from "../lib/entity-scratchpad.js";
 import { getPlaybook } from "../lib/site-playbooks.js";
+import { resolveModel } from "../lib/resolve-model.js";
 
 // Stable key for a tool-call input so we can detect exact repeats. Uses
 // safeInputKey lives in src/lib/safe-input-key.ts — 16 unit tests
@@ -431,8 +432,12 @@ export async function handleMaxChat(messages) {
 
   const lastUser = messages[messages.length - 1]?.content || "";
 
-  // Load user-saved memories (a freeform notes field in settings)
-  const { memories } = await chrome.storage.local.get("memories");
+  // Load user-saved memories (a freeform notes field in settings) and the
+  // user's speed/quality choice. resolveModel maps it to a --model alias;
+  // default "balanced" (sonnet) is much faster than the CLI's opus default
+  // while keeping quality. The model rides every send below.
+  const { memories, modelSpeed } = await chrome.storage.local.get(["memories", "modelSpeed"]);
+  const model = resolveModel(modelSpeed);
 
   // Current tab context
   let tab = null;
@@ -620,7 +625,7 @@ export async function handleMaxChat(messages) {
       // stuck detector starts counting fresh from this retry.
       firstEventSeen = false;
       lastProgressAt = Date.now();
-      const ok = sendMaxQuery(id, userPrompt, { system: STATIC_SYSTEM });
+      const ok = sendMaxQuery(id, userPrompt, { system: STATIC_SYSTEM, model });
       if (!ok) {
         finishTask({ type: "error", text: "فشلت إعادة المحاولة — تأكّد من اتصال الإضافة بالمضيف." });
       }
@@ -835,7 +840,7 @@ export async function handleMaxChat(messages) {
   // so by the time we reach this send activeTask.images is empty by
   // construction. We don't pass an `images` field — sendMaxQuery
   // defaults it to [].
-  const sent = sendMaxQuery(id, userPrompt, { system: STATIC_SYSTEM });
+  const sent = sendMaxQuery(id, userPrompt, { system: STATIC_SYSTEM, model });
   if (!sent) {
     clearTimeout(timeoutTimer);
     finishTask({ type: "error", text: "فشل إرسال الطلب للمضيف. أعد تحميل الإضافة." });

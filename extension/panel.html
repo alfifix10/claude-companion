@@ -164,7 +164,15 @@
       </div>
 
       <div class="settings-body">
-        <label class="settings-label" for="memoriesInput">🧠 ذاكرة مختصرة</label>
+        <label class="settings-label" for="modelSelect">⚡ السرعة والجودة</label>
+        <select id="modelSelect" class="settings-textarea" style="height:auto; padding:8px 12px;">
+          <option value="fast">سريع — Haiku (الأسرع)</option>
+          <option value="balanced">متوازن — Sonnet (موصى به: سريع + جودة عالية)</option>
+          <option value="powerful">الأقوى — Opus (للمهام الأصعب، الأبطأ)</option>
+        </select>
+        <p class="settings-hint">«متوازن» أسرع بكثير من «الأقوى» مع جودة ممتازة لمعظم المهام. اختر «الأقوى» للاستدلال الصعب فقط.</p>
+
+        <label class="settings-label" for="memoriesInput" style="margin-top:18px;">🧠 ذاكرة مختصرة</label>
         <textarea id="memoriesInput" class="settings-textarea" rows="5"
           placeholder="اسمي: أحمد&#10;بريدي: ahmed@gmail.com&#10;أفضّل النتائج من الأرخص"></textarea>
         <p class="settings-hint">تُرسَل مع كل محادثة.</p>
