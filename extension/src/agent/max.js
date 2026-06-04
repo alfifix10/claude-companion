@@ -22,6 +22,7 @@ import { isMutating } from "../lib/tool-registry.js";
 import { LoopDetector } from "../lib/loop-detector.js";
 import { safeInputKey } from "../lib/safe-input-key.js";
 import { buildSmartHistory } from "../lib/conversation-history.js";
+import { buildScratchpad } from "../lib/entity-scratchpad.js";
 
 // Stable key for a tool-call input so we can detect exact repeats. Uses
 // safeInputKey lives in src/lib/safe-input-key.ts — 16 unit tests
@@ -440,7 +441,14 @@ export async function handleMaxChat(messages) {
   // older state forward instead.
   const history = buildSmartHistory(messages);
 
-  let userPrompt = buildDynamicUser({ history, tab, memories });
+  // Entity scratchpad (C3): a compact list of concrete details the USER has
+  // mentioned (emails, paths, urls, refs), prepended so they survive even when
+  // the turn that introduced them is folded out of the history window. Empty
+  // string when the chat has no such entities, so short chats are unaffected.
+  const scratchpad = buildScratchpad(messages);
+  const historyBlock = scratchpad ? `${scratchpad}\n\n${history}` : history;
+
+  let userPrompt = buildDynamicUser({ history: historyBlock, tab, memories });
 
   // Long-session compaction nudge. When the conversation has run
   // long enough that the elision marker is firing, gently ask the
