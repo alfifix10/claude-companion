@@ -635,7 +635,7 @@ export async function executeTool(name, input, tabId) {
         const topCoords = hasTop ? Object.values(labels) : [];
         const crossFrame = (cf.items || []).filter((c) =>
           !topCoords.some((m) => Math.abs(m.x - c.x) < 12 && Math.abs(m.y - c.y) < 12));
-        if (hasTop || crossFrame.length || cf.diag) {
+        if (hasTop || crossFrame.length) {
           let lines = "";
           if (hasTop) {
             lines += Object.entries(labels)
@@ -647,7 +647,6 @@ export async function executeTool(name, input, tabId) {
               + "Cross-frame elements (incl. cross-origin iframes — click by (x,y)):\n"
               + crossFrame.map((c) => `  • ${c.role}${c.name ? ` "${c.name}"` : ""} @(${c.x},${c.y})`).join("\n");
           }
-          if (cf.diag) lines += (lines ? "\n\n" : "") + "[cross-frame diag: " + cf.diag + "]";
           return { type: "screenshot_labeled", base64, mediaType, labels: labels || {},
             text: `Screenshot interactive elements:\n${lines}\n\nTo act: "click ref=<value>" (top-frame) or click by coordinates (x,y).` };
         }
