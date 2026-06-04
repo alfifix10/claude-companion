@@ -5,7 +5,7 @@
  */
 
 import {
-  cdp, ensureAttached, mouseClick, mouseDrag, dispatchMouse, waitForDomStable,
+  cdp, ensureAttached, ensureDomain, mouseClick, mouseDrag, dispatchMouse, waitForDomStable,
   takeScreenshot, sendContentMessage, resolveRefCoords, resolveClickTarget,
   dialogNote, getActiveTab, modifiersBitmask,
 } from "../core/cdp.js";
