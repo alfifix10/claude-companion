@@ -287,7 +287,14 @@
     }
 
     function walk(el, depth, indent) {
-      if (truncated || depth > 15 || !el || el.nodeType !== 1) return;
+      // depth cap 40 (was 15): modern SPAs nest interactive elements far
+      // deeper through shadow DOM. Measured live, YouTube video-title links
+      // sit at depth 17 and the DOM reaches depth 30 — the old 15 limit cut
+      // every video title (and channel/handle) out of the tree, so the agent
+      // literally couldn't "click the video about X". 40 covers real apps
+      // with margin; cost stays ~O(nodes) since the walk already visited the
+      // shallower nodes, and max_chars still bounds the emitted output.
+      if (truncated || depth > 40 || !el || el.nodeType !== 1) return;
       const tag = el.tagName.toLowerCase();
       if (["script", "style", "noscript", "template", "svg"].includes(tag)) return;
 
