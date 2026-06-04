@@ -297,10 +297,15 @@ async function enumerateClickablesAllFrames(tabId, max = 40) {
   }
   const cand = [];
   let totalNodes = 0;
-  (function walk(n) {
+  (function walk(n, inFrame) {
     if (!n || cand.length >= 300) return;
     totalNodes++;
-    if (n.nodeType === 1) {
+    // Collect ONLY elements inside (sub-)frames. The top frame is already
+    // covered by content.js's Set-of-Mark labels, so collecting it here would
+    // duplicate them — and leak the top-frame controls beyond content.js's cap
+    // into the "cross-frame" section. inFrame flips true once we descend into
+    // any iframe's contentDocument.
+    if (n.nodeType === 1 && inFrame) {
       const tag = String(n.nodeName || "").toUpperCase();
       const role = attr(n, "role");
       const ti = attr(n, "tabindex");
@@ -314,10 +319,10 @@ async function enumerateClickablesAllFrames(tabId, max = 40) {
         });
       }
     }
-    if (n.children) for (const c of n.children) walk(c);
-    if (n.shadowRoots) for (const c of n.shadowRoots) walk(c);
-    if (n.contentDocument) walk(n.contentDocument);
-  })(doc?.root);
+    if (n.children) for (const c of n.children) walk(c, inFrame);
+    if (n.shadowRoots) for (const c of n.shadowRoots) walk(c, inFrame);
+    if (n.contentDocument) walk(n.contentDocument, true);
+  })(doc?.root, false);
   // Viewport bounds so we only surface ON-SCREEN controls (the cross-frame
   // candidate list includes off-screen skip-links and below-fold content).
   let vw = 1e9, vh = 1e9;
