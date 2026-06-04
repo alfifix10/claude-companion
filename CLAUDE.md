@@ -77,7 +77,7 @@ Side Panel (UI) ─ Service Worker ─ Native Host (Node) ─┬── claude CL
 
 ## الميزات الأساسية
 1. **Side panel UI** — chat بسيط
-2. **57 أداة MCP** موزّعة على 10 فئات (تفاصيل تحت)
+2. **60 أداة MCP** موزّعة على 10 فئات (تفاصيل تحت) — تشمل `act` المركّبة و`fill_form`
 3. **Pro Mode** — filesystem + shell + PDF/JSON/CSV (gated خلف toggle)
 4. **Local Arabic shortcuts** — "اضغط على X"، "افتح يوتيوب"، إلخ (مجانية بدون AI)
 5. **Markdown renderer** للردود (bold, headings, tables, code, code blocks)
@@ -85,18 +85,22 @@ Side Panel (UI) ─ Service Worker ─ Native Host (Node) ─┬── claude CL
 7. **مهام مكررة** — chips ⚡ في الشريط الجانبي (من settings)
 8. **ذاكرة مخصّصة (memories)** — نص يُرسَل مع كل طلب
 9. **Project memory** — CLAUDE.md + _STATE.md من working dir تُحقَن في كلّ turn
-10. **Smart conversation history** — first-2 + last-12 + compaction nudge (لا يفقد goal الجلسات الطويلة)
+10. **Smart conversation history** — first-2 + last-12 + compaction nudge + **استرجاع BM25** لأكثر أدوار المنتصف صلةً + **تثبيت الهدف** حتى 200 رسالة (`cap-conversation`)
 11. **Auto-retry** على transient API errors (ENOTFOUND, 5xx, 429، إلخ)
 12. **Orange automation border** — يظهر أثناء الأتمتة
 13. **Image Q&A pure mode** — مسار منفصل بلا system prompt لمنع الهلوسة
 14. **Multi-browser session routing** — Brave + Chrome + Edge بدون تداخل
 15. **Copy buttons + Edit-and-resend** — على كل رسالة
+16. **بوّابة تأكيد Pro Mode (1.3)** — موافقة بشريّة قبل write/edit/delete/run_command؛ آمنة افتراضيّاً
+17. **نظام توقّف ذكيّ (5.2/5.3)** — استئناف تلقائيّ محصور للمهام الطويلة، لا توقّف كاذب على التمرير، توقّف صارم عند المشاكل الحقيقيّة
+18. **سجلّ كيانات (C3) + site playbooks (4.4)** — تذكّر بريد/مسارات/مُعرّفات + تلميحات لأصعب المواقع
+19. **مؤشّر توكن (3.6)** + **كتابة في المحرّرات الغنيّة** (contenteditable) — Slack/Discord/Notion/ProseMirror
 
-## الـ 57 أداة بالفئات
+## الـ 60 أداة بالفئات
 
 | الفئة | العدد | أمثلة |
 |---|:--:|---|
-| **Browser automation** | 22 | navigate, read_page, click, type_text, screenshot, run_javascript, ... |
+| **Browser automation** | 24 | navigate, read_page, **act**, **fill_form**, click, type_text, screenshot, run_javascript, ... |
 | **DevTools** (read-only) | 7 | read_console_messages, read_network_requests, read_page_errors, inspect_element, read_storage (Pro), read_performance, clear_injected_scripts |
 | **Filesystem** (Pro) | 8 | read_file, write_file, edit_file, list_directory, find_files, ... |
 | **Shell** (Pro) | 1 | run_command (allowlist + denylist + shell:false) |
@@ -193,10 +197,10 @@ Side Panel (UI) ─ Service Worker ─ Native Host (Node) ─┬── claude CL
 - الإضافة لا تعمل إذا Brave مغلق كلياً
 - Voice input يحتاج إنترنت (Web Speech API)
 - Markdown renderer مكتوب يدوياً (لا dependencies)
-- panel.js عند 2,278 سطر — monolith، يحتاج تقسيم لو انضمّ مهندس ثانٍ
+- panel.js عند 2,557 سطر — monolith (تقسيمه 6.1 أُجِّل: بلا قيمة لمطوّر منفرد)
 - Skills MVP rolled back (composer.ts/interview.js orphan files موجودة لكن غير مستخدمة)
 - لا scheduling (`chrome.alarms` غير مُستعمَل) — خيار قادم
-- لا token-usage indicator في الـ panel — المستخدم لا يعرف متى يبدأ chat جديد
+- ~~لا token-usage indicator~~ ✅ أُضيف (3.6): رقاقة `≈ NK توكن` في شريط التبويب
 
 ## الهيكل النهائي
 
@@ -231,4 +235,4 @@ claude-companion/
 - Extended cache TTL لو Anthropic دعمه
 
 ---
-آخر تحديث: 2026-05-09 (57 tools + project memory + smart history + auto-retry + T_MAX 60min)
+آخر تحديث: 2026-06-04 (v2 مكتملة: 60 tools + بوّابة تأكيد 1.3 + نظام توقّف ذكيّ 5.2/5.3 + استرجاع BM25 + سجلّ كيانات + site playbooks + viewport-first AX + مؤشّر توكن + تثبيت الهدف. ~341+12 اختبار. انظر ROADMAP.md لِلسجلّ الكامل.)

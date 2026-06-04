@@ -118,6 +118,7 @@ Public-release hardening applied:
 - Be aware this is a denylist, not an allowlist: it **fails open** for any *new* built-in a future CLI version might add. Moving to an explicit allowlist is tracked in `ROADMAP.md` (Phase 1). Treat the working directory you point Pro Mode at as fully trusted.
 - The image-Q&A path runs with `--tools ""` (no tools at all).
 - Pro Mode tools (filesystem / shell / sqlite) are sandboxed to the configured working directory and gated behind an explicit user toggle.
+- **Confirmation gate:** every machine-modifying Pro Mode action (`write_file`, `edit_file`, `delete_file`, `run_command`) requires explicit in-panel approval before it runs. It's fail-safe — no panel open, a timeout, or any non-approval denies the action — so the interpreters on the shell allowlist can't silently run code. The decision logic is unit-tested in `host/security.js`.
 - JavaScript dialogs auto-dismiss `confirm()` and `prompt()` (cancel). `alert()` and `beforeunload` are accepted.
 - Markdown links rendered in the UI are limited to safe URL schemes (`https`, `http`, `mailto`, `tel`, relative). `javascript:` and `data:` are stripped.
 - Native messaging and TCP bridge enforce a 16 MB payload cap to block length-prefix DoS.
