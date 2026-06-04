@@ -297,15 +297,16 @@ async function enumerateClickablesAllFrames(tabId, max = 40) {
   }
   const cand = [];
   let totalNodes = 0;
-  (function walk(n, inFrame) {
+  // Walk the WHOLE pierced tree (shadow roots + iframe documents). We collect
+  // top-frame elements too on purpose: CDP catches controls content.js's
+  // Set-of-Mark can't (e.g. opacity:0 radio inputs styled as a toolbar, as in
+  // Excalidraw). Duplicates of already-labelled controls are removed by the
+  // coordinate de-dupe in the caller, so what's left is the genuine extra:
+  // cross-origin iframe controls + anything content.js missed.
+  (function walk(n) {
     if (!n || cand.length >= 300) return;
     totalNodes++;
-    // Collect ONLY elements inside (sub-)frames. The top frame is already
-    // covered by content.js's Set-of-Mark labels, so collecting it here would
-    // duplicate them — and leak the top-frame controls beyond content.js's cap
-    // into the "cross-frame" section. inFrame flips true once we descend into
-    // any iframe's contentDocument.
-    if (n.nodeType === 1 && inFrame) {
+    if (n.nodeType === 1) {
       const tag = String(n.nodeName || "").toUpperCase();
       const role = attr(n, "role");
       const ti = attr(n, "tabindex");
@@ -319,10 +320,10 @@ async function enumerateClickablesAllFrames(tabId, max = 40) {
         });
       }
     }
-    if (n.children) for (const c of n.children) walk(c, inFrame);
-    if (n.shadowRoots) for (const c of n.shadowRoots) walk(c, inFrame);
-    if (n.contentDocument) walk(n.contentDocument, true);
-  })(doc?.root, false);
+    if (n.children) for (const c of n.children) walk(c);
+    if (n.shadowRoots) for (const c of n.shadowRoots) walk(c);
+    if (n.contentDocument) walk(n.contentDocument);
+  })(doc?.root);
   // Viewport bounds so we only surface ON-SCREEN controls (the cross-frame
   // candidate list includes off-screen skip-links and below-fold content).
   let vw = 1e9, vh = 1e9;
@@ -649,7 +650,7 @@ export async function executeTool(name, input, tabId) {
           }
           if (crossFrame.length) {
             lines += (lines ? "\n\n" : "")
-              + "Cross-frame elements (incl. cross-origin iframes — click by (x,y)):\n"
+              + "Additional clickable elements (cross-origin iframes + controls not labeled above — click by (x,y)):\n"
               + crossFrame.map((c) => `  • ${c.role}${c.name ? ` "${c.name}"` : ""} @(${c.x},${c.y})`).join("\n");
           }
           return { type: "screenshot_labeled", base64, mediaType, labels: labels || {},
