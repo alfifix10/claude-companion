@@ -628,8 +628,13 @@ export async function executeTool(name, input, tabId) {
         const cf = input.labels
           ? await enumerateClickablesAllFrames(tabId, 40).catch((e) => ({ items: [], diag: "threw: " + (e?.message || e) }))
           : { items: [], diag: "" };
-        const crossFrame = cf.items || [];
         const hasTop = labels && Object.keys(labels).length;
+        // De-dupe: drop cross-frame items that coincide (within ~12px) with a
+        // top-frame label already listed above, so the agent sees each control
+        // once.
+        const topCoords = hasTop ? Object.values(labels) : [];
+        const crossFrame = (cf.items || []).filter((c) =>
+          !topCoords.some((m) => Math.abs(m.x - c.x) < 12 && Math.abs(m.y - c.y) < 12));
         if (hasTop || crossFrame.length || cf.diag) {
           let lines = "";
           if (hasTop) {
