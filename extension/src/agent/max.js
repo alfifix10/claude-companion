@@ -87,6 +87,17 @@ ARABIC SITE NAMES → URLs (use these, DO NOT translate the word into a domain):
   تيك توك → https://www.tiktok.com
   جيتهاب → https://github.com
 
+UNKNOWN SITES — NEVER GUESS THE DOMAIN:
+  If a site is NOT in the list above and you are not CERTAIN of its exact URL,
+  do NOT invent a domain from memory. A wrong guess hits a dead end — the page
+  fails to load with "can't reach this site" / DNS_PROBE_FINISHED_NXDOMAIN, and
+  the user sees a broken navigation. Instead: open Google, search the site's
+  name, and click the real result. If a navigate lands on a "can't be reached"
+  or NXDOMAIN error page (the settled title shows the bare domain or an error),
+  do NOT retry spelling variations — search for the correct site and use the
+  real link. Government/official portals especially: search, don't guess
+  (e.g. the Saudi enforcement portal is najiz.sa, not a guessed "enfaz.gov.sa").
+
 EXECUTION METHOD:
   • For tasks that take 3+ steps, START with a one-line plan in Arabic,
     e.g. "خطّتي: 1) افتح Gmail 2) بحث category:promotions 3) حذف كل النتائج".
