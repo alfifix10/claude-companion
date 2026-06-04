@@ -270,6 +270,54 @@ async function waitForTabComplete(tabId, timeoutMs = 8000) {
   try { return await chrome.tabs.get(tabId); } catch { return null; }
 }
 
+// CROSS-FRAME clickable enumeration via CDP (chrome.debugger). content.js sees
+// only the top frame (same-origin); the debugger can read EVERY frame including
+// CROSS-ORIGIN iframes (Google account chooser, Stripe card fields, captchas).
+// We flatten the whole document (pierce shadow DOM + iframes), pick clickable
+// nodes, and resolve each to TOP-PAGE coordinates via DOM.getBoxModel — so the
+// agent can click them precisely by (x,y). [Phase 1: cross-origin iframes]
+async function enumerateClickablesAllFrames(tabId, max = 40) {
+  try { await ensureDomain(tabId, "DOM"); } catch { return []; }
+  let flat;
+  try { flat = await cdp(tabId, "DOM.getFlattenedDocument", { depth: -1, pierce: true }); }
+  catch { return []; }
+  const nodes = flat?.nodes || [];
+  const attr = (n, key) => {
+    const a = n.attributes || [];
+    for (let i = 0; i < a.length; i += 2) if (a[i] === key) return a[i + 1];
+    return null;
+  };
+  const TAGS = new Set(["A", "BUTTON", "INPUT", "SELECT", "TEXTAREA", "SUMMARY"]);
+  const ROLES = new Set(["button", "link", "textbox", "checkbox", "radio", "tab",
+    "menuitem", "option", "switch", "combobox", "searchbox"]);
+  const cand = [];
+  for (const n of nodes) {
+    if (n.nodeType !== 1) continue;
+    const tag = String(n.nodeName || "").toUpperCase();
+    const role = attr(n, "role");
+    const ti = attr(n, "tabindex");
+    if (!(TAGS.has(tag) || (role && ROLES.has(role)) || (ti && ti !== "-1"))) continue;
+    if (tag === "INPUT" && String(attr(n, "type") || "").toLowerCase() === "hidden") continue;
+    const name = (attr(n, "aria-label") || attr(n, "value") || attr(n, "placeholder")
+      || attr(n, "title") || attr(n, "alt") || "").trim();
+    cand.push({ nodeId: n.nodeId, role: role || tag.toLowerCase(), name });
+    if (cand.length >= 250) break;
+  }
+  const out = [];
+  for (const c of cand) {
+    if (out.length >= max) break;
+    let bm;
+    try { bm = await cdp(tabId, "DOM.getBoxModel", { nodeId: c.nodeId }); } catch { continue; }
+    const q = bm?.model?.content;
+    if (!q || q.length < 8) continue;
+    if ((bm.model.width || 0) < 6 || (bm.model.height || 0) < 6) continue;
+    const x = Math.round((q[0] + q[2] + q[4] + q[6]) / 4);
+    const y = Math.round((q[1] + q[3] + q[5] + q[7]) / 4);
+    out.push({ role: c.role, name: c.name.slice(0, 60), x, y });
+  }
+  return out;
+}
+
 export async function executeTool(name, input, tabId) {
   if (!tabId) {
     const tab = await getActiveTab();
@@ -549,12 +597,26 @@ export async function executeTool(name, input, tabId) {
         // attachment it sends to Claude — passing PNG bytes with a
         // jpeg mediaType would corrupt the image at the API boundary.
         const { base64, mediaType } = await takeScreenshot(tabId, { highQuality: input.highQuality === true });
-        if (labels && Object.keys(labels).length) {
-          const lines = Object.entries(labels)
-            .map(([n, m]) => `  ${n}: ${m.role}${m.name ? ` "${m.name}"` : ""} @(${m.x},${m.y}) ref=${m.ref}`)
-            .join("\n");
-          return { type: "screenshot_labeled", base64, mediaType, labels,
-            text: `Screenshot with ${Object.keys(labels).length} labeled interactive elements:\n${lines}\n\nTo act on one: "click ref=<value>" from the legend above, or use coordinates (x,y) from the entry.` };
+        // Cross-frame clickables (incl. cross-origin iframes) via CDP — the
+        // top-frame content.js labels above are blind to these.
+        const crossFrame = input.labels
+          ? await enumerateClickablesAllFrames(tabId, 40).catch(() => [])
+          : [];
+        const hasTop = labels && Object.keys(labels).length;
+        if (hasTop || crossFrame.length) {
+          let lines = "";
+          if (hasTop) {
+            lines += Object.entries(labels)
+              .map(([n, m]) => `  ${n}: ${m.role}${m.name ? ` "${m.name}"` : ""} @(${m.x},${m.y}) ref=${m.ref}`)
+              .join("\n");
+          }
+          if (crossFrame.length) {
+            lines += (lines ? "\n\n" : "")
+              + "Cross-frame elements (incl. cross-origin iframes — click by (x,y)):\n"
+              + crossFrame.map((c) => `  • ${c.role}${c.name ? ` "${c.name}"` : ""} @(${c.x},${c.y})`).join("\n");
+          }
+          return { type: "screenshot_labeled", base64, mediaType, labels: labels || {},
+            text: `Screenshot interactive elements:\n${lines}\n\nTo act: "click ref=<value>" (top-frame) or click by coordinates (x,y).` };
         }
         return { type: "screenshot", base64, mediaType };
       } finally {
