@@ -54,6 +54,12 @@
     <div class="tab-strip" id="tabStrip">
       <span class="dot" id="tabDot"></span>
       <span class="tab-title" id="tabTitle">...</span>
+      <!-- Token meter — cumulative tokens (context + output) for THIS chat.
+           Hidden until the first turn completes. Lets the user gauge how much
+           they've consumed and decide when to start a fresh chat. NOT a cost
+           figure — the Max subscription bills nothing per token. -->
+      <span class="token-meter" id="tokenMeter" hidden
+            title="إجمالي توكن هذه المحادثة (سياق + ناتج). ابدأ محادثة جديدة للرجوع لاستهلاك أخفّ."></span>
     </div>
 
     <!-- Quick actions -->

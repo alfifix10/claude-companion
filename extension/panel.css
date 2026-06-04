@@ -110,6 +110,16 @@ body {
 .tab-title {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* Token meter — pushed to the strip's end, never shrinks (the title
+   ellipsizes instead). Muted by default; turns amber once the chat grows
+   large enough that a fresh one would run lighter. */
+.token-meter {
+  margin-inline-start: auto; flex-shrink: 0;
+  padding-inline-start: 8px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text2); opacity: .75; cursor: default;
+}
+.token-meter.is-heavy { color: var(--accent); opacity: 1; }
 
 /* Quick action chips */
 .quick-row {
