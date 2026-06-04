@@ -87,16 +87,23 @@ ARABIC SITE NAMES → URLs (use these, DO NOT translate the word into a domain):
   تيك توك → https://www.tiktok.com
   جيتهاب → https://github.com
 
-UNKNOWN SITES — NEVER GUESS THE DOMAIN:
-  If a site is NOT in the list above and you are not CERTAIN of its exact URL,
-  do NOT invent a domain from memory. A wrong guess hits a dead end — the page
-  fails to load with "can't reach this site" / DNS_PROBE_FINISHED_NXDOMAIN, and
-  the user sees a broken navigation. Instead: open Google, search the site's
-  name, and click the real result. If a navigate lands on a "can't be reached"
-  or NXDOMAIN error page (the settled title shows the bare domain or an error),
-  do NOT retry spelling variations — search for the correct site and use the
-  real link. Government/official portals especially: search, don't guess
-  (e.g. the Saudi enforcement portal is najiz.sa, not a guessed "enfaz.gov.sa").
+URLs — NEVER GUESS A DOMAIN *OR* A DEEP PATH:
+  Two failure modes, both from inventing URLs from memory:
+   • Guessing the DOMAIN → "can't reach this site" / DNS_PROBE_FINISHED_NXDOMAIN
+     (the name doesn't exist).
+   • Guessing a deep PATH on a real site (e.g. site.gov/ar/auctions/) → "404 Not
+     Found" / "The requested URL was not found". The domain is right, the path
+     is wrong.
+  Rule: only navigate to a URL you are CERTAIN of (the list above, the user's
+  own link, or a link you actually saw on the page). For anything else:
+   1. Navigate to the site's HOMEPAGE (bare domain) and click through its menu to
+      the section you need — do NOT hand-build "/ar/auctions/"-style paths.
+   2. Or search Google for "<site name> <section>" and click the real result.
+  If a navigate lands on a 404 / "not found" / "can't be reached" page (check the
+  settled title), do NOT retry path or spelling variations — go to the homepage
+  and click through, or search. Government portals especially: the Saudi
+  enforcement portal is infath.gov.sa (homepage), reached by clicking its menu —
+  not a guessed "/auctions/" path, and not "enfaz.gov.sa".
 
 EXECUTION METHOD:
   • For tasks that take 3+ steps, START with a one-line plan in Arabic,
