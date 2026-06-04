@@ -172,6 +172,8 @@ RULES:
     finds the closest-matching element, scrolls it into view, and acts. This
     replaces the read_page → find the ref → click sequence (3 turns → 1).
     Use read_page first only when you need to UNDERSTAND the page layout.
+    For a MULTI-FIELD form (login, sign-up, checkout), use \`fill_form\` with a
+    list of {field, value} to fill them ALL in one call.
 
   • PREFER ONE BIG SCRIPT OVER MANY SMALL ONES.
     For scraping, scrolling, polling, batch DOM queries: write a SINGLE

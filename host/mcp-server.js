@@ -523,6 +523,20 @@ server.tool("act",
   },
   async (a) => ({ content: [{ type: "text", text: String(await request("act", a)) }] }));
 
+server.tool("fill_form",
+  "Fill MULTIPLE form fields in ONE call — saves a round-trip per field. " +
+  "Give `fields`: an array of { field, value } where `field` is the visible label/name " +
+  "(closest match wins) and `value` is the text to enter. Fields are filled in order; a " +
+  "field that can't be found is skipped and reported, the rest still fill. Use for login / " +
+  "sign-up / checkout forms instead of calling act per field.",
+  {
+    fields: z.array(z.object({
+      field: z.string().describe("Visible label/name of the field (closest match)."),
+      value: z.string().describe("Text to enter into it."),
+    })).describe("The fields to fill, in order."),
+  },
+  async (a) => ({ content: [{ type: "text", text: String(await request("fill_form", a)) }] }));
+
 server.tool("click", "Click an element by ref or coordinates. Set button to 'right' for context menu, 'middle' to open link in new tab. Use modifiers like ['ctrl'] for Ctrl+click (open in new tab on links).", {
   ref: z.string().optional(),
   coordinate: coord.optional(),

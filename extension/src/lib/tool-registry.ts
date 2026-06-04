@@ -97,6 +97,12 @@ export const TOOL_REGISTRY: Record<string, ToolMetadata> = {
     category: "upload",
     description: 'Upload local file(s) to an <input type="file"> element.',
   },
+  fill_form: {
+    name: "fill_form",
+    mutating: true,
+    category: "interaction",
+    description: "Fill multiple form fields by label in one call.",
+  },
   find: {
     name: "find",
     mutating: false,

@@ -8,12 +8,12 @@ import {
 } from "./tool-registry.js";
 
 describe("TOOL_REGISTRY — shape invariants", () => {
-  it("exposes exactly the 30 tools we ship today (23 browser + 7 devtools)", () => {
-    // 23 browser (interaction + reading + tabs + nav + scripting + waiting +
-    //              upload; includes the compound `act` tool)
+  it("exposes exactly the 31 tools we ship today (24 browser + 7 devtools)", () => {
+    // 24 browser (interaction + reading + tabs + nav + scripting + waiting +
+    //              upload; includes the compound `act` and `fill_form` tools)
     // + 7 DevTools (read_console_messages, read_network_requests, read_page_errors,
     //                inspect_element, read_storage, read_performance, clear_injected_scripts)
-    expect(Object.keys(TOOL_REGISTRY)).toHaveLength(30);
+    expect(Object.keys(TOOL_REGISTRY)).toHaveLength(31);
   });
 
   it("every entry's key matches its `name` field", () => {
@@ -92,8 +92,8 @@ describe("MUTATING_TOOLS derived set", () => {
     expect(MUTATING_TOOLS).toBeInstanceOf(Set);
   });
 
-  it("contains exactly the 15 mutating tools (14 + the compound act)", () => {
-    expect(MUTATING_TOOLS.size).toBe(15);
+  it("contains exactly the 16 mutating tools (14 + act + fill_form)", () => {
+    expect(MUTATING_TOOLS.size).toBe(16);
   });
 
   it("is consistent with per-entry mutating flags", () => {
@@ -104,8 +104,8 @@ describe("MUTATING_TOOLS derived set", () => {
 });
 
 describe("getAllToolNames", () => {
-  it("returns 30 names", () => {
-    expect(getAllToolNames()).toHaveLength(30);
+  it("returns 31 names", () => {
+    expect(getAllToolNames()).toHaveLength(31);
   });
 
   it("returns the names sorted alphabetically", () => {

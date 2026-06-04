@@ -469,6 +469,37 @@ export async function executeTool(name, input, tabId) {
       }
       return `act: unknown action "${action}". Use "click" or "fill".`;
     }
+    case "fill_form": {
+      // Fill MANY fields in one call (login/signup/checkout) instead of one
+      // act/form_input round-trip per field. Each field is found by its label
+      // (ranked find) or a ref, then filled via the existing form_input path
+      // (React-safe setNativeValue). A missing field is skipped + reported, not
+      // fatal, so the rest still fill.
+      const fields = Array.isArray(input.fields) ? input.fields : [];
+      if (!fields.length) return "fill_form: provide a 'fields' array of { field, value }.";
+      const out = [];
+      let ok = 0;
+      for (const f of fields) {
+        const label = f?.field;
+        const value = String(f?.value ?? "");
+        if (!label && !f?.ref) { out.push("✗ (missing field name)"); continue; }
+        let ref = f?.ref;
+        if (!ref) {
+          const resp = await sendContentMessage(tabId, { type: "findElements", query: label });
+          const hits = resp?.result || [];
+          if (!hits.length) { out.push(`✗ "${label}": not found`); continue; }
+          ref = hits[0].ref;
+        }
+        const r = await executeTool("form_input", { ref, value }, tabId);
+        if (typeof r === "string" && r.toLowerCase().startsWith("error")) {
+          out.push(`✗ "${label || ref}": ${r}`);
+        } else {
+          ok++;
+          out.push(`✓ "${label || ref}" = "${value.slice(0, 30)}${value.length > 30 ? "…" : ""}"`);
+        }
+      }
+      return `Filled ${ok}/${fields.length} field(s):\n${out.join("\n")}`;
+    }
     case "click": {
       const [x, y] = await resolveClickTarget(tabId, input);
       if (x == null) return "Element not found (ref may have expired — call read_page again)" + noteRefMiss(tabId);
