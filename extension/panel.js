@@ -135,6 +135,8 @@ function hardStop(reason = "أوقفت العملية.") {
   endTaskStats();
   // 5. Reset all UI state
   setLoading(false);
+  autoResumeCount = 0;
+  autoResumeArmed = false; // a hard stop must never auto-resume
   stopBlackoutUntil = Date.now() + 3000;
   if (reason) appendError(reason);
 }
@@ -199,6 +201,19 @@ let streamingBubble = null;
 // user message, new chat, and normal completion. Bounded by MAX_AUTO_RESUMES
 // so a task can extend itself for a long batch but never loop forever.
 let autoResumeCount = 0;
+// SAFETY (critical): auto-resume may ONLY fire as a direct continuation of a
+// task the user actively started by sending a message in THIS live panel
+// session. It is false on every fresh load — so a stale "resumable" result
+// replayed via get_status after an extension reload can NEVER auto-run a task
+// and open pages on its own. Armed only in send()/autoResume(); disarmed on
+// done/stop/new-chat and whenever a stop is shown instead of resumed.
+let autoResumeArmed = false;
+// KILL SWITCH: auto-resume is DISABLED by default. It re-runs the agent
+// without a fresh user message, which alarmed the user (pages opening after a
+// reload). Off until it's been proven safe end-to-end; a long task simply
+// stops at the budget and waits for the user to press "اكمل" — the known-safe
+// behaviour. Flip to true (and reload) to re-enable the smart auto-continue.
+const AUTO_RESUME_ENABLED = false;
 
 // Token meter — cumulative tokens (input/context + output) across every turn
 // of the CURRENT chat. Summed from each turn's `result` usage. Resets on a
@@ -402,6 +417,7 @@ function onBgMessage(msg) {
       addTokenUsage(msg.usage);
       setLoading(false);
       autoResumeCount = 0; // task completed normally — clear the resume budget
+      autoResumeArmed = false;
       saveHistory();
       // If the user had scrolled up to read something else while the
       // answer was streaming, give the floating ↓ button a brief pulse so
@@ -417,7 +433,11 @@ function onBgMessage(msg) {
       // flagged resumable — continue it automatically instead of nagging.
       // Loops / error streaks / timeouts aren't resumable, so they fall
       // through and stop as before.
-      if (shouldAutoResume(msg, autoResumeCount)) {
+      // ONLY auto-resume a LIVE, in-session, user-initiated task (armed +
+      // currently loading). This is what stops a stale resumable result —
+      // replayed after an extension reload — from re-running a task and
+      // opening pages unprompted.
+      if (AUTO_RESUME_ENABLED && isLoading && autoResumeArmed && shouldAutoResume(msg, autoResumeCount)) {
         autoResumeCount++;
         endTaskStats();
         showNotice(`المهمة طويلة — أُكملها تلقائيّاً (${autoResumeCount}/${MAX_AUTO_RESUMES})…`,
@@ -429,6 +449,7 @@ function onBgMessage(msg) {
       endTaskStats();
       setLoading(false);
       autoResumeCount = 0;
+      autoResumeArmed = false;
       break;
     case "no_task":
       break;
@@ -1158,6 +1179,7 @@ function setTyping(show, text) {
 // is already in its advanced state, so the agent re-reads and picks up where
 // it left off — exactly what a manual "اكمل" does, just without the nag.
 function autoResume() {
+  autoResumeArmed = true; // stay armed across the bounded continuation
   setLoading(true);
   setTyping(true, "أُكمل المهمة…");
   streamingBubble = null;
@@ -1178,6 +1200,7 @@ async function send() {
   const hasImages = pendingImages.length > 0;
   if (!text && !hasImages) return;
   autoResumeCount = 0; // a real new user message starts a fresh task
+  autoResumeArmed = true; // only NOW is auto-resume allowed (live user task)
 
   // Speech recognition cleanup. If the user hits send while the mic is
   // still listening, three things need to happen before we continue:
@@ -2129,6 +2152,7 @@ async function startNewConversation() {
   conversation = [];
   streamingBubble = null;
   autoResumeCount = 0;
+  autoResumeArmed = false;
   resetTokenMeter();
 
   // 3. DOM — empty message list, welcome panel back (fresh-chat layout
