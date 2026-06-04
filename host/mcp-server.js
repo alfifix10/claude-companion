@@ -523,9 +523,15 @@ server.tool("type_text", "Type text at the current keyboard focus.", {
   text: z.string(),
 }, async (a) => ({ content: [{ type: "text", text: String(await request("type_text", a)) }] }));
 
-server.tool("press_key", "Press a keyboard key/shortcut (e.g. Enter, Tab, Ctrl+A).", {
-  key: z.string(),
-}, async (a) => ({ content: [{ type: "text", text: String(await request("press_key", a)) }] }));
+server.tool("press_key",
+  "Press a key, a chord, or a SEQUENCE. One key: 'Enter', 'Tab', 'Escape'. " +
+  "Chord with '+': 'Ctrl+A'. Multi-key SEQUENCE with spaces — the keys fire " +
+  "back-to-back in one call so app shortcuts that need a sequence work, e.g. " +
+  "Gmail '* a' (select all), '#' (delete to trash), 'g i' (go to inbox); " +
+  "vim-style 'g g'. Shifted symbols like * # $ are sent with their real code.",
+  {
+    key: z.string(),
+  }, async (a) => ({ content: [{ type: "text", text: String(await request("press_key", a)) }] }));
 
 server.tool("form_input", "Set the value of a form field by ref.", {
   ref: z.string(),

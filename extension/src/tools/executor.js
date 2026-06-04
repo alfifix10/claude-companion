@@ -271,6 +271,35 @@ async function waitForTabComplete(tabId, timeoutMs = 8000) {
   try { return await chrome.tabs.get(tabId); } catch { return null; }
 }
 
+// Map a single key token (e.g. "a", "*", "#", "Enter", "Ctrl+A") to the CDP
+// dispatchKeyEvent params. Crucially, shifted symbols get their REAL physical
+// code + the Shift modifier — the old code did `Key${"*".toUpperCase()}` →
+// "Key*", an invalid code that apps (Gmail) ignore. Now "*" → Digit8 + Shift,
+// "#" → Digit3 + Shift, etc., so single-char shortcuts actually register.
+const SHIFT_SYMBOLS = {
+  "!": "Digit1", "@": "Digit2", "#": "Digit3", "$": "Digit4", "%": "Digit5",
+  "^": "Digit6", "&": "Digit7", "*": "Digit8", "(": "Digit9", ")": "Digit0",
+  "_": "Minus", "{": "BracketLeft", "}": "BracketRight", ":": "Semicolon",
+  '"': "Quote", "<": "Comma", ">": "Period", "?": "Slash", "~": "Backquote",
+  "|": "Backslash",
+};
+function keyToCdp(token) {
+  const { key, modifiers } = parseKeyCombo(token);
+  let mod = modifiers, code, text;
+  if (key.length === 1) {
+    if (SHIFT_SYMBOLS[key]) { code = SHIFT_SYMBOLS[key]; mod |= 8; /* Shift */ text = key; }
+    else if (/[a-z]/i.test(key)) { code = `Key${key.toUpperCase()}`; text = key; }
+    else if (/[0-9]/.test(key)) { code = `Digit${key}`; text = key; }
+    else { code = key; text = key; }
+  } else {
+    code = key; // named key (Enter, Tab, ArrowDown, …) — no char text
+  }
+  // Only emit char text for plain / Shift-only keys. With Ctrl/Alt/Meta it's a
+  // chord (Ctrl+A) — the char must NOT be typed, so drop the text.
+  if (mod & ~8) text = undefined;
+  return { key, code, modifiers: mod, text };
+}
+
 // CROSS-FRAME clickable enumeration via CDP (chrome.debugger). content.js sees
 // only the top frame (same-origin); the debugger can read EVERY frame including
 // CROSS-ORIGIN iframes (Google account chooser, Stripe card fields, captchas).
@@ -642,15 +671,29 @@ export async function executeTool(name, input, tabId) {
     case "press_key": {
       await ensureAttached(tabId);
       invalidatePageTextCache(tabId);
-      const { key, modifiers } = parseKeyCombo(input.key);
-      const code = key.length === 1 ? `Key${key.toUpperCase()}` : key;
-      // Enter / Tab / Escape often submit or navigate — capture the
-      // delta so Claude knows what just happened.
-      const triggeringKey = /^(Enter|NumpadEnter|Tab|Escape)$/i.test(key);
-      const before = triggeringKey ? await capturePageSignals(tabId) : null;
-      await cdp(tabId, "Input.dispatchKeyEvent", { type: "keyDown", key, code, modifiers });
-      await cdp(tabId, "Input.dispatchKeyEvent", { type: "keyUp", key, code, modifiers });
-      if (triggeringKey) {
+      // SEQUENCE support: space-separated tokens are pressed in order WITHIN
+      // this one call (no MCP round-trip between them), so multi-key shortcuts
+      // like Gmail's "* a" (select all) or "g i" (go to inbox) actually
+      // register — sent as separate tool calls, the ~1s gap breaks the
+      // sequence. Each token may still be a chord ("Ctrl+A"). A single token
+      // behaves exactly as before.
+      const tokens = String(input.key).trim().split(/\s+/).filter(Boolean);
+      if (!tokens.length) return "press_key: no key given.";
+      const isSequence = tokens.length > 1;
+      const lastKey = keyToCdp(tokens[tokens.length - 1]).key;
+      // A sequence usually DOES something (select, navigate); capture the delta
+      // for it too, alongside the classic submit/navigate single keys.
+      const triggering = isSequence || /^(Enter|NumpadEnter|Tab|Escape)$/i.test(lastKey);
+      const before = triggering ? await capturePageSignals(tabId) : null;
+      for (const tok of tokens) {
+        const { key, code, modifiers, text } = keyToCdp(tok);
+        const down = { type: "keyDown", key, code, modifiers };
+        if (text) down.text = text; // emit the char so keypress listeners fire
+        await cdp(tabId, "Input.dispatchKeyEvent", down);
+        await cdp(tabId, "Input.dispatchKeyEvent", { type: "keyUp", key, code, modifiers });
+        if (isSequence) await sleep(45); // brief beat between sequence keys
+      }
+      if (triggering) {
         await waitForDomStable(tabId);
         schedulePageTextPrefetch(tabId);
         const after = await capturePageSignals(tabId);
