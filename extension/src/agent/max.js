@@ -581,11 +581,16 @@ export async function handleMaxChat(messages) {
 
   // Every timeout path MUST also kill lingering processes and arm a tool
   // blackout — otherwise a dying claude keeps emitting clicks/navigates.
-  function timeoutCancel(reason) {
+  function timeoutCancel(reason, resumable = false) {
     if (currentRunId !== id) return;
     cancelAllHost();
     rejectToolsFor(10_000);
-    finishTask({ type: "error", text: reason });
+    // resumable=true marks a BENIGN stop: the task was making genuine,
+    // varied progress and only hit the absolute action budget — the panel
+    // may auto-continue it (bounded) instead of asking the user to press
+    // "اكمل". Loops, repeated-error streaks, no-progress spins, the total
+    // backstop and the timeouts are NOT resumable — those are real problems.
+    finishTask({ type: "error", text: reason, resumable });
   }
 
   // Transient-retry helper. Returns true if a retry was scheduled
@@ -705,9 +710,12 @@ export async function handleMaxChat(messages) {
               return;
             }
             if (actionCount > MAX_ACTIONS) {
+              // BENIGN cap: 250 varied actions = a genuinely long task (e.g.
+              // "clean 300 emails"), not a spin. Mark it resumable so the panel
+              // can auto-continue it rather than nagging the user.
               timeoutCancel(
-                `بلغتُ حدّ ${MAX_ACTIONS} إجراء (نقر/كتابة/تنقّل) في هذه المهمّة. `
-                + `حفظتُ ما أُنجِز — اضغط «اكمل» لإكمال الجزء المتبقّي.`
+                `بلغتُ حدّ ${MAX_ACTIONS} إجراء في هذه المهمّة الطويلة — أُكمل من حيث وقفت.`,
+                true,
               );
               return;
             }

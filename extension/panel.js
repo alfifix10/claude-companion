@@ -23,6 +23,7 @@ import { buildSnippet } from "./src/lib/search-snippet.js";
 // model remembers what it did across turns (C1). 7 unit tests. src/lib.
 import { actionTrace } from "./src/lib/action-trace.js";
 import { capConversation } from "./src/lib/cap-conversation.js";
+import { shouldAutoResume, MAX_AUTO_RESUMES } from "./src/lib/auto-resume.js";
 
 // ─────────────────────────────────────────────────────────────────────
 // DOM refs
@@ -193,6 +194,11 @@ let conversation = [];
 const MAX_HISTORY = 100;
 let isLoading = false;
 let streamingBubble = null;
+// Smart-stop auto-resume (5.2): how many times the CURRENT task has
+// auto-continued after hitting the benign action budget. Reset on every new
+// user message, new chat, and normal completion. Bounded by MAX_AUTO_RESUMES
+// so a task can extend itself for a long batch but never loop forever.
+let autoResumeCount = 0;
 
 // Token meter — cumulative tokens (input/context + output) across every turn
 // of the CURRENT chat. Summed from each turn's `result` usage. Resets on a
@@ -395,6 +401,7 @@ function onBgMessage(msg) {
       endTaskStats();
       addTokenUsage(msg.usage);
       setLoading(false);
+      autoResumeCount = 0; // task completed normally — clear the resume budget
       saveHistory();
       // If the user had scrolled up to read something else while the
       // answer was streaming, give the floating ↓ button a brief pulse so
@@ -406,9 +413,22 @@ function onBgMessage(msg) {
       // Terminate the streaming bubble so the next task doesn't append to it.
       // Without this, a retry after error keeps writing into the old bubble.
       if (streamingBubble) streamingBubble = null;
+      // Smart stop: a BENIGN budget hit (long task, still progressing) is
+      // flagged resumable — continue it automatically instead of nagging.
+      // Loops / error streaks / timeouts aren't resumable, so they fall
+      // through and stop as before.
+      if (shouldAutoResume(msg, autoResumeCount)) {
+        autoResumeCount++;
+        endTaskStats();
+        showNotice(`المهمة طويلة — أُكملها تلقائيّاً (${autoResumeCount}/${MAX_AUTO_RESUMES})…`,
+          { variant: "info", ms: 3000 });
+        autoResume();
+        break;
+      }
       appendError(msg.text || "خطأ غير معروف");
       endTaskStats();
       setLoading(false);
+      autoResumeCount = 0;
       break;
     case "no_task":
       break;
@@ -1131,10 +1151,33 @@ function setTyping(show, text) {
 // ─────────────────────────────────────────────────────────────────────
 // Send flow
 // ─────────────────────────────────────────────────────────────────────
+// Continue a long task automatically after a benign budget stop (smart stop).
+// Mirrors send()'s core minus the UI/input/image machinery: it appends an
+// ephemeral "continue" instruction (NOT persisted, so reopening the chat stays
+// clean) and re-issues the query against the existing conversation. The page
+// is already in its advanced state, so the agent re-reads and picks up where
+// it left off — exactly what a manual "اكمل" does, just without the nag.
+function autoResume() {
+  setLoading(true);
+  setTyping(true, "أُكمل المهمة…");
+  streamingBubble = null;
+  startTaskStats();
+  if (!bgPort) connectBg();
+  const sent = conversation.map((m) => ({
+    role: m.role,
+    content: m.role === "assistant" && typeof m.content === "string"
+      ? m.content + actionTrace(m.toolActions)
+      : m.content,
+  }));
+  sent.push({ role: "user", content: "تابِع إكمال المهمة من حيث توقفت، دون إعادة ما أنجزته." });
+  bgPort.postMessage({ type: "chat_send", messages: sent });
+}
+
 async function send() {
   const text = $input.value.trim();
   const hasImages = pendingImages.length > 0;
   if (!text && !hasImages) return;
+  autoResumeCount = 0; // a real new user message starts a fresh task
 
   // Speech recognition cleanup. If the user hits send while the mic is
   // still listening, three things need to happen before we continue:
@@ -2082,6 +2125,7 @@ async function startNewConversation() {
   await chrome.storage.local.remove("currentConvId");
   conversation = [];
   streamingBubble = null;
+  autoResumeCount = 0;
   resetTokenMeter();
 
   // 3. DOM — empty message list, welcome panel back (fresh-chat layout
