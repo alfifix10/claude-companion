@@ -70,6 +70,37 @@ describe("buildSmartHistory — long conversations", () => {
   });
 });
 
+describe("buildSmartHistory — BM25 retrieval (4.5)", () => {
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, i) => (i % 2 === 0 ? u(`u${i}`) : a(`a${i}`)));
+
+  it("surfaces an elided-middle turn relevant to the current question", () => {
+    const msgs = many(34);
+    msgs[10] = u("my passport number is XYZ789, keep it safe"); // buried in the middle
+    msgs[32] = u("remind me of that passport number");           // the current question (tail)
+    const out = buildSmartHistory(msgs);
+    expect(out).toContain("[relevant earlier]");
+    expect(out).toContain("XYZ789"); // the relevant old turn was retrieved
+  });
+
+  it("does not surface unrelated middle turns", () => {
+    const msgs = many(34);
+    msgs[10] = u("weather forecast tomorrow looks pleasant"); // middle, no shared terms
+    msgs[32] = u("remind me of my passport number");           // current question
+    const out = buildSmartHistory(msgs);
+    expect(out).not.toContain("[relevant earlier]");
+    expect(out).not.toContain("weather forecast");
+  });
+
+  it("retrieval is disabled when retrieveK is 0", () => {
+    const msgs = many(34);
+    msgs[10] = u("passport XYZ789");
+    msgs[32] = u("passport number please");
+    const out = buildSmartHistory(msgs, { retrieveK: 0 });
+    expect(out).not.toContain("[relevant earlier]");
+  });
+});
+
 describe("buildSmartHistory — character budget", () => {
   it("clips an oversized single message", () => {
     const big = "x".repeat(5000);

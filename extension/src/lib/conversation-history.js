@@ -20,13 +20,20 @@
  *   • Structured (non-string) content is summarised to a short tag
  *     ("[image]", "[used: read_page, click]") instead of the opaque
  *     "(structured content)" the old formatter emitted.
+ *   • RETRIEVE (4.5) the few elided-middle turns most relevant to the current
+ *     question via BM25, so "you said X 20 turns ago" still surfaces without
+ *     injecting the whole history. Retrieved turns are sheddable — the char
+ *     budget drops them first under pressure, so they never bloat tokens.
  */
+import { rankBM25 } from "./bm25.js";
 export const DEFAULT_HISTORY_CONFIG = {
     keepFirst: 2,
     keepLast: 12,
     maxChars: 8000,
     maxPerMessage: 1500,
     maxPivots: 3,
+    retrieveK: 3,
+    maxRetrievedChars: 400,
 };
 // Heuristic: does this USER message redirect the task? Bilingual — Arabic
 // script alternatives don't use \b (word boundaries don't apply to Arabic).
@@ -79,7 +86,25 @@ export function buildSmartHistory(messages, config = {}) {
         const pivots = middle
             .filter((m) => m.role === "user" && isPivot(m.content))
             .slice(-cfg.maxPivots);
-        const skipped = middle.length - pivots.length;
+        // BM25 retrieval (4.5): from the elided middle (minus the pivots we're
+        // already keeping), surface the turns most relevant to the CURRENT
+        // question — the last user message. Shares no query term → not retrieved,
+        // so this is a no-op for unrelated middles.
+        const pivotSet = new Set(pivots);
+        const candidates = middle.filter((m) => !pivotSet.has(m));
+        const lastUser = [...messages].reverse().find((m) => m.role === "user");
+        const query = lastUser ? contentToText(lastUser.content) : "";
+        let retrieved = [];
+        if (query && cfg.retrieveK > 0 && candidates.length > 0) {
+            retrieved = rankBM25(query, candidates.map((m) => contentToText(m.content)), {
+                limit: cfg.retrieveK,
+            })
+                .map((r) => candidates[r.index])
+                .filter((m) => !!m)
+                // Chronological order reads more naturally than relevance order.
+                .sort((x, y) => messages.indexOf(x) - messages.indexOf(y));
+        }
+        const skipped = middle.length - pivots.length - retrieved.length;
         const headLines = head.map(fmt);
         const pivotLines = pivots.map((m) => `USER: [earlier course-correction] ${clip(contentToText(m.content), cfg.maxPerMessage)}`);
         const markerLines = skipped > 0
@@ -87,7 +112,10 @@ export function buildSmartHistory(messages, config = {}) {
                 `[ELIDED: ${skipped} earlier turn(s) folded for brevity. Read _STATE.md for the back-story if needed. — تمّ طيّ ${skipped} رسالة سابقة.]`,
             ]
             : [];
-        lines = [...headLines, ...pivotLines, ...markerLines, ...tail.map(fmt)];
+        const retrievedLines = retrieved.map((m) => `${m.role === "user" ? "USER" : "ASSISTANT"}: [relevant earlier] ${clip(contentToText(m.content), cfg.maxRetrievedChars)}`);
+        // Retrieved lines sit AFTER the pinned prefix so the char budget can shed
+        // them first (they're a bonus, not load-bearing). Tail stays most-recent.
+        lines = [...headLines, ...pivotLines, ...markerLines, ...retrievedLines, ...tail.map(fmt)];
         pinned = headLines.length + pivotLines.length + markerLines.length;
     }
     // Character budget. Per-message clipping happened in fmt; if the whole
