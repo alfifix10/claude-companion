@@ -22,6 +22,7 @@ import { buildSnippet } from "./src/lib/search-snippet.js";
 // actionTrace: compact one-line summary of tools an assistant turn ran, so the
 // model remembers what it did across turns (C1). 7 unit tests. src/lib.
 import { actionTrace } from "./src/lib/action-trace.js";
+import { capConversation } from "./src/lib/cap-conversation.js";
 
 // ─────────────────────────────────────────────────────────────────────
 // DOM refs
@@ -1192,7 +1193,12 @@ async function send() {
     if (thumbs.length) userMsg.images = thumbs;
   }
   conversation.push(userMsg);
-  if (conversation.length > MAX_HISTORY) conversation = conversation.slice(-MAX_HISTORY);
+  // Cap history but PIN the first turn (the goal). slice(-MAX_HISTORY) used to
+  // drop the original objective once a chat passed 100 messages, so by msg 200
+  // the model lost the "why". capConversation keeps the first 2 + the most
+  // recent, so buildSmartHistory's first-2 stays the true goal even in a
+  // marathon chat — no Pro Mode required.
+  conversation = capConversation(conversation, MAX_HISTORY);
   $input.value = "";
   $input.style.height = "auto";
   updateSend();
