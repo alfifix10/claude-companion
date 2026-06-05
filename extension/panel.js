@@ -1699,13 +1699,14 @@ async function saveSettings() {
       warning = "⚠ جذر القرص مرفوض لأمان — اختر مجلّداً فرعياً.";
     }
   }
+  // The status line is for PROBLEMS only. On a clean save we stay
+  // silent: the toast confirms persistence, the header badge + the
+  // checked toggle show Pro Mode is on, and the path is right there in
+  // the field above — echoing it again (with bidi-mangled Arabic+path)
+  // added noise, not information.
   if (warning) {
     $proModeStatus.textContent = warning;
     $proModeStatus.style.color = "var(--accent)";
-    $proModeStatus.hidden = false;
-  } else if (proMode) {
-    $proModeStatus.textContent = "✓ Pro Mode فعّال — مجلّد العمل: " + workingDirectory;
-    $proModeStatus.style.color = "var(--accent-br)";
     $proModeStatus.hidden = false;
   } else {
     $proModeStatus.hidden = true;
