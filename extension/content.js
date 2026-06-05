@@ -102,6 +102,23 @@
     setTimeout(() => { try { el.remove(); } catch {} }, 260);
   }
 
+  // Self-heal the border on viewport resize. Chromium occasionally fails to
+  // repaint a position:fixed element to the new viewport bounds when the side
+  // panel is dragged, so the frame can lose an edge until the next layout.
+  // After the resize settles, nudge a fresh compositing layer (translateZ then
+  // clear) — forces a repaint to the correct bounds, no visible flicker. No-op
+  // when the border isn't showing. Debounced so dragging doesn't thrash.
+  let borderResizeTimer = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(borderResizeTimer);
+    borderResizeTimer = setTimeout(() => {
+      const el = document.getElementById(BORDER_ID);
+      if (!el) return;
+      el.style.transform = "translateZ(0)";
+      requestAnimationFrame(() => { try { el.style.transform = ""; } catch {} });
+    }, 120);
+  }, { passive: true });
+
   // Click ripple — a briefly-expanding ring at the interaction point
   function showClickRipple(x, y, color = CLAUDE_COLOR) {
     ensureStyle();
