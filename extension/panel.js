@@ -444,7 +444,9 @@ function onBgMessage(msg) {
       const text = bubble?.dataset?.raw || msg.text || "";
       streamingBubble = null;
       if (!bubble && text) appendAssistantBubble(text);
-      if (msg.toolActions?.length) appendToolActions(msg.toolActions);
+      // Per-tool "✓ …" lines were removed from the transcript (noise) — the
+      // live progress bar under the composer shows work in flight. We still
+      // KEEP the actions on the message for the model's cross-turn memory.
       // Keep the turn's tool actions on the message so the next turn's history
       // can remind the model what it already did (C1 — see actionTrace).
       if (text) conversation.push({ role: "assistant", content: text, toolActions: msg.toolActions || [] });
@@ -1219,33 +1221,6 @@ function appendError(text) {
   scrollToBottom();
 }
 
-// Single compact line below the assistant bubble summarizing what Claude did.
-// Much cleaner than one box per tool. Screenshots render separately.
-function appendToolActions(actions) {
-  if (!actions?.length) return;
-  removeWelcome();
-
-  // Collapse to unique labels — if Claude did read_page 3 times, show once.
-  const labels = [];
-  const seen = new Set();
-  for (const a of actions) {
-    const lbl = TOOL_LABELS[a.tool] || a.tool;
-    const key = a.error ? `!${lbl}` : lbl;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    labels.push({ label: lbl, error: !!a.error });
-  }
-  if (labels.length === 0) return;
-
-  const line = document.createElement("div");
-  line.className = "tool-line";
-  line.innerHTML = labels
-    .map((l) => `<span class="${l.error ? "t-bad" : "t-ok"}">${l.error ? "✗" : "✓"} ${l.label}</span>`)
-    .join(`<span class="t-sep">·</span>`);
-  $messages.appendChild(line);
-  scrollToBottom();
-}
-
 // ─────────────────────────────────────────────────────────────────────
 // Scroll management
 //
@@ -1557,7 +1532,6 @@ async function runLocal(hit, myCancel) {
 
     if (r?.error) appendError(r.error);
     else {
-      if (r?.toolActions) appendToolActions(r.toolActions);
       if (r?.screenshot) {
         // mediaType is now driven by what cdp.takeScreenshot actually
         // produced. Hardcoding "image/jpeg" used to ship PNG bytes with

@@ -847,18 +847,6 @@ input.settings-textarea, select.settings-textarea { min-height: 0; }
 .msg.markdown a { color: var(--accent-br); text-decoration: underline; }
 .msg.markdown a:hover { color: var(--accent); }
 
-/* Tool actions: compact single line under the assistant bubble */
-.tool-line {
-  align-self: flex-end;
-  font-size: 10.5px; color: var(--text2);
-  padding: 0 4px; opacity: .65;
-  display: flex; flex-wrap: wrap; gap: 4px;
-  line-height: 1.6;
-}
-.tool-line .t-ok { color: var(--text2); }
-.tool-line .t-bad { color: var(--red); }
-.tool-line .t-sep { color: var(--text2); opacity: .4; margin: 0 2px; }
-
 /* Typing */
 .typing {
   display: flex; align-items: center; gap: 4px; padding: 4px 14px 8px;
