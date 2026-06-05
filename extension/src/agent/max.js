@@ -30,6 +30,36 @@ import { resolveModel } from "../lib/resolve-model.js";
 // safeInputKey lives in src/lib/safe-input-key.ts — 16 unit tests
 // cover determinism across key orders, circular refs, empty objects.
 
+// Tools that act on the user's COMPUTER (filesystem, shell, git, code
+// search, HTTP, SQLite, documents, project memory) — NOT on the visible
+// web page. The orange automation border means "your page is being
+// driven", so it must NOT light up for a purely local task (e.g.
+// "search my computer for a project"). The border is shown by the first
+// tool that is ABSENT from this set, i.e. a real page/tab tool.
+// ⚠ When you add a new LOCAL (Pro) tool, add its name here too — otherwise
+// the page border will wrongly appear while it runs.
+const NON_PAGE_TOOLS = new Set([
+  // filesystem
+  "read_file", "write_file", "edit_file", "delete_file",
+  "list_directory", "find_files", "create_directory", "get_working_directory",
+  // shell
+  "run_command",
+  // documents
+  "generate_pdf", "save_json", "save_csv",
+  // git (structured)
+  "git_status", "git_diff", "git_log", "git_blame", "git_branches",
+  // code search
+  "grep_files", "find_symbol", "find_references", "code_outline",
+  // http (host-side fetch, not the page)
+  "http_fetch", "http_get_json",
+  // code quality
+  "lint_file", "format_file", "type_check",
+  // sqlite
+  "sqlite_query", "sqlite_schema",
+  // project memory
+  "update_project_state",
+]);
+
 // Toggle the task-level sticky border. Individual tool calls pulse it
 // separately so there's always a visual even if this fails to reach the tab.
 async function setBorder(tabId, show) {
@@ -697,8 +727,11 @@ export async function handleMaxChat(messages) {
             // Pause the stuck detector while this tool is in flight.
             // It'll resume when the matching tool_result arrives below.
             toolsInFlight++;
-            // First browser tool call — now we can honestly show the border.
-            if (!borderShown) {
+            // First PAGE tool call — now we can honestly show the border.
+            // Local/computer tools (filesystem, shell, git, …) must NOT
+            // trigger it: they never touch the visible page, so lighting
+            // the orange frame there would be a lie (see NON_PAGE_TOOLS).
+            if (!borderShown && !NON_PAGE_TOOLS.has(name)) {
               borderShown = true;
               setBorder(activeTask?.tabId, true);
             }
