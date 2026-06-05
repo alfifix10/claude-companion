@@ -744,6 +744,12 @@ function enterEditMode(wrap, msgIdx) {
   const fallback = (conversation[msgIdx]?.images || []).map((im) => ({ ...im }));
   let editImages = cached || fallback;
 
+  // Text attachments ride along on resend the same way images do — without
+  // this they'd silently vanish when the user edits an attachment-bearing
+  // message. editTexts is the LIVE list: × removes a chip before resend.
+  let editTexts = (conversation[msgIdx]?.attachments || [])
+    .map((a) => ({ id: ++pendingTextSeq, label: a.label, content: a.content }));
+
   // Build the editor UI.
   const editor = document.createElement("div");
   editor.className = "edit-box";
@@ -785,6 +791,42 @@ function enterEditMode(wrap, msgIdx) {
   }
   renderEditImages();
   editor.appendChild(imagesRow);
+
+  // Text-file chip strip — mirrors the image strip: each attachment that
+  // will resend with the message, removable, previewable.
+  const textsRow = document.createElement("div");
+  textsRow.className = "edit-images";
+  function renderEditTexts() {
+    textsRow.innerHTML = "";
+    if (!editTexts.length) { textsRow.style.display = "none"; return; }
+    textsRow.style.display = "";
+    for (const t of editTexts) {
+      const chip = document.createElement("div");
+      chip.className = "attach-text";
+      const kb = Math.max(1, Math.round((t.content?.length || 0) / 1024));
+      const label = document.createElement("span");
+      label.className = "attach-text-label";
+      label.textContent = `📄 ${t.label} · ~${kb}KB`;
+      label.title = "انقر للمعاينة";
+      label.addEventListener("click", () => openTextViewer(t.label, t.content));
+      chip.appendChild(label);
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "attach-remove";
+      rm.textContent = "×";
+      rm.title = "إزالة";
+      rm.addEventListener("click", (e) => {
+        e.preventDefault();
+        const i = editTexts.indexOf(t);
+        if (i >= 0) editTexts.splice(i, 1);
+        renderEditTexts();
+      });
+      chip.appendChild(rm);
+      textsRow.appendChild(chip);
+    }
+  }
+  renderEditTexts();
+  editor.appendChild(textsRow);
 
   const ta = document.createElement("textarea");
   ta.className = "edit-textarea";
@@ -884,11 +926,11 @@ function enterEditMode(wrap, msgIdx) {
     // Allow text-only OR image-only — only stay in edit mode when BOTH
     // are empty. Sending an image with no caption is a legitimate use
     // case (e.g. "describe this" follow-ups via the chip).
-    if (!newText && !editImages.length) return;
+    if (!newText && !editImages.length && !editTexts.length) return;
     // إرسال always resends — even with no text change. That way the
     // button does exactly what its label says, and users who want a
     // fresh attempt on the same prompt get "regenerate" for free.
-    commitEdit(wrap, msgIdx, newText, editImages);
+    commitEdit(wrap, msgIdx, newText, editImages, editTexts);
   };
 
   saveBtn.addEventListener("click", save);
@@ -900,19 +942,19 @@ function enterEditMode(wrap, msgIdx) {
   // No input listener needed — field-sizing: content handles growth.
 }
 
-function commitEdit(wrap, msgIdx, newText, editImages) {
+function commitEdit(wrap, msgIdx, newText, editImages, editTexts) {
   // If a task is currently streaming, the user pressing save is
   // basically "forget that, here's my new question" — stop the task
   // first, same pattern send() uses for overlap.
   if (isLoading) {
     hardStop("");
-    setTimeout(() => performEdit(wrap, msgIdx, newText, editImages), 150);
+    setTimeout(() => performEdit(wrap, msgIdx, newText, editImages, editTexts), 150);
   } else {
-    performEdit(wrap, msgIdx, newText, editImages);
+    performEdit(wrap, msgIdx, newText, editImages, editTexts);
   }
 }
 
-function performEdit(wrap, msgIdx, newText, editImages) {
+function performEdit(wrap, msgIdx, newText, editImages, editTexts) {
   // 1. Peel every DOM node after the edited bubble (and the bubble
   //    itself) — includes tool-lines, screenshots, error bubbles,
   //    later user/assistant bubbles. send() below re-adds the
@@ -949,6 +991,11 @@ function performEdit(wrap, msgIdx, newText, editImages) {
   //    Claude got a text-only retry.
   if (editImages && editImages.length) {
     pendingImages = editImages.map((im) => ({ ...im }));
+    renderAttachments();
+  }
+  // Re-stage kept text attachments so they resend too (mirrors images).
+  if (editTexts && editTexts.length) {
+    pendingTexts = editTexts.map((t) => ({ ...t }));
     renderAttachments();
   }
   $input.value = newText;
