@@ -165,6 +165,16 @@ Side Panel (UI) ─ Service Worker ─ Native Host (Node) ─┬── claude CL
 - **يدخل dynamic user message**, ليس static system → لا يكسر prompt cache
 - **Pro Mode + workingDirectory مطلوبان** — graceful no-op خلاف ذلك
 
+### Pro-Mode coding discipline (قاعدة ثابتة في STATIC_SYSTEM)
+قسم `PROJECT MEMORY & DISCIPLINE` في max.js يطبّق حلقة احترافيّة افتراضيّاً
+لكلّ مشروع برمجيّ (محصور بـ Pro Mode + working dir، مُستثنى منه التصفّح):
+- **اقرأ قبل أن تكتب** (read_file/grep) — لا يستدلّ على الكود من الذاكرة (#1 ضدّ الهلوسة)
+- **أنشئ CLAUDE.md** القصير إن غاب (مرّة)
+- **خطوات صغيرة + إثبات** قبل «تمّ» (شغّل/اقرأ النتيجة)
+- **git commit** عند نقاط التوقّف = سجلّ التغيير الصادق
+- **حدّث _STATE.md** (update_project_state، بلا تأكيد) في نهاية التقدّم
+- المبدأ: git = الحقيقة، _STATE.md = مؤشّر «أين تركنا»
+
 ### Pro Mode (Layer 1+2+3+4+5)
 - **Toggle في settings** — مع working directory مُحدَّد
 - **Filesystem** sandboxed داخل working dir + symlink-escape check
