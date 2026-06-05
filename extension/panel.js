@@ -137,7 +137,7 @@ function setLoading(on) {
   if (on) {
     $send.disabled = false;            // always clickable as stop
   } else {
-    $send.disabled = !$input.value.trim();
+    updateSend();                      // text OR image OR text-chip enables it
     setTyping(false);
   }
 }
@@ -1511,9 +1511,7 @@ async function runLocal(hit, myCancel) {
         const mt = r.screenshotMediaType || "image/jpeg";
         if (pendingImages.length < MAX_IMAGE_COUNT) {
           pendingImages.push({ mediaType: mt, base64: r.screenshot });
-          renderAttachments();
-          // Update send button enable state — pendingImages now non-empty.
-          $send.disabled = !$input.value.trim() && pendingImages.length === 0;
+          renderAttachments();   // also refreshes the send button (updateSend)
           // The tile now appears in the composer, so the confirmation is
           // short. The format/size diagnostic lives on the tile's tooltip
           // (set in renderAttachments) for anyone who needs to check it.
@@ -1568,7 +1566,7 @@ $send.addEventListener("click", () => {
     try { recog?.stop(); } catch {}
     return;
   }
-  const hasContent = $input.value.trim() || pendingImages.length > 0;
+  const hasContent = $input.value.trim() || pendingImages.length > 0 || pendingTexts.length > 0;
   if (!hasContent && isLoading) { hardStop(""); return; }
   if (!hasContent) return;
   send();
@@ -1584,7 +1582,7 @@ $input.addEventListener("keydown", (e) => {
       try { recog?.stop(); } catch {}
       return;
     }
-    const hasContent = $input.value.trim() || pendingImages.length > 0;
+    const hasContent = $input.value.trim() || pendingImages.length > 0 || pendingTexts.length > 0;
     if (!hasContent && isLoading) { hardStop(""); return; }
     if (hasContent) send();
   }
@@ -1700,8 +1698,7 @@ DROP_TARGET.addEventListener("drop", async (e) => {
     } catch {}
   }
   if (added) {
-    renderAttachments();
-    $send.disabled = !$input.value.trim() && pendingImages.length === 0;
+    renderAttachments();   // also refreshes the send button (updateSend)
     showNotice(`✓ أُضيفت ${added} صورة`, { variant: "info", ms: 1800 });
   }
   if (rejectedBig)  showNotice(`تم تجاهل ${rejectedBig} صورة أكبر من 10MB.`);
