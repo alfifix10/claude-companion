@@ -871,7 +871,7 @@ input.settings-textarea, select.settings-textarea { min-height: 0; }
 }
 .attachments:empty { display: none; }
 .attach-item {
-  position: relative; width: 60px; height: 60px;
+  position: relative; width: 62px; height: 62px;
   border: 1px solid var(--border); border-radius: 8px;
   overflow: hidden; background: var(--bg);
 }
@@ -890,14 +890,14 @@ input.settings-textarea, select.settings-textarea { min-height: 0; }
    a truncated name, and a corner × (the shared .attach-remove, absolute). */
 .attach-text {
   position: relative;
-  width: 60px; height: 60px; padding: 4px;
+  width: 62px; height: 62px; padding: 5px 4px;
   border: 1px solid var(--border); border-radius: 8px;
   background: var(--bg); cursor: pointer; overflow: hidden;
   display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 3px;
 }
 .attach-text:hover { border-color: var(--accent); }
-.attach-text-icon { font-size: 20px; line-height: 1; }
+.attach-text-icon { font-size: 24px; line-height: 1; }
 .attach-text-name {
   font-size: 8.5px; line-height: 1.15; color: var(--text2); text-align: center;
   max-width: 100%;
