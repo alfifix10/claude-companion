@@ -948,6 +948,34 @@ function performEdit(wrap, msgIdx, newText, editImages) {
  * Copy button still only copies the text; copying images is browser-clumsy
  * and out of scope here.
  */
+// Full-size image viewer. Opens a dark overlay with the image centered, a
+// ✕ button, and three ways to close: backdrop click, the button, or Esc.
+// One overlay at a time (re-opening removes any previous one).
+function openLightbox(src) {
+  document.getElementById("lightboxOverlay")?.remove();
+  const overlay = document.createElement("div");
+  overlay.id = "lightboxOverlay";
+  overlay.className = "lightbox-overlay";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.innerHTML = `
+    <button class="lightbox-close" type="button" aria-label="إغلاق">✕</button>
+    <img class="lightbox-img" alt="">`;
+  overlay.querySelector(".lightbox-img").src = src;
+
+  function close() {
+    overlay.remove();
+    document.removeEventListener("keydown", onKey);
+  }
+  function onKey(e) { if (e.key === "Escape") close(); }
+  // Close on backdrop or the ✕ — but NOT when the image itself is clicked.
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || e.target.classList.contains("lightbox-close")) close();
+  });
+  document.addEventListener("keydown", onKey);
+  document.body.appendChild(overlay);
+}
+
 function appendUserMessage(text, images, msgIdx) {
   if (!text && (!images || images.length === 0)) return;
   removeWelcome();
@@ -979,6 +1007,7 @@ function appendUserMessage(text, images, msgIdx) {
       el.className = "msg-img";
       el.src = `data:${img.mediaType};base64,${img.base64}`;
       el.alt = "";
+      el.addEventListener("click", () => openLightbox(el.src));
       wrap2.appendChild(el);
     }
     d.appendChild(wrap2);

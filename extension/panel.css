@@ -603,19 +603,23 @@ input.settings-textarea, select.settings-textarea { min-height: 0; }
   display: grid;
   grid-template-columns: 1fr;
   gap: 3px;
-  max-width: 100%;
+  /* Compact thumbnail size in the transcript — click any image to open it
+     full-size in the lightbox. Keeps the chat scannable instead of letting
+     a screenshot dominate the panel. */
+  max-width: 180px;
 }
 
-/* Single image: natural aspect, bounded height so a tall screenshot
-   can't eat the whole panel. object-fit: contain preserves content. */
+/* Single image: small thumbnail, natural aspect inside the bounded box.
+   object-fit: contain preserves the whole picture (no crop). */
 .msg-img {
   display: block;
   width: 100%;
-  max-height: 280px;
+  max-height: 150px;
   height: auto;
   object-fit: contain;
   border-radius: 10px;
   background: rgba(0,0,0,.2);
+  cursor: zoom-in;
 }
 
 /* Two or more images: 2-column grid of equal squares. object-fit:
@@ -630,6 +634,30 @@ input.settings-textarea, select.settings-textarea { min-height: 0; }
   object-fit: cover;
   border-radius: 8px;
 }
+
+/* Image lightbox — click a thumbnail to view it full-size. Backdrop click,
+   the ✕ button, or Esc all close it. */
+.lightbox-overlay {
+  position: fixed; inset: 0; z-index: 2147483647;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.85); padding: 24px;
+  cursor: zoom-out;
+}
+.lightbox-img {
+  max-width: 92vw; max-height: 88vh;
+  object-fit: contain; border-radius: 8px;
+  box-shadow: 0 10px 40px rgba(0,0,0,.6);
+  cursor: default;
+}
+.lightbox-close {
+  position: fixed; top: 12px; inset-inline-end: 14px;
+  width: 36px; height: 36px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,.12); color: #fff;
+  border: 1px solid rgba(255,255,255,.28);
+  font-size: 17px; line-height: 1; cursor: pointer;
+}
+.lightbox-close:hover { background: rgba(255,255,255,.26); }
 
 /* Message wrapper (bubble + copy button) */
 .msg-wrap {
