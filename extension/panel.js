@@ -34,6 +34,9 @@ const $send = document.getElementById("sendBtn");
 const $mic = document.getElementById("micBtn");
 const $typing = document.getElementById("typing");
 const $typingText = document.getElementById("typingText");
+// The bouncing-dots + label row inside #typing. Hidden on its own (while
+// the stats line stays) when the model is streaming text mid-task.
+const $typingMain = $typing?.querySelector(".typing-main");
 const $settings = document.getElementById("settingsBtn");
 const $tabTitle = document.getElementById("tabTitle");
 const $tabDot = document.getElementById("tabDot");
@@ -377,7 +380,17 @@ function onBgMessage(msg) {
 
   switch (msg.type) {
     case "text_delta":
-      setTyping(false);
+      // The streaming text is itself proof of life, so drop the bouncing
+      // dots. But if a task is STILL running (taskStats live), keep the
+      // progress line visible — otherwise the "N إجراء • time" counter
+      // flickered away every time the model wrote a sentence between tools.
+      if (taskStats) {
+        $typing.style.display = "flex";
+        if ($typingMain) $typingMain.style.display = "none";
+        renderTaskStats();
+      } else {
+        setTyping(false);
+      }
       streamingBubble ??= appendAssistantBubble("");
       streamingBubble.dataset.raw = (streamingBubble.dataset.raw || "") + msg.text;
       // Coalesce renders onto the next animation frame: a fast stream
@@ -1167,6 +1180,8 @@ $scrollBtn?.addEventListener("click", () => {
 
 function setTyping(show, text) {
   $typing.style.display = show ? "flex" : "none";
+  // Restore the dots row in case a mid-task text stream had hidden it.
+  if (show && $typingMain) $typingMain.style.display = "";
   if (text) $typingText.textContent = text;
 }
 
