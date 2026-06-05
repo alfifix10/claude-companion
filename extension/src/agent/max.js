@@ -302,13 +302,16 @@ RULES:
  *   • Streams text back; no tool-event handling needed.
  *   • Ten-minute hard ceiling, single timeout, no anti-stuck loop.
  */
-// Pixel-first grounding instruction for image turns: read the real pixels
-// BEFORE reasoning, so the conversation context (added under it) can inform
-// the answer WITHOUT overriding what's actually in the image — the guard
-// against the old "context out-votes the image" hallucination.
+// Pixel-first grounding instruction for image turns: UNDERSTAND the real
+// pixels before reasoning (the guard against the old "context out-votes the
+// image" hallucination) — but grounding is internal, NOT a request to dump a
+// full element-by-element description. Answer concisely about the user's
+// point; the image path runs with an empty system prompt, so without this
+// line the model has no brevity guidance and writes a long inventory.
 const IMAGE_GROUNDING_PREFACE =
-  "انظر إلى الصورة وصِف ما فيها فعلاً من بكسلاتها أوّلاً — لا تفترض محتواها من السياق. " +
-  "ثمّ استعن بسياق المحادثة أدناه لتفهم لماذا أرسل المستخدم هذه الصورة تحديداً، واربط جوابك به.";
+  "افهم الصورة جيّداً من بكسلاتها أوّلاً (لا تفترض محتواها من السياق)، ثمّ أجب بإيجاز " +
+  "مستعيناً بسياق المحادثة أدناه لتدرك لماذا أرسلها المستخدم. ركّز على النقطة المقصودة فقط — " +
+  "لا تَسرُد عناصر الصورة ولا تصفها وصفاً كاملاً إلّا إذا طلب المستخدم ذلك صراحةً.";
 
 // Recent TEXT-ONLY conversation context for the image path. Excludes the
 // current image question, skips non-text (image) turns, keeps the last few
