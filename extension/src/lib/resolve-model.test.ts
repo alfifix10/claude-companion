@@ -8,17 +8,17 @@ describe("resolveModel", () => {
     expect(resolveModel("powerful")).toBe("opus");
   });
 
-  it("falls back to the powerful default for unset/unknown values", () => {
+  it("falls back to the balanced default for unset/unknown values", () => {
     expect(resolveModel(undefined)).toBe(MODEL_BY_SPEED[DEFAULT_MODEL_SPEED]);
-    expect(resolveModel(null)).toBe("opus");
-    expect(resolveModel("")).toBe("opus");
-    expect(resolveModel("turbo")).toBe("opus");
-    expect(resolveModel(42)).toBe("opus");
+    expect(resolveModel(null)).toBe("sonnet");
+    expect(resolveModel("")).toBe("sonnet");
+    expect(resolveModel("turbo")).toBe("sonnet");
+    expect(resolveModel(42)).toBe("sonnet");
   });
 
-  it("the default never silently degrades intelligence (powerful/opus)", () => {
-    expect(DEFAULT_MODEL_SPEED).toBe("powerful");
-    expect(MODEL_BY_SPEED[DEFAULT_MODEL_SPEED]).toBe("opus");
+  it("defaults to the balanced speed/economy/quality point (sonnet)", () => {
+    expect(DEFAULT_MODEL_SPEED).toBe("balanced");
+    expect(MODEL_BY_SPEED[DEFAULT_MODEL_SPEED]).toBe("sonnet");
   });
 
   it("only ever emits allowlist-safe bare aliases", () => {
