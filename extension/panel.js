@@ -316,16 +316,17 @@ function renderTaskStats() {
   const elapsedStr = sec < 60
     ? `${sec}ث`
     : `${Math.floor(sec / 60)}د ${sec % 60}ث`;
-  // Don't show the stats line until SOMETHING has happened — pure
-  // thinking turns ("ما هو 2+2؟") shouldn't surface a stats row at
-  // all. Once an action lands, the line stays for the rest of the run.
-  if (taskStats.actionCount === 0 && sec < 10) {
+  // Show a ticking elapsed counter after 3s even on a pure thinking turn
+  // (no tools yet) — it's the clearest "I'm alive, not frozen" signal.
+  // Below 3s the bouncing dots alone are enough; this avoids a stats row
+  // flashing on every instant ("ما هو 2+2؟") answer.
+  if (taskStats.actionCount === 0 && sec < 3) {
     $typingStats.hidden = true;
     return;
   }
   const toolLabel = taskStats.lastTool
     ? `📋 ${TOOL_LABELS[taskStats.lastTool] || taskStats.lastTool}`
-    : "📋 يحضّر…";
+    : "🤔 يفكّر…";
   const countPart = taskStats.actionCount > 0 ? ` • ${taskStats.actionCount} إجراء` : "";
   $typingStats.textContent = `${toolLabel}${countPart} • ${elapsedStr}`;
   $typingStats.hidden = false;
