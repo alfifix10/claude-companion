@@ -124,8 +124,13 @@ body {
 /* Pro-Mode confirmation gate (1.3) — modal overlay + card */
 .confirm-overlay {
   position: fixed; inset: 0; z-index: 2147483646;
-  display: flex; align-items: center; justify-content: center;
-  background: rgba(0, 0, 0, .55); padding: 20px;
+  /* Anchor the card to the BOTTOM, not the vertical center. The action
+     buttons sit at the card's bottom edge, so a bottom-anchored card keeps
+     them at the SAME screen coordinates no matter how long the command is
+     (the card grows upward into the scrollable summary instead). The user
+     reaches for Approve/Deny in one fixed spot every time. */
+  display: flex; align-items: flex-end; justify-content: center;
+  background: rgba(0, 0, 0, .55); padding: 20px 20px 28px;
 }
 .confirm-card {
   background: var(--bg2); border: 1px solid var(--border); border-radius: 14px;
