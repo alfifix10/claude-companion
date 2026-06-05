@@ -1514,15 +1514,10 @@ async function runLocal(hit, myCancel) {
           renderAttachments();
           // Update send button enable state — pendingImages now non-empty.
           $send.disabled = !$input.value.trim() && pendingImages.length === 0;
-          // Visible diagnostic — proves to the user (no DevTools needed)
-          // that a real image really did get attached, what format it is,
-          // and how big it is. If they ever see "JPEG ~110KB" instead of
-          // "PNG ~600KB" they know the high-quality path didn't run
-          // (i.e. they need to reload the extension).
-          const kb = Math.round((r.screenshot.length * 0.75) / 1024);  // base64 → bytes ≈ 0.75
-          const fmt = mt.split("/")[1].toUpperCase();
-          showNotice(`✓ التُقطت صورة: ${fmt} ~${kb}KB — مرفقة بالرسالة التالية`,
-            { variant: "info", ms: 3500 });
+          // The tile now appears in the composer, so the confirmation is
+          // short. The format/size diagnostic lives on the tile's tooltip
+          // (set in renderAttachments) for anyone who needs to check it.
+          showNotice(`✓ التُقطت الصورة`, { variant: "info", ms: 1800 });
         } else {
           showNotice(`لا يمكن إرفاق أكثر من ${MAX_IMAGE_COUNT} صور — أرسل الحالية أوّلاً.`);
         }
@@ -1535,7 +1530,7 @@ async function runLocal(hit, myCancel) {
         if (hit.action === "read_page" || hit.action === "get_text") {
           const label = hit.action === "read_page" ? "عناصر الصفحة" : "نصّ الصفحة";
           if (addPendingText(label, r.text)) {
-            showNotice(`✓ أُرفق ${label} — سيُرسَل مع رسالتك التالية`, { variant: "info", ms: 3000 });
+            showNotice(`✓ أُرفق ${label}`, { variant: "info", ms: 1800 });
           }
         } else {
           appendAssistantBubble(r.text);
@@ -1619,9 +1614,7 @@ $input.addEventListener("paste", async (e) => {
   if (!hasImageItem && plain.length > LONG_PASTE_THRESHOLD) {
     e.preventDefault();
     if (addPendingText("نصّ ملصوق", plain)) {
-      const kb = Math.max(1, Math.round(plain.length / 1024));
-      showNotice(`✓ حُوّل النصّ الطويل (~${kb}KB) إلى مرفق — سيُرسَل مع رسالتك`,
-        { variant: "info", ms: 3000 });
+      showNotice(`✓ أُرفق النصّ`, { variant: "info", ms: 1800 });
     }
     return;
   }
@@ -1709,10 +1702,7 @@ DROP_TARGET.addEventListener("drop", async (e) => {
   if (added) {
     renderAttachments();
     $send.disabled = !$input.value.trim() && pendingImages.length === 0;
-    showNotice(
-      `✓ أُضيفت ${added} صورة من السحب — مرفقة بالرسالة التالية`,
-      { variant: "info", ms: 3500 },
-    );
+    showNotice(`✓ أُضيفت ${added} صورة`, { variant: "info", ms: 1800 });
   }
   if (rejectedBig)  showNotice(`تم تجاهل ${rejectedBig} صورة أكبر من 10MB.`);
   if (rejectedFull) showNotice(`الحد الأقصى ${MAX_IMAGE_COUNT} صور — أرسل الحالية أوّلاً.`);
@@ -1803,6 +1793,10 @@ function renderAttachments() {
     const img = pendingImages[i];
     const wrap = document.createElement("div");
     wrap.className = "attach-item";
+    // Format/size diagnostic on hover (replaces the old verbose toast).
+    const kb = Math.round(((img.base64?.length || 0) * 0.75) / 1024);
+    const fmt = String(img.mediaType || "").split("/")[1]?.toUpperCase() || "IMG";
+    wrap.title = `${fmt} ~${kb}KB`;
     const thumb = document.createElement("img");
     thumb.src = `data:${img.mediaType};base64,${img.base64}`;
     wrap.appendChild(thumb);
