@@ -124,20 +124,19 @@ body {
 /* Pro-Mode confirmation gate (1.3) — modal overlay + card */
 .confirm-overlay {
   position: fixed; inset: 0; z-index: 2147483646;
-  /* Anchor the card to the BOTTOM, not the vertical center. The action
-     buttons sit at the card's bottom edge, so a bottom-anchored card keeps
-     them at the SAME screen coordinates no matter how long the command is
-     (the card grows upward into the scrollable summary instead). The user
-     reaches for Approve/Deny in one fixed spot every time. */
-  display: flex; align-items: flex-end; justify-content: center;
-  background: rgba(0, 0, 0, .55); padding: 20px 20px 28px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, .55); padding: 20px;
 }
 .confirm-card {
   background: var(--bg2); border: 1px solid var(--border); border-radius: 14px;
   padding: 18px 18px 14px; max-width: 360px; width: 100%;
   box-shadow: 0 12px 40px rgba(0, 0, 0, .5);
-  /* Never taller than the viewport — a long command must scroll INSIDE
-     the summary box (below), not push the action buttons off-screen. */
+  /* FIXED height — combined with the overlay's vertical centering, this
+     keeps the card's bottom edge (and therefore the action buttons) at the
+     SAME screen coordinates every time, regardless of command length. The
+     command box (below) flexes to fill and scrolls when the command is long.
+     Capped to the viewport on very short windows. */
+  height: 380px;
   max-height: calc(100vh - 40px);
   display: flex; flex-direction: column;
 }
@@ -155,10 +154,10 @@ body {
   white-space: pre-wrap;
   background: var(--bg); border-radius: 8px; padding: 10px; margin-bottom: 10px;
   font-family: ui-monospace, monospace; line-height: 1.5;
-  /* The only scrollable region: shrinks to fit the available card height
-     (min-height:0 lets a flex item shrink below its content) and scrolls
-     when the command is long. Short commands stay compact. */
-  min-height: 0; overflow-y: auto;
+  /* The only flexible region: fills the fixed card height (flex:1) so the
+     buttons always rest at the bottom, and scrolls internally when the
+     command is long. min-height:0 lets it shrink below its content. */
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
   scrollbar-width: thin; scrollbar-color: var(--border) transparent;
 }
 .confirm-summary::-webkit-scrollbar { width: 5px; }
