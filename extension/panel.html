@@ -170,17 +170,14 @@
           <option value="balanced">متوازن — Sonnet (موصى به: سريع + جودة عالية)</option>
           <option value="powerful">الأقوى — Opus (للمهام الأصعب، الأبطأ)</option>
         </select>
-        <p class="settings-hint">الأقوى للجودة · الأسرع للمهامّ البسيطة.</p>
 
         <label class="settings-label" for="memoriesInput" style="margin-top:18px;">🧠 ذاكرة مختصرة</label>
         <textarea id="memoriesInput" class="settings-textarea" rows="5"
           placeholder="اسمي: أحمد&#10;بريدي: ahmed@gmail.com&#10;أفضّل النتائج من الأرخص"></textarea>
-        <p class="settings-hint">تُرسَل مع كل محادثة.</p>
 
         <label class="settings-label" for="tasksInput" style="margin-top:18px;">⚡ مهام مكررة</label>
         <textarea id="tasksInput" class="settings-textarea" rows="6"
           placeholder="صباح: افتح الإيميل ولخّص&#10;&#10;أخبار: افتح سبق ولخّص الأهم&#10;&#10;(افصل بين المهام بسطر فارغ)"></textarea>
-        <p class="settings-hint">أزرار ⚡ في الشريط الجانبي.</p>
 
         <!-- Pro Mode section. Off by default. Unlocks filesystem read-only
              tools (this phase) and shell + write tools later. The warning
@@ -193,17 +190,12 @@
             <span>🔓 Pro Mode</span>
           </label>
           <p class="settings-hint" style="margin-top:6px;">
-            يُفعّل أدوات قراءة الملفّات داخل مجلّد العمل المُحدَّد. مغلق افتراضياً.
             <span style="color: var(--accent);">⚠ افتح فقط إذا كنت تثق بالمواقع التي تتصفّحها.</span>
           </p>
 
           <label class="settings-label" for="workingDirInput" style="margin-top:12px;">📁 مجلّد العمل</label>
           <input type="text" id="workingDirInput" class="settings-textarea" style="height:auto; padding:8px 12px;"
             placeholder="C:\Users\fix\Desktop\my-project" autocomplete="off" spellcheck="false">
-          <p class="settings-hint">
-            كلّ عمليّات قراءة الملفّات محصورة في هذا المجلّد وفروعه.
-            استخدم مجلّداً محدّداً (مشروعاً) — ليس <code>~</code> أو <code>C:\</code> مباشرة.
-          </p>
           <p id="proModeStatus" class="settings-hint" style="margin-top:8px;" hidden></p>
         </div>
       </div>
