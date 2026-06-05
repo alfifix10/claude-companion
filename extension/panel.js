@@ -854,7 +854,7 @@ function enterEditMode(wrap, msgIdx) {
   const saveBtn = document.createElement("button");
   saveBtn.type = "button";   // default is "submit" — harmless standalone but clearer intent
   saveBtn.className = "edit-save";
-  saveBtn.textContent = "إرسال";
+  saveBtn.textContent = "تعديل";
   saveBtn.title = "Enter";
   const cancelBtn = document.createElement("button");
   cancelBtn.type = "button";
@@ -862,8 +862,8 @@ function enterEditMode(wrap, msgIdx) {
   cancelBtn.textContent = "إلغاء";
   cancelBtn.title = "Escape";
   // Delete = remove this message AND everything after it (rollback). Two-step
-  // confirm because it's destructive and can drop many turns at once. Pushed
-  // to the far side (margin via .edit-delete) so it isn't next to إرسال.
+  // confirm because it's destructive and can drop many turns at once. Sits in
+  // the MIDDLE of the action row (between تعديل and إلغاء).
   const deleteBtn = document.createElement("button");
   deleteBtn.type = "button";
   deleteBtn.className = "edit-delete";
@@ -886,8 +886,8 @@ function enterEditMode(wrap, msgIdx) {
     clearTimeout(deleteTimer);
     performDelete(wrap, msgIdx);
   });
-  actions.appendChild(deleteBtn);
   actions.appendChild(saveBtn);
+  actions.appendChild(deleteBtn);
   actions.appendChild(cancelBtn);
   editor.appendChild(ta);
   editor.appendChild(actions);
