@@ -70,6 +70,27 @@ const $closeHistoryBtn = document.getElementById("closeHistoryBtn");
 // { mediaType: "image/png", base64: "iVBOR..." }
 let pendingImages = [];
 
+// Captured/pasted TEXT waiting to ride with the next message as a collapsed
+// "file" chip (page elements, page text, or a long paste). Kept OUT of the
+// textarea so a big blob never buries the input. Each: { id, label, content }.
+// On send it's folded into the message content (so Claude + history get the
+// full text) while the bubble shows only a chip.
+const MAX_TEXT_ATTACH = 4;
+let pendingTexts = [];
+let pendingTextSeq = 0;
+function addPendingText(label, content) {
+  const trimmed = String(content || "").trim();
+  if (!trimmed) return false;
+  if (pendingTexts.length >= MAX_TEXT_ATTACH) {
+    showNotice(`لا يمكن إرفاق أكثر من ${MAX_TEXT_ATTACH} مقاطع نصّيّة — أرسل الحالية أوّلاً.`);
+    return false;
+  }
+  pendingTexts.push({ id: ++pendingTextSeq, label, content: trimmed });
+  renderAttachments();
+  updateSend();
+  return true;
+}
+
 // Full-resolution images keyed by user-message index in conversation[].
 // Why this exists: conversation[i].images stores 400-px thumbnails for
 // chrome.storage replay (quota-friendly). When the user clicks ✎ to
@@ -668,8 +689,8 @@ function attachCopyButton(wrap, getText) {
   wrap.appendChild(btn);
 }
 
-function appendUser(text, msgIdx, images = []) {
-  appendUserMessage(text, images, msgIdx);
+function appendUser(text, msgIdx, images = [], attachments = []) {
+  appendUserMessage(text, images, msgIdx, attachments);
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -976,8 +997,49 @@ function openLightbox(src) {
   document.body.appendChild(overlay);
 }
 
-function appendUserMessage(text, images, msgIdx) {
-  if (!text && (!images || images.length === 0)) return;
+// Full-text viewer for an attachment chip. Same overlay pattern as the
+// image lightbox: dark backdrop, ✕ button, closes on backdrop click / Esc.
+function openTextViewer(title, content) {
+  document.getElementById("textViewerOverlay")?.remove();
+  const overlay = document.createElement("div");
+  overlay.id = "textViewerOverlay";
+  overlay.className = "textviewer-overlay";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  const card = document.createElement("div");
+  card.className = "textviewer-card";
+  const head = document.createElement("div");
+  head.className = "textviewer-head";
+  const ttl = document.createElement("span");
+  ttl.textContent = `📄 ${title || "نصّ"}`;
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "textviewer-close";
+  close.textContent = "✕";
+  close.setAttribute("aria-label", "إغلاق");
+  head.appendChild(ttl);
+  head.appendChild(close);
+  const body = document.createElement("pre");
+  body.className = "textviewer-body";
+  body.textContent = content || "";
+  card.appendChild(head);
+  card.appendChild(body);
+  overlay.appendChild(card);
+
+  function done() {
+    overlay.remove();
+    document.removeEventListener("keydown", onKey);
+  }
+  function onKey(e) { if (e.key === "Escape") done(); }
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || e.target === close) done();
+  });
+  document.addEventListener("keydown", onKey);
+  document.body.appendChild(overlay);
+}
+
+function appendUserMessage(text, images, msgIdx, attachments = []) {
+  if (!text && (!images || images.length === 0) && (!attachments || attachments.length === 0)) return;
   removeWelcome();
   const wrap = makeMessageWrap("user");
   // msgIdx links the DOM bubble back to its slot in conversation[] so
@@ -1012,12 +1074,27 @@ function appendUserMessage(text, images, msgIdx) {
     }
     d.appendChild(wrap2);
   }
+  if (attachments && attachments.length) {
+    const arow = document.createElement("div");
+    arow.className = "msg-attachments";
+    for (const a of attachments) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "msg-attach-chip";
+      const kb = Math.max(1, Math.round((a.content?.length || 0) / 1024));
+      chip.textContent = `📄 ${a.label} · ~${kb}KB`;
+      chip.title = "انقر للمعاينة";
+      chip.addEventListener("click", () => openTextViewer(a.label, a.content || ""));
+      arow.appendChild(chip);
+    }
+    d.appendChild(arow);
+  }
   wrap.appendChild(d);
   // Action column: copy + edit. Edit is offered for any bubble — even
   // image-only — so the user can add a caption or replace the screenshot
   // and resend without starting over. Copy stays gated on text presence
   // (image clipboard is browser-clumsy; out of scope here).
-  const hasMedia = !!(images && images.length);
+  const hasMedia = !!(images && images.length) || !!(attachments && attachments.length);
   if (text || hasMedia) {
     const actions = document.createElement("div");
     actions.className = "msg-actions";
@@ -1243,7 +1320,7 @@ function autoResume() {
 async function send() {
   const text = $input.value.trim();
   const hasImages = pendingImages.length > 0;
-  if (!text && !hasImages) return;
+  if (!text && !hasImages && pendingTexts.length === 0) return;
   autoResumeCount = 0; // a real new user message starts a fresh task
   autoResumeArmed = true; // only NOW is auto-resume allowed (live user task)
 
@@ -1277,6 +1354,8 @@ async function send() {
   // start filling a fresh batch without racing this send.
   const images = pendingImages;
   pendingImages = [];
+  const texts = pendingTexts;
+  pendingTexts = [];
   renderAttachments();
 
   // Snapshot the upcoming user-message slot — populated AFTER we cache so
@@ -1285,9 +1364,9 @@ async function send() {
   const upcomingMsgIdx = conversation.length;
   if (images.length) cacheFullResImages(upcomingMsgIdx, images);
 
-  // One unified bubble for text + attached images — matches mainstream
-  // chat UX (WhatsApp/Telegram/ChatGPT).
-  if (text || images.length) appendUserMessage(text, images);
+  // One unified bubble for text + attached images + text-file chips —
+  // matches mainstream chat UX (WhatsApp/Telegram/ChatGPT).
+  if (text || images.length || texts.length) appendUserMessage(text, images, undefined, texts);
 
   // Build the message we'll persist. Full-resolution images go to
   // Claude in the same turn via the separate `images` field below;
@@ -1295,7 +1374,23 @@ async function send() {
   // chat shows the user's screenshots again without exploding the
   // chrome.storage.local 10 MB quota. Awaited inline to guarantee
   // the previews land in this message's slot before saveHistory().
-  const userMsg = { role: "user", content: text };
+  // Fold text attachments into the content the MODEL + history see — fenced
+  // and labeled — while the bubble shows only chips (via displayText +
+  // attachments). Storing the full text in `content` means no special-casing
+  // in buildSmartHistory / the bg send: Claude gets everything for free.
+  const attachBlock = texts.map(
+    (t) => `--- ${t.label} ---\n${t.content}\n--- نهاية ${t.label} ---`,
+  ).join("\n\n");
+  const fullContent = attachBlock
+    ? (text ? `${attachBlock}\n\n${text}` : attachBlock)
+    : text;
+
+  const userMsg = { role: "user", content: fullContent };
+  if (texts.length) {
+    // What the bubble renders instead of the full content.
+    userMsg.displayText = text;
+    userMsg.attachments = texts.map((t) => ({ label: t.label, content: t.content }));
+  }
   if (images.length) {
     const previews = await Promise.all(
       images.map((im) => makeImagePreview(im.mediaType, im.base64)),
@@ -1403,8 +1498,19 @@ async function runLocal(hit, myCancel) {
         }
       }
       if (r?.text) {
-        appendAssistantBubble(r.text);
-        conversation.push({ role: "assistant", content: r.text, toolActions: r.toolActions || [] });
+        // The two CAPTURE chips (page elements / page text) now attach their
+        // result to the SEND BOX as a collapsed text chip — consistent with
+        // 📸 لقطة — so the user can add a question and send. Any other local
+        // action that returns text still posts it straight to the chat.
+        if (hit.action === "read_page" || hit.action === "get_text") {
+          const label = hit.action === "read_page" ? "عناصر الصفحة" : "نصّ الصفحة";
+          if (addPendingText(label, r.text)) {
+            showNotice(`✓ أُرفق ${label} — سيُرسَل مع رسالتك التالية`, { variant: "info", ms: 3000 });
+          }
+        } else {
+          appendAssistantBubble(r.text);
+          conversation.push({ role: "assistant", content: r.text, toolActions: r.toolActions || [] });
+        }
       }
     }
     saveHistory();
@@ -1471,8 +1577,24 @@ $input.addEventListener("keydown", (e) => {
 // ─────────────────────────────────────────────────────────────────────
 const MAX_PER_IMAGE_BYTES = 10 * 1024 * 1024;   // 10 MB
 const MAX_IMAGE_COUNT = 8;
+// Above this many chars, a plain-text paste becomes a collapsed "file" chip
+// instead of dumping a wall of text into the composer.
+const LONG_PASTE_THRESHOLD = 2000;
 
 $input.addEventListener("paste", async (e) => {
+  // Long plain-text paste → text-file chip (not an image paste).
+  const plain = e.clipboardData?.getData("text/plain") || "";
+  const hasImageItem = Array.from(e.clipboardData?.items || [])
+    .some((it) => it.kind === "file" && it.type.startsWith("image/"));
+  if (!hasImageItem && plain.length > LONG_PASTE_THRESHOLD) {
+    e.preventDefault();
+    if (addPendingText("نصّ ملصوق", plain)) {
+      const kb = Math.max(1, Math.round(plain.length / 1024));
+      showNotice(`✓ حُوّل النصّ الطويل (~${kb}KB) إلى مرفق — سيُرسَل مع رسالتك`,
+        { variant: "info", ms: 3000 });
+    }
+    return;
+  }
   const items = e.clipboardData?.items || [];
   let rejectedBig = 0;
   let rejectedFull = 0;
@@ -1638,6 +1760,29 @@ function renderAttachments() {
     wrap.appendChild(rm);
     $attachments.appendChild(wrap);
   }
+  // Text-file chips (page elements / page text / long paste).
+  for (const t of pendingTexts) {
+    const wrap = document.createElement("div");
+    wrap.className = "attach-text";
+    const kb = Math.max(1, Math.round(t.content.length / 1024));
+    const label = document.createElement("span");
+    label.className = "attach-text-label";
+    label.textContent = `📄 ${t.label} · ~${kb}KB`;
+    label.title = "انقر للمعاينة";
+    label.addEventListener("click", () => openTextViewer(t.label, t.content));
+    wrap.appendChild(label);
+    const rm = document.createElement("button");
+    rm.className = "attach-remove";
+    rm.textContent = "×";
+    rm.title = "إزالة";
+    rm.addEventListener("click", () => {
+      const idx = pendingTexts.indexOf(t);
+      if (idx >= 0) pendingTexts.splice(idx, 1);
+      renderAttachments();
+    });
+    wrap.appendChild(rm);
+    $attachments.appendChild(wrap);
+  }
   // Enable send button when we have images even if input is empty
   updateSend();
 }
@@ -1650,8 +1795,8 @@ $input.addEventListener("input", () => {
 function updateSend() {
   // While loading, the button is a stop button — keep it enabled.
   if (isLoading) { $send.disabled = false; return; }
-  // Enable if there's text OR at least one pasted image.
-  $send.disabled = !$input.value.trim() && pendingImages.length === 0;
+  // Enable if there's typed text OR at least one pasted image OR a text chip.
+  $send.disabled = !$input.value.trim() && pendingImages.length === 0 && pendingTexts.length === 0;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -2005,7 +2150,7 @@ function renderStoredConversation(messages) {
   // user pasted, not just bare text bubbles.
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
-    if (m.role === "user") appendUser(m.content, i, m.images || []);
+    if (m.role === "user") appendUser(m.displayText ?? m.content, i, m.images || [], m.attachments || []);
     else appendAssistantBubble(m.content);
   }
 }
