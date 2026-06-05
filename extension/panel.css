@@ -784,11 +784,12 @@ input.settings-textarea, select.settings-textarea { min-height: 0; }
   transition: background .15s, border-color .15s, color .15s;
   min-width: 72px;
 }
+/* Edit (primary) — outlined like حذف/إلغاء, with green text. */
 .edit-save {
-  background: var(--green); color: #fff;
-  border: 1px solid var(--green);
+  background: transparent; color: var(--green);
+  border: 1px solid var(--border);
 }
-.edit-save:hover { background: #16a34a; border-color: #16a34a; }
+.edit-save:hover { border-color: var(--green); background: rgba(34,197,94,.08); }
 .edit-cancel {
   background: transparent; color: var(--text2);
   border: 1px solid var(--border);
