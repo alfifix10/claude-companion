@@ -437,6 +437,10 @@ body {
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
+/* Single-line fields (text input + select) opt out of the textarea
+   min-height — that floor is meant for the multi-line memories/tasks
+   areas, not for a one-line path or a dropdown. */
+input.settings-textarea, select.settings-textarea { min-height: 0; }
 .settings-textarea:focus { border-color: var(--accent); }
 .settings-textarea::-webkit-scrollbar { width: 4px; }
 .settings-textarea::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
