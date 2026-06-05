@@ -1823,10 +1823,15 @@ function renderAttachments() {
     // Format/size diagnostic on hover (replaces the old verbose toast).
     const kb = Math.round(((img.base64?.length || 0) * 0.75) / 1024);
     const fmt = String(img.mediaType || "").split("/")[1]?.toUpperCase() || "IMG";
-    wrap.title = `${fmt} ~${kb}KB`;
+    wrap.title = `${fmt} ~${kb}KB — انقر للتكبير`;
     const thumb = document.createElement("img");
     thumb.src = `data:${img.mediaType};base64,${img.base64}`;
     wrap.appendChild(thumb);
+    // Click the tile to enlarge in the lightbox (× still removes it).
+    wrap.addEventListener("click", (e) => {
+      if (e.target.classList.contains("attach-remove")) return;
+      openLightbox(thumb.src);
+    });
     const rm = document.createElement("button");
     rm.className = "attach-remove";
     rm.textContent = "×";
