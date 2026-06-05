@@ -798,8 +798,8 @@ input.settings-textarea, select.settings-textarea { min-height: 0; }
 .edit-save:focus-visible, .edit-cancel:focus-visible {
   outline: 2px solid var(--accent-br); outline-offset: 2px;
 }
-/* Delete (destructive) — in the middle of the action row. Subtle until
-   armed (the 2-step confirm), then solid red. */
+/* Delete (destructive) — in the middle of the action row. Deletes the Q&A
+   pair on click; red text, red hover. */
 .edit-delete {
   font: inherit; font-size: 12px; font-weight: 600;
   padding: 5px 12px; border-radius: 8px; cursor: pointer; min-width: 58px;
@@ -807,7 +807,6 @@ input.settings-textarea, select.settings-textarea { min-height: 0; }
   background: transparent; color: var(--red); border: 1px solid var(--border);
 }
 .edit-delete:hover { border-color: var(--red); background: rgba(239,68,68,.08); }
-.edit-delete.armed { background: var(--red); color: #fff; border-color: var(--red); }
 .edit-delete:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
 
 /* Markdown rendering */

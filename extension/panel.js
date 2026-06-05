@@ -862,29 +862,13 @@ function enterEditMode(wrap, msgIdx) {
   cancelBtn.className = "edit-cancel";
   cancelBtn.textContent = "إلغاء";
   // Delete = remove this question and its answer only (surgical), keeping
-  // everything after — distinct from تعديل's rollback. Two-step confirm
-  // since it's destructive. Sits in the MIDDLE (between تعديل and إلغاء).
+  // everything after — distinct from تعديل's rollback. Deletes immediately on
+  // click (no confirm). Sits in the MIDDLE (between تعديل and إلغاء).
   const deleteBtn = document.createElement("button");
   deleteBtn.type = "button";
   deleteBtn.className = "edit-delete";
   deleteBtn.textContent = "حذف";
-  let deleteArmed = false;
-  let deleteTimer = null;
-  deleteBtn.addEventListener("click", () => {
-    if (!deleteArmed) {
-      deleteArmed = true;
-      deleteBtn.textContent = "تأكيد الحذف؟";
-      deleteBtn.classList.add("armed");
-      deleteTimer = setTimeout(() => {
-        deleteArmed = false;
-        deleteBtn.textContent = "حذف";
-        deleteBtn.classList.remove("armed");
-      }, 3000);
-      return;
-    }
-    clearTimeout(deleteTimer);
-    performDelete(wrap, msgIdx);
-  });
+  deleteBtn.addEventListener("click", () => performDelete(wrap, msgIdx));
   actions.appendChild(saveBtn);
   actions.appendChild(deleteBtn);
   actions.appendChild(cancelBtn);
