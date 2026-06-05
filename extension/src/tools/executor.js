@@ -11,6 +11,7 @@ import {
 } from "../core/cdp.js";
 import { sleep, parseKeyCombo } from "../core/utils.js";
 import { activeTask, broadcastToPanels, consoleMessages, networkRequests, pageErrors } from "../core/state.js";
+import { isNonPageTool } from "../core/page-tools.js";
 import { refusalMessage } from "../lib/file-upload-denylist.js";
 import { fenceUntrusted } from "../lib/untrusted-fence.js";
 import { capText } from "../lib/cap-text.js";
@@ -386,9 +387,11 @@ export async function executeTool(name, input, tabId) {
     tabId = tab.id;
   }
 
-  // Show the "something is happening" border for every tool call — auto-hides
-  // 2.5s after the last action. Sticky task-level show is handled separately.
-  pulseBorder(tabId);
+  // Show the "something is happening" border for every PAGE tool call —
+  // auto-hides 2.5s after the last action. Local/computer tools (filesystem,
+  // shell, git, …) never touch the visible page, so they must not pulse it
+  // (see core/page-tools.js). Sticky task-level show is handled separately.
+  if (!isNonPageTool(name)) pulseBorder(tabId);
 
   switch (name) {
     case "tabs_context": {
