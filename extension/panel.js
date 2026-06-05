@@ -712,8 +712,8 @@ function appendUser(text, msgIdx, images = [], attachments = []) {
 function attachEditButton(parent, msgIdx) {
   const btn = document.createElement("button");
   btn.className = "edit-ico";
-  btn.title = "تعديل";
-  btn.setAttribute("aria-label", "تعديل الرسالة");
+  btn.title = "تعديل وحذف";
+  btn.setAttribute("aria-label", "تعديل أو حذف الرسالة");
   btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>`;
   btn.addEventListener("click", (e) => {
     e.stopPropagation();
