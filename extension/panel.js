@@ -861,9 +861,9 @@ function enterEditMode(wrap, msgIdx) {
   cancelBtn.type = "button";
   cancelBtn.className = "edit-cancel";
   cancelBtn.textContent = "إلغاء";
-  // Delete = remove this message AND everything after it (rollback). Two-step
-  // confirm because it's destructive and can drop many turns at once. Sits in
-  // the MIDDLE of the action row (between تعديل and إلغاء).
+  // Delete = remove this question and its answer only (surgical), keeping
+  // everything after — distinct from تعديل's rollback. Two-step confirm
+  // since it's destructive. Sits in the MIDDLE (between تعديل and إلغاء).
   const deleteBtn = document.createElement("button");
   deleteBtn.type = "button";
   deleteBtn.className = "edit-delete";
@@ -1011,33 +1011,39 @@ function performEdit(wrap, msgIdx, newText, editImages, editTexts) {
   send();
 }
 
-// Delete this message AND everything after it (the user-chosen rollback
-// semantic). Same teardown as performEdit, minus the resend.
+// Surgical delete: remove THIS message and its paired assistant reply only,
+// keeping everything after it. (Edit handles the rollback case instead, so
+// the two buttons stay distinct.)
 function performDelete(wrap, msgIdx) {
-  // 1. Peel the bubble and every node after it (tool lines, later turns).
-  let node = wrap.nextSibling;
-  while (node) { const nxt = node.nextSibling; node.remove(); node = nxt; }
-  wrap.remove();
-
-  // 2. Truncate the model to everything BEFORE the deleted slot.
-  if (Number.isFinite(msgIdx) && msgIdx >= 0 && msgIdx <= conversation.length) {
-    conversation = conversation.slice(0, msgIdx);
+  // 1. Splice out the user message + the assistant reply that follows it.
+  //    A turn is stored as [user, assistant]; the last turn may have no
+  //    reply yet, so guard on the next role.
+  if (Number.isFinite(msgIdx) && msgIdx >= 0 && msgIdx < conversation.length) {
+    const count = conversation[msgIdx + 1]?.role === "assistant" ? 2 : 1;
+    conversation.splice(msgIdx, count);
   }
+  // 2. Full-res image cache is keyed by index; everything from msgIdx on has
+  //    shifted, so invalidate from there (later edits fall back to thumbnails).
   dropFullResImagesFrom(msgIdx);
 
-  // 3. Persist. saveHistory() bails on an empty conversation, so when the
-  //    delete emptied the chat we write the empty state (and a 0 count)
-  //    explicitly — otherwise the stale pre-delete messages would reappear
-  //    on reopen.
+  // 3. Re-render from the model so DOM ↔ conversation indices realign after
+  //    the mid-list cut (a plain DOM splice would leave stale data-msg-idx).
+  $messages.innerHTML = "";
   if (conversation.length) {
+    renderStoredConversation(conversation);
     saveHistory();
-  } else if (currentConvId) {
-    const id = currentConvId;
-    chrome.storage.local.set({ [`conv_${id}`]: [] }).catch(() => {});
-    convLoadIndex().then((index) => {
-      const entry = index.find((c) => c.id === id);
-      if (entry) { entry.count = 0; entry.updatedAt = Date.now(); convSaveIndex(index); }
-    }).catch(() => {});
+  } else {
+    // Emptied the chat — restore the fresh-chat layout and persist the empty
+    // state (saveHistory bails on empty, so write it explicitly).
+    setFreshChat(true);
+    if (currentConvId) {
+      const id = currentConvId;
+      chrome.storage.local.set({ [`conv_${id}`]: [] }).catch(() => {});
+      convLoadIndex().then((index) => {
+        const entry = index.find((c) => c.id === id);
+        if (entry) { entry.count = 0; entry.updatedAt = Date.now(); convSaveIndex(index); }
+      }).catch(() => {});
+    }
   }
 }
 
