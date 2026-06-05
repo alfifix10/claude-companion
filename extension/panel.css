@@ -131,7 +131,14 @@ body {
   background: var(--bg2); border: 1px solid var(--border); border-radius: 14px;
   padding: 18px 18px 14px; max-width: 360px; width: 100%;
   box-shadow: 0 12px 40px rgba(0, 0, 0, .5);
+  /* Never taller than the viewport — a long command must scroll INSIDE
+     the summary box (below), not push the action buttons off-screen. */
+  max-height: calc(100vh - 40px);
+  display: flex; flex-direction: column;
 }
+/* Everything except the command box keeps its size; only the summary
+   shrinks + scrolls, so the buttons are always visible. */
+.confirm-head, .confirm-tool, .confirm-note, .confirm-actions { flex-shrink: 0; }
 .confirm-head { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 12px; }
 .confirm-tool {
   display: inline-block; font: 600 11px ui-monospace, monospace;
@@ -140,9 +147,17 @@ body {
 }
 .confirm-summary {
   font-size: 13px; color: var(--text); word-break: break-word;
+  white-space: pre-wrap;
   background: var(--bg); border-radius: 8px; padding: 10px; margin-bottom: 10px;
   font-family: ui-monospace, monospace; line-height: 1.5;
+  /* The only scrollable region: shrinks to fit the available card height
+     (min-height:0 lets a flex item shrink below its content) and scrolls
+     when the command is long. Short commands stay compact. */
+  min-height: 0; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
 }
+.confirm-summary::-webkit-scrollbar { width: 5px; }
+.confirm-summary::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px; }
 .confirm-note { font-size: 12px; color: var(--text2); margin-bottom: 14px; line-height: 1.5; }
 .confirm-actions { display: flex; gap: 10px; }
 .confirm-actions button {
