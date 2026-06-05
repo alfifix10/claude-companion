@@ -302,10 +302,44 @@ RULES:
  *   • Streams text back; no tool-event handling needed.
  *   • Ten-minute hard ceiling, single timeout, no anti-stuck loop.
  */
+// Pixel-first grounding instruction for image turns: read the real pixels
+// BEFORE reasoning, so the conversation context (added under it) can inform
+// the answer WITHOUT overriding what's actually in the image — the guard
+// against the old "context out-votes the image" hallucination.
+const IMAGE_GROUNDING_PREFACE =
+  "انظر إلى الصورة وصِف ما فيها فعلاً من بكسلاتها أوّلاً — لا تفترض محتواها من السياق. " +
+  "ثمّ استعن بسياق المحادثة أدناه لتفهم لماذا أرسل المستخدم هذه الصورة تحديداً، واربط جوابك به.";
+
+// Recent TEXT-ONLY conversation context for the image path. Excludes the
+// current image question, skips non-text (image) turns, keeps the last few
+// turns, and is character-capped. History images are never included — only
+// text — so this stays cheap and can't itself bias the pixels.
+function buildImageContext(messages, maxTurns = 6, maxChars = 1500) {
+  const prior = Array.isArray(messages) ? messages.slice(0, -1) : [];
+  const lines = [];
+  for (const m of prior) {
+    const c = typeof m?.content === "string" ? m.content.trim() : "";
+    if (!c) continue;
+    lines.push(`${m.role === "assistant" ? "المساعد" : "المستخدم"}: ${c}`);
+  }
+  let ctx = lines.slice(-maxTurns).join("\n");
+  if (ctx.length > maxChars) ctx = "…" + ctx.slice(ctx.length - maxChars);
+  return ctx;
+}
+
 async function handleImageQA(messages) {
   const lastUser = messages[messages.length - 1]?.content || "";
-  const prompt = (typeof lastUser === "string" ? lastUser.trim() : "")
-    || "Describe what you see in the image.";
+  const question = (typeof lastUser === "string" ? lastUser.trim() : "")
+    || "صف ما تراه في الصورة.";
+
+  // Understand the image first, then connect it to recent context so the
+  // answer grasps WHY the user sent it. When there's no prior context (the
+  // image is the first message), fall back to the bare question — identical
+  // to the old pure-mode behaviour.
+  const priorContext = buildImageContext(messages);
+  const prompt = priorContext
+    ? `${IMAGE_GROUNDING_PREFACE}\n\n--- سياق المحادثة (خلفية فقط — لا تجعله يغيّر ما تراه فعلاً في الصورة) ---\n${priorContext}\n--- نهاية السياق ---\n\nسؤال المستخدم مع الصورة: ${question}`
+    : question;
 
   broadcastToPanels({ type: "provider_info", provider: "Claude Max (image)" });
 
@@ -471,8 +505,12 @@ export async function handleMaxChat(messages) {
   // hallucinates a Claude logo onto a Google search page.
   //
   // Image questions get the IMAGE-Q&A path instead: empty system, no
-  // tools, no context — just `{user question, image} → text`. Same
-  // shape as calling claude.ai directly.
+  // tools, and a PIXEL-FIRST prompt — describe the real image, THEN use a
+  // small text-only slice of recent conversation as background so the
+  // answer understands why the user sent it. The grounding preface +
+  // "background only" labeling keep that context from out-voting the
+  // pixels (the failure mode above). No browser/tool context, no history
+  // images — so the hallucination guard holds while continuity returns.
   // ──────────────────────────────────────────────────────────────────
   if ((activeTask?.images?.length || 0) > 0) {
     return handleImageQA(messages);
