@@ -51,13 +51,25 @@ export async function ensureAttached(tabId) {
   for (const dom of ["Runtime", "Console", "Network"]) {
     try { await ensureDomain(tabId, dom); } catch {}
   }
-  // Lock devicePixelRatio so screenshots match CSS coordinates the AI sees.
+  // Lock deviceScaleFactor to 1 so screenshots are 1:1 with the CSS
+  // coordinates the AI sees. CRITICAL: size the override to the page's ACTUAL
+  // CSS viewport (window.innerWidth/innerHeight), NOT chrome.windows.get()
+  // dimensions — on a maximized window at fractional display scaling (e.g.
+  // 125%) the windows API overstates the height by ~16px, which forced the
+  // emulated viewport TALLER than the visible window and clipped the bottom of
+  // every page + the automation border. Querying the real viewport first (the
+  // override isn't applied yet on a fresh attach) keeps it 1:1 and unclipped.
   try {
-    const tab = await chrome.tabs.get(tabId);
-    const win = await chrome.windows.get(tab.windowId);
-    await chrome.debugger.sendCommand({ tabId }, "Emulation.setDeviceMetricsOverride", {
-      width: win.width, height: win.height, deviceScaleFactor: 1, mobile: false,
+    const r = await chrome.debugger.sendCommand({ tabId }, "Runtime.evaluate", {
+      expression: "({ w: window.innerWidth, h: window.innerHeight })",
+      returnByValue: true,
     });
+    const vp = r?.result?.value;
+    if (vp && vp.w > 0 && vp.h > 0) {
+      await chrome.debugger.sendCommand({ tabId }, "Emulation.setDeviceMetricsOverride", {
+        width: vp.w, height: vp.h, deviceScaleFactor: 1, mobile: false,
+      });
+    }
   } catch {}
   // Pretend the tab has focus even when it doesn't.
   //   Many sites pause video/animations/analytics when the tab is
