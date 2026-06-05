@@ -885,21 +885,24 @@ input.settings-textarea, select.settings-textarea { min-height: 0; }
 }
 .attach-remove:hover { background: var(--red); }
 
-/* Text-file chip in the composer (page elements / page text / long paste).
-   A horizontal pill — label opens the viewer, × removes it. */
+/* Text-file tile in the composer (page elements / page text / long paste).
+   A 60×60 square — same silhouette as an image attachment — with a 📄 icon,
+   a truncated name, and a corner × (the shared .attach-remove, absolute). */
 .attach-text {
-  display: inline-flex; align-items: center; gap: 6px;
-  max-width: 220px; height: 28px;
-  padding-inline-start: 10px; padding-inline-end: 4px;
+  position: relative;
+  width: 60px; height: 60px; padding: 4px;
   border: 1px solid var(--border); border-radius: 8px;
-  background: var(--bg); font-size: 11.5px; color: var(--text);
+  background: var(--bg); cursor: pointer; overflow: hidden;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 3px;
 }
-.attach-text-label {
-  cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+.attach-text:hover { border-color: var(--accent); }
+.attach-text-icon { font-size: 20px; line-height: 1; }
+.attach-text-name {
+  font-size: 8.5px; line-height: 1.15; color: var(--text2); text-align: center;
+  max-width: 100%;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.attach-text-label:hover { color: var(--accent-br); }
-/* Un-absolute the shared × inside the inline pill. */
-.attach-text .attach-remove { position: static; flex-shrink: 0; }
 
 /* Attachment chips shown inside a sent user bubble (collapsed text files). */
 .msg-attachments { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }

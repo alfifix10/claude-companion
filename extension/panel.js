@@ -801,28 +801,11 @@ function enterEditMode(wrap, msgIdx) {
     if (!editTexts.length) { textsRow.style.display = "none"; return; }
     textsRow.style.display = "";
     for (const t of editTexts) {
-      const chip = document.createElement("div");
-      chip.className = "attach-text";
-      const kb = Math.max(1, Math.round((t.content?.length || 0) / 1024));
-      const label = document.createElement("span");
-      label.className = "attach-text-label";
-      label.textContent = `📄 ${t.label} · ~${kb}KB`;
-      label.title = "انقر للمعاينة";
-      label.addEventListener("click", () => openTextViewer(t.label, t.content));
-      chip.appendChild(label);
-      const rm = document.createElement("button");
-      rm.type = "button";
-      rm.className = "attach-remove";
-      rm.textContent = "×";
-      rm.title = "إزالة";
-      rm.addEventListener("click", (e) => {
-        e.preventDefault();
+      textsRow.appendChild(buildTextChip(t, () => {
         const i = editTexts.indexOf(t);
         if (i >= 0) editTexts.splice(i, 1);
         renderEditTexts();
-      });
-      chip.appendChild(rm);
-      textsRow.appendChild(chip);
+      }));
     }
   }
   renderEditTexts();
@@ -1783,6 +1766,37 @@ async function makeImagePreview(mediaType, base64, maxDim = 400, quality = 0.7) 
   }
 }
 
+// One square text-file tile (60×60) — same silhouette as an image
+// attachment: a 📄 icon, a truncated name, and a corner × . Click the tile
+// to preview, click × to remove. Shared by the composer strip and the
+// edit-box strip so both look identical.
+function buildTextChip(t, onRemove) {
+  const kb = Math.max(1, Math.round((t.content?.length || 0) / 1024));
+  const chip = document.createElement("div");
+  chip.className = "attach-text";
+  chip.title = `${t.label} · ~${kb}KB — انقر للمعاينة`;
+  const icon = document.createElement("span");
+  icon.className = "attach-text-icon";
+  icon.textContent = "📄";
+  const name = document.createElement("span");
+  name.className = "attach-text-name";
+  name.textContent = t.label;
+  chip.appendChild(icon);
+  chip.appendChild(name);
+  chip.addEventListener("click", (e) => {
+    if (e.target.classList.contains("attach-remove")) return;
+    openTextViewer(t.label, t.content || "");
+  });
+  const rm = document.createElement("button");
+  rm.type = "button";
+  rm.className = "attach-remove";
+  rm.textContent = "×";
+  rm.title = "إزالة";
+  rm.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); onRemove(); });
+  chip.appendChild(rm);
+  return chip;
+}
+
 function renderAttachments() {
   $attachments.innerHTML = "";
   for (let i = 0; i < pendingImages.length; i++) {
@@ -1809,26 +1823,11 @@ function renderAttachments() {
   }
   // Text-file chips (page elements / page text / long paste).
   for (const t of pendingTexts) {
-    const wrap = document.createElement("div");
-    wrap.className = "attach-text";
-    const kb = Math.max(1, Math.round(t.content.length / 1024));
-    const label = document.createElement("span");
-    label.className = "attach-text-label";
-    label.textContent = `📄 ${t.label} · ~${kb}KB`;
-    label.title = "انقر للمعاينة";
-    label.addEventListener("click", () => openTextViewer(t.label, t.content));
-    wrap.appendChild(label);
-    const rm = document.createElement("button");
-    rm.className = "attach-remove";
-    rm.textContent = "×";
-    rm.title = "إزالة";
-    rm.addEventListener("click", () => {
+    $attachments.appendChild(buildTextChip(t, () => {
       const idx = pendingTexts.indexOf(t);
       if (idx >= 0) pendingTexts.splice(idx, 1);
       renderAttachments();
-    });
-    wrap.appendChild(rm);
-    $attachments.appendChild(wrap);
+    }));
   }
   // Enable send button when we have images even if input is empty
   updateSend();
