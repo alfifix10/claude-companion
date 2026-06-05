@@ -861,6 +861,32 @@ function enterEditMode(wrap, msgIdx) {
   cancelBtn.className = "edit-cancel";
   cancelBtn.textContent = "إلغاء";
   cancelBtn.title = "Escape";
+  // Delete = remove this message AND everything after it (rollback). Two-step
+  // confirm because it's destructive and can drop many turns at once. Pushed
+  // to the far side (margin via .edit-delete) so it isn't next to إرسال.
+  const deleteBtn = document.createElement("button");
+  deleteBtn.type = "button";
+  deleteBtn.className = "edit-delete";
+  deleteBtn.textContent = "حذف";
+  deleteBtn.title = "حذف هذه الرسالة وكلّ ما بعدها";
+  let deleteArmed = false;
+  let deleteTimer = null;
+  deleteBtn.addEventListener("click", () => {
+    if (!deleteArmed) {
+      deleteArmed = true;
+      deleteBtn.textContent = "تأكيد الحذف؟";
+      deleteBtn.classList.add("armed");
+      deleteTimer = setTimeout(() => {
+        deleteArmed = false;
+        deleteBtn.textContent = "حذف";
+        deleteBtn.classList.remove("armed");
+      }, 3000);
+      return;
+    }
+    clearTimeout(deleteTimer);
+    performDelete(wrap, msgIdx);
+  });
+  actions.appendChild(deleteBtn);
   actions.appendChild(saveBtn);
   actions.appendChild(cancelBtn);
   editor.appendChild(ta);
@@ -984,6 +1010,36 @@ function performEdit(wrap, msgIdx, newText, editImages, editTexts) {
   $input.value = newText;
   $input.dispatchEvent(new Event("input"));
   send();
+}
+
+// Delete this message AND everything after it (the user-chosen rollback
+// semantic). Same teardown as performEdit, minus the resend.
+function performDelete(wrap, msgIdx) {
+  // 1. Peel the bubble and every node after it (tool lines, later turns).
+  let node = wrap.nextSibling;
+  while (node) { const nxt = node.nextSibling; node.remove(); node = nxt; }
+  wrap.remove();
+
+  // 2. Truncate the model to everything BEFORE the deleted slot.
+  if (Number.isFinite(msgIdx) && msgIdx >= 0 && msgIdx <= conversation.length) {
+    conversation = conversation.slice(0, msgIdx);
+  }
+  dropFullResImagesFrom(msgIdx);
+
+  // 3. Persist. saveHistory() bails on an empty conversation, so when the
+  //    delete emptied the chat we write the empty state (and a 0 count)
+  //    explicitly — otherwise the stale pre-delete messages would reappear
+  //    on reopen.
+  if (conversation.length) {
+    saveHistory();
+  } else if (currentConvId) {
+    const id = currentConvId;
+    chrome.storage.local.set({ [`conv_${id}`]: [] }).catch(() => {});
+    convLoadIndex().then((index) => {
+      const entry = index.find((c) => c.id === id);
+      if (entry) { entry.count = 0; entry.updatedAt = Date.now(); convSaveIndex(index); }
+    }).catch(() => {});
+  }
 }
 
 /**
