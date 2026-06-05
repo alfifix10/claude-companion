@@ -857,12 +857,10 @@ function enterEditMode(wrap, msgIdx) {
   saveBtn.type = "button";   // default is "submit" — harmless standalone but clearer intent
   saveBtn.className = "edit-save";
   saveBtn.textContent = "تعديل";
-  saveBtn.title = "Enter";
   const cancelBtn = document.createElement("button");
   cancelBtn.type = "button";
   cancelBtn.className = "edit-cancel";
   cancelBtn.textContent = "إلغاء";
-  cancelBtn.title = "Escape";
   // Delete = remove this message AND everything after it (rollback). Two-step
   // confirm because it's destructive and can drop many turns at once. Sits in
   // the MIDDLE of the action row (between تعديل and إلغاء).
@@ -870,7 +868,6 @@ function enterEditMode(wrap, msgIdx) {
   deleteBtn.type = "button";
   deleteBtn.className = "edit-delete";
   deleteBtn.textContent = "حذف";
-  deleteBtn.title = "حذف هذه الرسالة وكلّ ما بعدها";
   let deleteArmed = false;
   let deleteTimer = null;
   deleteBtn.addEventListener("click", () => {
