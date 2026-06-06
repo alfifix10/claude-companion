@@ -217,6 +217,19 @@ ensureHealthyPort(3000).catch(() => {});
 // back in silently. Does nothing when storage already has data.
 restoreFromNativeIfEmpty().catch(() => {});
 
+// First-run onboarding: open the welcome page once, on fresh install only.
+// Gated by a storage flag so reloading the unpacked extension (which also
+// fires onInstalled) never re-opens it, and the owner isn't nagged.
+chrome.runtime.onInstalled.addListener(async (details) => {
+  if (details.reason !== "install") return;
+  try {
+    const { onboardingShown } = await chrome.storage.local.get("onboardingShown");
+    if (onboardingShown) return;
+    await chrome.storage.local.set({ onboardingShown: true });
+    await chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") });
+  } catch {}
+});
+
 // Settings page can't directly hit the native port (it's a plain script, not
 // a service-worker module). It asks us to mirror via runtime.sendMessage.
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
