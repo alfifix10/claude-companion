@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>مرحباً بك — Claude Companion</title>
+  <link rel="stylesheet" href="welcome.css">
+</head>
+<body>
+  <main class="wrap">
+    <header class="hero">
+      <img class="logo" src="icons/icon128.png" alt="Claude Companion">
+      <h1>مرحباً بك في <span class="brand">Claude Companion</span></h1>
+      <p class="tag">مساعد المتصفّح الذي يعمل باشتراك Claude Max — بلا API، بلا تكاليف إضافيّة.</p>
+      <p class="req">يتطلّب اشتراك <strong>Claude Max</strong> فعّالاً.</p>
+    </header>
+
+    <!-- Live status: auto-detected via the native host's diag endpoint -->
+    <section class="status" aria-live="polite">
+      <div class="status-head">
+        <span>حالة الإعداد</span>
+        <button id="recheck" class="btn-ghost" type="button">↻ إعادة الفحص</button>
+      </div>
+      <ul class="checks">
+        <li id="chk-host"><span class="dot"></span><span class="lbl">الخادم المحليّ</span><span class="val"></span></li>
+        <li id="chk-cli"><span class="dot"></span><span class="lbl">Claude CLI</span><span class="val"></span></li>
+        <li id="chk-mcp"><span class="dot"></span><span class="lbl">اتّصال الأدوات (MCP)</span><span class="val"></span></li>
+      </ul>
+    </section>
+
+    <!-- Steps -->
+    <ol class="steps">
+      <li class="step" id="step-1" data-state="done">
+        <div class="step-mark"></div>
+        <div class="step-body">
+          <h3>حمّلت الإضافة ✓</h3>
+          <p>أنت تقرأ هذه الصفحة، إذن الإضافة محمّلة في متصفّحك بنجاح.</p>
+        </div>
+      </li>
+
+      <li class="step" id="step-2" data-state="pending">
+        <div class="step-mark"></div>
+        <div class="step-body">
+          <h3>شغّل المثبِّت (مرّة واحدة)</h3>
+          <p>
+            انقر <strong>نقراً مزدوجاً</strong> على ملفّ الإعداد داخل المجلّد المُستخرَج — يتكفّل بكلّ شيء
+            (فحص Node، تثبيت Claude CLI، تسجيل الدخول، تهيئة الخادم المحليّ):
+          </p>
+          <div class="cmd">
+            <code id="os-file">…</code>
+            <button id="copy-cmd" class="btn-copy" type="button">نسخ الأمر</button>
+          </div>
+          <p class="hint" id="win-hint" hidden>
+            لو منع ويندوز التشغيل («SmartScreen»): انقر «المزيد» → «تشغيل على أيّ حال».
+          </p>
+          <p class="hint">
+            أو يدويّاً عبر <span id="os-name">الطرفيّة</span>:
+            <code id="os-cmd" class="inline-cmd">…</code>
+          </p>
+          <p class="hint">ستظهر علامات ✓ في «حالة الإعداد» بالأعلى بمجرّد نجاح المثبِّت.</p>
+        </div>
+      </li>
+
+      <li class="step" id="step-3" data-state="idle">
+        <div class="step-mark"></div>
+        <div class="step-body">
+          <h3>ابدأ الاستخدام</h3>
+          <p>
+            ثبّت أيقونة الإضافة في شريط المتصفّح (📌)، ثمّ انقرها لفتح اللوحة الجانبيّة.
+            اكتب أوّل طلب لك — مثل «افتح يوتيوب» أو «لخّص هذه الصفحة».
+          </p>
+        </div>
+      </li>
+    </ol>
+
+    <div class="ready" id="ready-banner" hidden>
+      ✓ كلّ شيء جاهز — افتح اللوحة الجانبيّة وابدأ!
+    </div>
+
+    <footer class="foot">
+      <span id="env-line"></span>
+      <a href="https://docs.anthropic.com/claude/docs" target="_blank" rel="noopener">الدليل</a>
+    </footer>
+  </main>
+  <script src="welcome.js"></script>
+</body>
+</html>
