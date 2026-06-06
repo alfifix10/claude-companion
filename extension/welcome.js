@@ -13,15 +13,18 @@ const ua = navigator.userAgent;
 const isWin = /Windows/i.test(ua);
 const isMac = /Macintosh|Mac OS X/i.test(ua);
 const osName = isWin ? "PowerShell" : isMac ? "Terminal (macOS)" : "Terminal";
+// Primary: a double-clickable setup file. Fallback: the manual terminal command.
+const setupFile = isWin ? "SETUP-Windows.bat" : "SETUP-Mac-Linux.command";
 const installCmd = isWin
   ? "powershell -ExecutionPolicy Bypass -File .\\install.ps1"
-  : "bash ./install.sh";
+  : "bash ./SETUP-Mac-Linux.command";
 
 $("os-name").textContent = osName;
+$("os-file").textContent = setupFile;
 $("os-cmd").textContent = installCmd;
 if (isWin) $("win-hint").hidden = false;
 
-// ── Copy button ───────────────────────────────────────────────────────────
+// ── Copy button (copies the manual fallback command) ───────────────────────
 $("copy-cmd").addEventListener("click", async () => {
   const btn = $("copy-cmd");
   try {
@@ -30,7 +33,7 @@ $("copy-cmd").addEventListener("click", async () => {
   } catch {
     btn.textContent = "انسخ يدويّاً";
   }
-  setTimeout(() => { btn.textContent = "نسخ"; }, 1600);
+  setTimeout(() => { btn.textContent = "نسخ الأمر"; }, 1600);
 });
 
 // ── Live detection ────────────────────────────────────────────────────────

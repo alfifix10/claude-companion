@@ -43,16 +43,19 @@
         <div class="step-body">
           <h3>شغّل المثبِّت (مرّة واحدة)</h3>
           <p>
-            افتح <strong id="os-name">الطرفيّة</strong> داخل المجلّد المُستخرَج (حيث يوجد ملفّ المثبِّت) ونفّذ الأمر التالي.
-            يثبّت Node و Claude CLI، يسجّل دخولك، ويهيّئ الخادم المحليّ تلقائيّاً:
+            انقر <strong>نقراً مزدوجاً</strong> على ملفّ الإعداد داخل المجلّد المُستخرَج — يتكفّل بكلّ شيء
+            (فحص Node، تثبيت Claude CLI، تسجيل الدخول، تهيئة الخادم المحليّ):
           </p>
           <div class="cmd">
-            <code id="os-cmd">…</code>
-            <button id="copy-cmd" class="btn-copy" type="button">نسخ</button>
+            <code id="os-file">…</code>
+            <button id="copy-cmd" class="btn-copy" type="button">نسخ الأمر</button>
           </div>
           <p class="hint" id="win-hint" hidden>
-            لو منع ويندوز التشغيل: انقر يميناً على الملفّ → «Run with PowerShell»،
-            أو نفّذ الأمر أعلاه كما هو (يتجاوز سياسة التنفيذ لهذه المرّة فقط).
+            لو منع ويندوز التشغيل («SmartScreen»): انقر «المزيد» → «تشغيل على أيّ حال».
+          </p>
+          <p class="hint">
+            أو يدويّاً عبر <span id="os-name">الطرفيّة</span>:
+            <code id="os-cmd" class="inline-cmd">…</code>
           </p>
           <p class="hint">ستظهر علامات ✓ في «حالة الإعداد» بالأعلى بمجرّد نجاح المثبِّت.</p>
         </div>

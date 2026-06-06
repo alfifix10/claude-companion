@@ -103,6 +103,10 @@ body {
 }
 .btn-copy:hover { filter: brightness(1.08); }
 .hint { font-size: 12px !important; color: var(--text2) !important; margin-top: 6px; }
+.inline-cmd {
+  direction: ltr; font-family: ui-monospace, monospace; font-size: 11px;
+  color: var(--accent-br); background: var(--bg); padding: 1px 6px; border-radius: 5px;
+}
 
 /* Ready banner */
 .ready {
