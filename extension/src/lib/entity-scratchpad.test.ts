@@ -29,7 +29,7 @@ describe("extractEntities", () => {
   });
 
   it("never captures bare numbers (passwords / PINs stay out)", () => {
-    const ents = extractEntities([u("my password is 110110110 and pin 4827")]);
+    const ents = extractEntities([u("my password is 12345678 and pin 0000")]);
     expect(ents).toHaveLength(0);
   });
 

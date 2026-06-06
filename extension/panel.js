@@ -1972,7 +1972,7 @@ async function saveSettings() {
     if (!workingDirectory) {
       warning = "⚠ Pro Mode فعّال لكن مجلّد العمل فارغ — لن تعمل أدوات الملفّات حتّى تحدّده.";
     } else if (!/^([A-Za-z]:[\\\/]|\/)/.test(workingDirectory)) {
-      warning = "⚠ مسار غير مطلق — استخدم مسارَ كاملاً مثل C:\\Users\\fix\\Desktop\\my-project.";
+      warning = "⚠ مسار غير مطلق — استخدم مسارَ كاملاً مثل C:\\Users\\YOU\\Desktop\\my-project.";
     } else if (/^([A-Za-z]:[\\\/]?$|\/$)/.test(workingDirectory)) {
       warning = "⚠ جذر القرص مرفوض لأمان — اختر مجلّداً فرعياً.";
     }

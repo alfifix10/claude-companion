@@ -55,7 +55,7 @@
 ---
 
 ## المسار
-`C:\Users\fix\Desktop\nnn\claude-companion\`
+`C:\Users\<you>\…\claude-companion\` (جذر المستودع المحليّ)
 
 ## المعمارية
 ```
