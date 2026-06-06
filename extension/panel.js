@@ -1012,9 +1012,16 @@ function performDelete(wrap, msgIdx) {
 
   // 3. Re-render from the model so DOM ↔ conversation indices realign after
   //    the mid-list cut (a plain DOM splice would leave stale data-msg-idx).
+  //    Suppress per-bubble auto-scroll and keep the viewport where it was,
+  //    so deleting doesn't yank the chat from top to bottom.
+  const prevTop = $messages.scrollTop;
   $messages.innerHTML = "";
   if (conversation.length) {
+    suppressScroll = true;
     renderStoredConversation(conversation);
+    suppressScroll = false;
+    $messages.scrollTop = Math.min(prevTop, $messages.scrollHeight);
+    updateScrollBtn();
     saveHistory();
   } else {
     // Emptied the chat — restore the fresh-chat layout and persist the empty
@@ -1226,6 +1233,10 @@ function appendError(text) {
 const NEAR_BOTTOM_PX = 60;   // slack so tiny overshoot still counts as "at bottom"
 const SHOW_BTN_PX    = 150;  // button appears when farther than this from bottom
 let followingBottom = true;
+// When true, scroll helpers are no-ops — used during a bulk re-render
+// (e.g. surgical delete) so each appended bubble doesn't yank the view to
+// the bottom, producing a rapid top→bottom scroll.
+let suppressScroll = false;
 
 function distanceFromBottom() {
   return $messages.scrollHeight - $messages.scrollTop - $messages.clientHeight;
@@ -1283,6 +1294,7 @@ function flushStreamRender() {
 
 /** Unconditional — jump to bottom and re-enter following mode. */
 function scrollToBottom() {
+  if (suppressScroll) return;
   $messages.scrollTop = $messages.scrollHeight;
   followingBottom = true;
   updateScrollBtn();
@@ -1291,6 +1303,7 @@ function scrollToBottom() {
 /** Only scrolls if the user was already near the bottom. Use this for
  *  streaming/reactive updates so we don't yank a reader around. */
 function scrollToBottomIfFollowing() {
+  if (suppressScroll) return;
   if (followingBottom) {
     $messages.scrollTop = $messages.scrollHeight;
   }
