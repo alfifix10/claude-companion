@@ -218,8 +218,11 @@ Side Panel (UI) ─ Service Worker ─ Native Host (Node) ─┬── claude CL
 claude-companion/
 ├── CLAUDE.md                (هذا الملف)
 ├── README.md
+├── SETUP-Windows.bat        (مثبّت بنقرة مزدوجة — يلفّ install.ps1 + CLI + login)
+├── SETUP-Mac-Linux.command  (نظيره لماك/لينكس، قابل للتنفيذ)
 ├── install.ps1              (Windows, cross-browser, auto-detect)
 ├── install.sh               (macOS/Linux)
+├── landing/                 (صفحة هبوط تسويقيّة ثابتة — index.html/style.css/script.js)
 ├── host/
 │   ├── package.json
 │   ├── native-host.js       (stdio ↔ TCP ↔ spawn claude)
@@ -229,6 +232,7 @@ claude-companion/
     ├── background.js
     ├── content.js           (Readability + AX tree + DOM diff + border + ripple)
     ├── panel.html/css/js    (side panel — main UI)
+    ├── welcome.html/css/js  (onboarding — opens on first install, live ✓ via diag)
     ├── settings.html/js     (memories + tasks)
     ├── mic-permission.html/js
     ├── icons/

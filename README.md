@@ -51,37 +51,48 @@
 
 ## Install
 
-### Windows
+### Easiest — double-click setup (recommended)
+
+1. Download and unzip the package.
+2. **Double-click** `SETUP-Windows.bat` (Windows) or `SETUP-Mac-Linux.command` (macOS/Linux).
+   It checks Node, installs the Claude CLI, runs `claude login`, and registers the
+   native host — all in one go.
+3. Open `chrome://extensions` → enable **Developer mode** → **Load unpacked** →
+   select the `extension/` folder.
+
+A **welcome page opens on first install** and shows a live ✓ checklist so you can
+see each piece come online.
+
+### Manual (advanced)
+
+<details><summary>Windows</summary>
 
 ```powershell
-# 1. Install Claude Code CLI
 npm install -g @anthropic-ai/claude-code
 claude login
-
-# 2. Clone or unzip this repo, then:
 cd claude-companion\host
 npm install
 cd ..
 .\install.ps1
-
-# 3. Load the extension
-#    Open chrome://extensions → enable "Developer mode"
-#    → "Load unpacked" → select the `extension/` folder.
+# then load the extension/ folder as unpacked (Developer mode)
 ```
+</details>
 
-### macOS / Linux
+<details><summary>macOS / Linux</summary>
 
 ```bash
 npm install -g @anthropic-ai/claude-code
 claude login
-
 cd claude-companion/host
 npm install
 cd ..
 ./install.sh
 ```
+</details>
 
 The installer registers the native messaging host across every Chromium-based browser it finds, wires up the MCP server in Claude Code, and never touches anything outside `~/.config/claude-companion/` or the per-browser `NativeMessagingHosts` registry key.
+
+> Requires a **Claude Max** subscription. A marketing landing page lives in `landing/` (static, deployable to any host).
 
 ---
 
