@@ -207,8 +207,8 @@ Side Panel (UI) ─ Service Worker ─ Native Host (Node) ─┬── claude CL
 - الإضافة لا تعمل إذا Brave مغلق كلياً
 - Voice input يحتاج إنترنت (Web Speech API)
 - Markdown renderer مكتوب يدوياً (لا dependencies)
-- panel.js عند 2,557 سطر — monolith (تقسيمه 6.1 أُجِّل: بلا قيمة لمطوّر منفرد)
-- Skills MVP rolled back (composer.ts/interview.js orphan files موجودة لكن غير مستخدمة)
+- panel.js عند ~2,850 سطر — monolith (تقسيمه 6.1 أُجِّل: بلا قيمة لمطوّر منفرد)
+- Skills MVP rolled back — ملفّات composer/interview اليتيمة أُزيلت (لم تعد موجودة)
 - لا scheduling (`chrome.alarms` غير مُستعمَل) — خيار قادم
 - ~~لا token-usage indicator~~ ✅ أُضيف (3.6): رقاقة `≈ NK توكن` في شريط التبويب
 
