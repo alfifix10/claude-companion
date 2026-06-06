@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Companion — مساعد المتصفّح باشتراك Claude Max</title>
+  <meta name="description" content="حوّل اشتراك Claude Max إلى مساعد ذكيّ داخل متصفّحك: يتصفّح، يلخّص، يملأ النماذج، ويتحكّم بأيّ موقع — بلا API وبلا تكاليف إضافيّة.">
+  <link rel="icon" href="icon128.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Nav -->
+  <header class="nav">
+    <a class="brand" href="#top">
+      <img src="icon128.png" alt="" width="28" height="28">
+      <span>Claude Companion</span>
+    </a>
+    <nav class="nav-links">
+      <a href="#features">المزايا</a>
+      <a href="#how">كيف يعمل</a>
+      <a href="#faq">أسئلة</a>
+      <a class="btn btn-sm" href="#download">تحميل</a>
+    </nav>
+  </header>
+
+  <!-- Hero -->
+  <section class="hero" id="top">
+    <div class="hero-text">
+      <span class="pill">مجّانيّ في البداية · مفتوح للمتبنّين المبكّرين</span>
+      <h1>متصفّحك، يقوده <span class="grad">Claude</span>.</h1>
+      <p class="lead">
+        حوّل اشتراك <strong>Claude Max</strong> إلى مساعد يعمل داخل المتصفّح:
+        يفتح المواقع، يلخّص الصفحات، يملأ النماذج، ويتحكّم بأيّ موقع نيابةً عنك —
+        <strong>بلا مفاتيح API وبلا تكاليف إضافيّة</strong>.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-lg" href="#download">⬇ حمّل الإضافة</a>
+        <a class="btn btn-ghost btn-lg" href="#how">شاهد كيف يعمل</a>
+      </div>
+      <p class="req-note">يتطلّب اشتراك Claude Max ومتصفّحاً يعتمد Chromium (Chrome · Brave · Edge).</p>
+    </div>
+
+    <!-- CSS mock of the side panel (no screenshot needed) -->
+    <div class="mock" aria-hidden="true">
+      <div class="mock-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="mock-title">Claude Companion</span></div>
+      <div class="mock-body">
+        <div class="bubble user">لخّص هذه الصفحة وافتح يوتيوب</div>
+        <div class="bubble bot">قرأت الصفحة ✓ — إليك أهمّ ٣ نقاط… وفتحت يوتيوب في تبويب جديد.</div>
+        <div class="mock-status">🤔 يفكّر… · 3 إجراء · 6ث</div>
+      </div>
+      <div class="mock-input"><span>اسأل أيّ شيء…</span><span class="send">➤</span></div>
+    </div>
+  </section>
+
+  <!-- Trust bar -->
+  <section class="trust">
+    <div>⚡ بلا API</div>
+    <div>🧰 ٦٠ أداة</div>
+    <div>🌐 كلّ المواقع</div>
+    <div>🔒 يعمل محليّاً</div>
+  </section>
+
+  <!-- Features -->
+  <section class="section" id="features">
+    <h2>ماذا يستطيع؟</h2>
+    <div class="grid">
+      <article class="card"><div class="ic">🤖</div><h3>أتمتة كاملة</h3><p>يتصفّح، ينقر، يكتب، يملأ النماذج، ويتنقّل بين التبويبات — على أيّ موقع.</p></article>
+      <article class="card"><div class="ic">📄</div><h3>قراءة وتلخيص</h3><p>يستخرج محتوى الصفحات ويلخّصها، ويجيب عن أسئلتك حولها.</p></article>
+      <article class="card"><div class="ic">🖼️</div><h3>فهم الصور</h3><p>أرسل لقطة شاشة ليفهمها ويربطها بسياق محادثتك.</p></article>
+      <article class="card"><div class="ic">🎙️</div><h3>إدخال صوتيّ عربيّ</h3><p>تحدّث بدل الكتابة — يفهم العربيّة مباشرةً.</p></article>
+      <article class="card"><div class="ic">🛠️</div><h3>وضع Pro</h3><p>قراءة الملفّات، تشغيل الأوامر، git، SQLite — بموافقة يدويّة لكلّ إجراء حسّاس.</p></article>
+      <article class="card"><div class="ic">🧠</div><h3>ذاكرة المشروع</h3><p>يتذكّر مشروعك عبر الجلسات عبر ملفّات حالة محليّة.</p></article>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="section alt" id="how">
+    <h2>التشغيل في ٣ خطوات</h2>
+    <ol class="steps">
+      <li><span class="num">1</span><div><h3>حمّل وفُكّ الضغط</h3><p>نزّل الحزمة من زرّ التحميل وافتحها في أيّ مجلّد.</p></div></li>
+      <li><span class="num">2</span><div><h3>نقرة مزدوجة على المثبِّت</h3><p><code>SETUP-Windows.bat</code> (أو <code>SETUP-Mac-Linux.command</code>) — يهيّئ كلّ شيء تلقائيّاً.</p></div></li>
+      <li><span class="num">3</span><div><h3>حمّل الإضافة</h3><p>«وضع المطوّر» ← «Load unpacked» ← اختر مجلّد <code>extension</code>. صفحة ترحيب ترشدك بعلامات ✓ حيّة.</p></div></li>
+    </ol>
+  </section>
+
+  <!-- Download -->
+  <section class="section download" id="download">
+    <h2>ابدأ الآن — مجّاناً</h2>
+    <p class="lead center">كلّ ما تحتاجه اشتراك Claude Max وخمس دقائق لإعداد لمرّة واحدة.</p>
+    <!-- رابط GitHub الثابت لأحدث إصدار — يعمل فور نشر Release يحوي claude-companion.zip. -->
+    <a class="btn btn-lg" href="https://github.com/alfifix10/claude-companion/releases/latest/download/claude-companion.zip" id="dl-btn">⬇ حمّل أحدث إصدار</a>
+    <p class="req-note center">Chrome · Brave · Edge · Opera · Vivaldi — كلّها مدعومة.</p>
+  </section>
+
+  <!-- FAQ -->
+  <section class="section" id="faq">
+    <h2>أسئلة شائعة</h2>
+    <div class="faq">
+      <details><summary>هل أحتاج اشتراك Claude Max؟</summary><p>نعم. الإضافة تعمل عبر اشتراكك الشخصيّ في Claude Max — لا تشتري شيئاً إضافيّاً ولا تدفع مقابل API.</p></details>
+      <details><summary>هل هي مجّانيّة؟</summary><p>نعم، مجّانيّة في هذه المرحلة. تحتاج فقط اشتراك Max الخاصّ بك.</p></details>
+      <details><summary>هل بياناتي آمنة؟</summary><p>كلّ شيء يعمل محليّاً على جهازك عبر Claude CLI — لا خوادم وسيطة. وضع Pro يطلب موافقتك قبل أيّ إجراء يُعدّل جهازك.</p></details>
+      <details><summary>أيّ المتصفّحات مدعومة؟</summary><p>كلّ متصفّحات Chromium: Chrome · Brave · Edge · Opera · Vivaldi · Arc.</p></details>
+      <details><summary>لماذا التثبيت ليس بنقرة من المتجر؟</summary><p>الإضافة تحتاج خادماً محليّاً للتواصل مع Claude CLI، وهذا خارج نطاق متجر الإضافات حاليّاً. المثبِّت يختصر الإعداد إلى نقرة مزدوجة.</p></details>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <div class="brand"><img src="icon128.png" alt="" width="22" height="22"><span>Claude Companion</span></div>
+    <div class="foot-links">
+      <a href="https://github.com/alfifix10/claude-companion/blob/main/PRIVACY.md" target="_blank" rel="noopener">الخصوصيّة</a>
+      <a href="https://github.com/alfifix10/claude-companion/blob/main/LICENSE" target="_blank" rel="noopener">الرخصة</a>
+      <a href="https://github.com/alfifix10/claude-companion" target="_blank" rel="noopener">GitHub</a>
+    </div>
+    <small>غير تابع رسميّاً لشركة Anthropic. «Claude» علامة تجاريّة لمالكها.</small>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
