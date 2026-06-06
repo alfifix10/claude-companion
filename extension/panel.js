@@ -25,6 +25,21 @@ import { actionTrace } from "./src/lib/action-trace.js";
 import { capConversation } from "./src/lib/cap-conversation.js";
 import { shouldAutoResume, MAX_AUTO_RESUMES } from "./src/lib/auto-resume.js";
 
+// Meta-note appended (at SEND time only) to an assistant turn that was cut
+// off — tells the model the attempt didn't finish, so it resumes correctly
+// and never assumes a gated write/edit/delete/run succeeded when it never
+// saw a success result.
+const INTERRUPTED_NOTE =
+  "\n\n[⚠ توقّفت هذه المحاولة قبل إكمالها — أيّ كتابة/تعديل/حذف/أمر لم تظهر له نتيجة نجاح لم يُنفَّذ. تابِع من حيث توقّفت بحذر.]";
+
+// History `content` for one message, built at send time so STORED content +
+// UI bubbles stay clean. Assistant turns get the tool trace (C1) and, if the
+// turn was interrupted, the note above. One place → both send paths agree.
+function historyContent(m) {
+  if (m.role !== "assistant" || typeof m.content !== "string") return m.content;
+  return m.content + actionTrace(m.toolActions) + (m.interrupted ? INTERRUPTED_NOTE : "");
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // DOM refs
 // ─────────────────────────────────────────────────────────────────────
@@ -462,9 +477,12 @@ function onBgMessage(msg) {
       notifyNewMessage();
       break;
     }
-    case "error":
-      // Terminate the streaming bubble so the next task doesn't append to it.
-      // Without this, a retry after error keeps writing into the old bubble.
+    case "error": {
+      // Capture whatever the model streamed before the stop, BEFORE we drop
+      // the bubble reference — we persist it so a later "اكمل" has real
+      // context (and the interrupted flag warns the model that gated actions
+      // it hadn't seen succeed did NOT run).
+      const partial = (streamingBubble?.dataset?.raw || "").trim();
       if (streamingBubble) streamingBubble = null;
       // Smart stop: a BENIGN budget hit (long task, still progressing) is
       // flagged resumable — continue it automatically instead of nagging.
@@ -482,12 +500,21 @@ function onBgMessage(msg) {
         autoResume();
         break;
       }
+      // Persist the interrupted turn so the model resumes with context on
+      // "اكمل" and never assumes a gated write/run succeeded. Stored content
+      // stays the clean partial text; the flag adds INTERRUPTED_NOTE only at
+      // send time (see historyContent).
+      if (partial) {
+        conversation.push({ role: "assistant", content: partial, toolActions: [], interrupted: true });
+        saveHistory();
+      }
       appendError(msg.text || "خطأ غير معروف");
       endTaskStats();
       setLoading(false);
       autoResumeCount = 0;
       autoResumeArmed = false;
       break;
+    }
     case "no_task":
       break;
   }
@@ -1368,12 +1395,7 @@ function autoResume() {
   streamingBubble = null;
   startTaskStats();
   if (!bgPort) connectBg();
-  const sent = conversation.map((m) => ({
-    role: m.role,
-    content: m.role === "assistant" && typeof m.content === "string"
-      ? m.content + actionTrace(m.toolActions)
-      : m.content,
-  }));
+  const sent = conversation.map((m) => ({ role: m.role, content: historyContent(m) }));
   sent.push({ role: "user", content: "تابِع إكمال المهمة من حيث توقفت، دون إعادة ما أنجزته." });
   bgPort.postMessage({ type: "chat_send", messages: sent });
 }
@@ -1491,15 +1513,9 @@ async function send() {
     // would waste vision tokens on every subsequent turn AND
     // double-count images we already forwarded at full resolution
     // on the turn they were pasted.
-    messages: conversation.map((m) => ({
-      role: m.role,
-      // Append a compact trace of the tools an assistant turn ran, so the
-      // model remembers across turns what it already did (C1). UI bubbles are
-      // unaffected — they render m.content; the trace only rides the history.
-      content: m.role === "assistant" && typeof m.content === "string"
-        ? m.content + actionTrace(m.toolActions)
-        : m.content,
-    })),
+    // historyContent() augments assistant turns (tool trace + interrupted
+    // note) at send time only; UI bubbles + stored content stay clean.
+    messages: conversation.map((m) => ({ role: m.role, content: historyContent(m) })),
     images,  // current turn's full-resolution images go here
   });
 }
