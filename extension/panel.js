@@ -577,7 +577,29 @@ async function init() {
   if (!conversation.length && !currentConvId) setFreshChat(true);
   try { await updateTabInfo(); } catch (e) { console.error("updateTabInfo:", e); }
   try { await loadTasks(); } catch (e) { console.error("loadTasks:", e); }
+  try { await initUpdateBanner(); } catch (e) { console.error("updateBanner:", e); }
   try { connectBg(); } catch (e) { console.error("connectBg:", e); }
+}
+
+// Show the "update available" banner when the background's daily GitHub
+// check found a newer release. Dismissible per-version so it doesn't nag
+// once the user has seen (or installed) that version.
+async function initUpdateBanner() {
+  const { updateAvailable, updateDismissed } =
+    await chrome.storage.local.get(["updateAvailable", "updateDismissed"]);
+  if (!updateAvailable || !updateAvailable.version) return;
+  if (updateDismissed === updateAvailable.version) return;
+
+  const banner = document.getElementById("updateBanner");
+  const link = document.getElementById("updateLink");
+  if (!banner || !link) return;
+  document.getElementById("updateVer").textContent = updateAvailable.version;
+  link.href = updateAvailable.url || "https://github.com/alfifix10/claude-companion/releases/latest";
+  banner.hidden = false;
+  document.getElementById("updateDismiss")?.addEventListener("click", async () => {
+    banner.hidden = true;
+    try { await chrome.storage.local.set({ updateDismissed: updateAvailable.version }); } catch {}
+  });
 }
 
 // Starter cards inside the welcome block — each drops a ready-made

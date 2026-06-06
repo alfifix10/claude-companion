@@ -74,6 +74,14 @@
     <!-- User-defined repeated tasks -->
     <div class="tasks-row" id="tasksRow"></div>
 
+    <!-- Update banner — shown when GitHub has a newer release than the
+         installed version. Dismissible per-version (see panel.js). -->
+    <div class="update-banner" id="updateBanner" hidden>
+      <span class="update-text">🔔 تحديث متاح <span id="updateVer"></span> —</span>
+      <a class="update-link" id="updateLink" href="#" target="_blank" rel="noopener">حمّله</a>
+      <button class="update-dismiss" id="updateDismiss" type="button" aria-label="إخفاء">×</button>
+    </div>
+
     <!-- Chat-area wrapper holds everything that reflows between the
          "fresh chat" layout (welcome + centered input + starter chips
          below) and the regular "active chat" layout (scrolling messages
