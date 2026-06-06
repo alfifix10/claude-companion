@@ -217,6 +217,12 @@ ensureHealthyPort(3000).catch(() => {});
 // back in silently. Does nothing when storage already has data.
 restoreFromNativeIfEmpty().catch(() => {});
 
+// Load-unpacked extensions don't auto-update — poll GitHub (throttled to
+// once/day) and flag a newer release so the panel can prompt the user.
+import("./src/messaging/update-check.js")
+  .then(({ checkForUpdate }) => checkForUpdate())
+  .catch(() => {});
+
 // First-run onboarding: open the welcome page once, on fresh install only.
 // Gated by a storage flag so reloading the unpacked extension (which also
 // fires onInstalled) never re-opens it, and the owner isn't nagged.

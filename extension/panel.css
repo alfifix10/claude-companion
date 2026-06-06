@@ -198,6 +198,27 @@ body {
 }
 .tasks-row::-webkit-scrollbar { height: 0; }
 .tasks-row:empty { display: none; }
+
+/* Update-available banner (load-unpacked has no auto-update). */
+.update-banner {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 12px; font-size: 12.5px;
+  background: var(--accent-bg); color: var(--text);
+  border-bottom: 1px solid var(--accent); flex-shrink: 0;
+}
+.update-banner[hidden] { display: none; }
+.update-text { flex-shrink: 0; }
+.update-link {
+  color: var(--accent-br); font-weight: 700; text-decoration: none;
+  border-bottom: 1px solid currentColor;
+}
+.update-link:hover { filter: brightness(1.1); }
+.update-dismiss {
+  margin-inline-start: auto; flex-shrink: 0;
+  background: transparent; border: none; color: var(--text2);
+  font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px;
+}
+.update-dismiss:hover { color: var(--text); }
 .task-chip {
   padding: 4px 12px; border-radius: 14px; border: 1px solid var(--accent);
   background: var(--accent-bg); color: var(--accent-br);
