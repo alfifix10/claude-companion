@@ -81,6 +81,70 @@
       <li><span class="num">2</span><div><h3>نقرة مزدوجة على المثبِّت</h3><p><code>SETUP-Windows.bat</code> (أو <code>SETUP-Mac-Linux.command</code>) — يهيّئ كلّ شيء تلقائيّاً.</p></div></li>
       <li><span class="num">3</span><div><h3>حمّل الإضافة</h3><p>«وضع المطوّر» ← «Load unpacked» ← اختر مجلّد <code>extension</code>. صفحة ترحيب ترشدك بعلامات ✓ حيّة.</p></div></li>
     </ol>
+
+    <!-- Animated, dependency-free demo of the ONE manual step (Load
+         unpacked) — the step no installer can automate for an unlisted
+         extension. Pure CSS mock of chrome://extensions looping through the
+         three sub-actions, so the user copies the motion instead of parsing
+         prose. dir=ltr because the real Chrome page is LTR. -->
+    <figure class="lu-demo" aria-label="عرض توضيحي: كيفية تحميل الإضافة عبر Load unpacked">
+      <div class="lu-window" dir="ltr">
+        <div class="lu-bar">
+          <span class="lu-dot"></span><span class="lu-dot"></span><span class="lu-dot"></span>
+          <span class="lu-url">chrome://extensions</span>
+        </div>
+        <div class="lu-stage">
+
+          <!-- Scene 1: flip Developer mode on -->
+          <div class="lu-scene lu-s1">
+            <div class="lu-row">
+              <span class="lu-h">Extensions</span>
+              <span class="lu-devwrap">Developer mode <span class="lu-toggle"></span></span>
+            </div>
+          </div>
+
+          <!-- Scene 2: toolbar appears, click Load unpacked, picker opens -->
+          <div class="lu-scene lu-s2">
+            <div class="lu-toolbar">
+              <span class="lu-btn lu-btn-primary">Load unpacked</span>
+              <span class="lu-btn">Pack extension</span>
+              <span class="lu-btn">Update</span>
+            </div>
+            <div class="lu-picker">
+              <div class="lu-folder">📁 host</div>
+              <div class="lu-folder lu-pick">📁 extension</div>
+              <div class="lu-folder">📁 landing</div>
+              <span class="lu-select">Select Folder</span>
+            </div>
+            <span class="lu-cursor"></span>
+          </div>
+
+          <!-- Scene 3: the enabled extension card -->
+          <div class="lu-scene lu-s3">
+            <div class="lu-card">
+              <span class="lu-card-ico"></span>
+              <span class="lu-card-body">
+                <b>Claude Companion</b>
+                <small>مُفعّلة</small>
+              </span>
+              <span class="lu-card-toggle"></span>
+            </div>
+            <span class="lu-check">✓</span>
+          </div>
+
+        </div>
+      </div>
+      <figcaption class="lu-caps">
+        <span class="lu-cap lu-cap1">١. فعّل «Developer mode» (أعلى اليمين)</span>
+        <span class="lu-cap lu-cap2">٢. اضغط «Load unpacked» واختر مجلّد <code>extension</code></span>
+        <span class="lu-cap lu-cap3">٣. ظهرت الإضافة مُفعّلة — انتهيت!</span>
+      </figcaption>
+      <ol class="lu-fallback">
+        <li>فعّل «Developer mode» من أعلى يمين صفحة <code>chrome://extensions</code>.</li>
+        <li>اضغط «Load unpacked» واختر مجلّد <code>extension</code>.</li>
+        <li>تظهر الإضافة مُفعّلة في القائمة.</li>
+      </ol>
+    </figure>
   </section>
 
   <!-- Download -->
