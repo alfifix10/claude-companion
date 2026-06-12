@@ -1950,7 +1950,7 @@ function renderEntryList($list, entries, kind) {
     // One line inside the empty card: what this section DOES, not how to
     // type into the field below it (that part is self-evident).
     empty.textContent = kind === "tasks"
-      ? "مهامك المتكررة تظهر هنا — وكرقاقات ⚡ فوق صندوق الكتابة"
+      ? "تظهر كرقاقات ⚡ فوق صندوق الكتابة"
       : "معلومات دائمة عنك — تُرسَل مع كل طلب ليعرفك المساعد";
     $list.appendChild(empty);
     return;
