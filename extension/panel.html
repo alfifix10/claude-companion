@@ -179,13 +179,27 @@
           <option value="powerful">الأقوى — Opus (للمهام الأصعب، الأبطأ)</option>
         </select>
 
-        <label class="settings-label" for="memoriesInput" style="margin-top:18px;">🧠 ذاكرة مختصرة</label>
-        <textarea id="memoriesInput" class="settings-textarea" rows="5"
-          placeholder="اسمي: أحمد&#10;بريدي: ahmed@gmail.com&#10;أفضّل النتائج من الأرخص"></textarea>
+        <!-- Memories + tasks as CARD LISTS (same visual language as the
+             conversation-history cards) instead of one big textarea.
+             Storage format is UNCHANGED: entries joined by blank lines into
+             the same `memories`/`tasks` strings the agent + chips consume —
+             this is purely a UI upgrade. Click a card to pull it back into
+             the input for editing; × deletes; both auto-save. -->
+        <label class="settings-label" for="memoriesAddInput" style="margin-top:18px;">🧠 ذاكرة مختصرة</label>
+        <div class="entry-list" id="memoriesList" aria-label="عناصر الذاكرة"></div>
+        <div class="entry-add">
+          <input id="memoriesAddInput" class="entry-add-input" type="text"
+            placeholder="أضف معلومة دائمة ثم Enter — مثال: بريدي ahmed@gmail.com">
+          <button id="memoriesAddBtn" class="entry-add-btn" title="إضافة" aria-label="إضافة للذاكرة">+</button>
+        </div>
 
-        <label class="settings-label" for="tasksInput" style="margin-top:18px;">⚡ مهام مكررة</label>
-        <textarea id="tasksInput" class="settings-textarea" rows="6"
-          placeholder="صباح: افتح الإيميل ولخّص&#10;&#10;أخبار: افتح سبق ولخّص الأهم&#10;&#10;(افصل بين المهام بسطر فارغ)"></textarea>
+        <label class="settings-label" for="tasksAddInput" style="margin-top:18px;">⚡ مهام مكررة</label>
+        <div class="entry-list" id="tasksList" aria-label="المهام المكررة"></div>
+        <div class="entry-add">
+          <input id="tasksAddInput" class="entry-add-input" type="text"
+            placeholder="أضف مهمة ثم Enter — مثال: صباح: افتح الإيميل ولخّص">
+          <button id="tasksAddBtn" class="entry-add-btn" title="إضافة" aria-label="إضافة مهمة">+</button>
+        </div>
 
         <!-- Pro Mode section. Off by default. Unlocks filesystem read-only
              tools (this phase) and shell + write tools later. The warning

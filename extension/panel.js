@@ -1920,9 +1920,93 @@ function updateSend() {
 // ─────────────────────────────────────────────────────────────────────
 const $settingsOverlay = document.getElementById("settingsOverlay");
 const $closeSettingsBtn = document.getElementById("closeSettingsBtn");
-const $memoriesInput = document.getElementById("memoriesInput");
 const $modelSelect = document.getElementById("modelSelect");
-const $tasksInput = document.getElementById("tasksInput");
+// Card-list UI for memories + tasks (replaces the old textareas). The
+// STORAGE format is unchanged — entries joined by blank lines into the same
+// `memories`/`tasks` strings max.js and the ⚡ chips already consume — so
+// the agent, the host mirror and loadTasks() need zero changes.
+const $memoriesList = document.getElementById("memoriesList");
+const $memoriesAddInput = document.getElementById("memoriesAddInput");
+const $memoriesAddBtn = document.getElementById("memoriesAddBtn");
+const $tasksList = document.getElementById("tasksList");
+const $tasksAddInput = document.getElementById("tasksAddInput");
+const $tasksAddBtn = document.getElementById("tasksAddBtn");
+
+let memoriesEntries = []; // in-memory card state; joined on save
+let tasksEntries = [];
+
+// Blank-line split — the SAME rule the placeholder always documented
+// ("افصل بين المهام بسطر فارغ"), so existing saved text becomes cards
+// losslessly (multi-line entries with single newlines stay one card).
+function splitEntries(text) {
+  return String(text || "").split(/\n\s*\n/).map((t) => t.trim()).filter(Boolean);
+}
+
+function renderEntryList($list, entries, kind) {
+  $list.replaceChildren();
+  if (!entries.length) {
+    const empty = document.createElement("div");
+    empty.className = "entry-empty";
+    empty.textContent = kind === "tasks"
+      ? "لا مهام بعد — اكتب في الحقل أدناه واضغط Enter، وستظهر كرقاقة ⚡ فوق صندوق الكتابة."
+      : "لا عناصر بعد — اكتب معلومة دائمة في الحقل أدناه واضغط Enter.";
+    $list.appendChild(empty);
+    return;
+  }
+  entries.forEach((text, i) => {
+    const item = document.createElement("div");
+    item.className = "entry-item";
+    const body = document.createElement("div");
+    body.className = "entry-text";
+    body.textContent = text; // textContent — user data never hits innerHTML
+    body.title = "انقر للتعديل";
+    // Click-to-edit: pull the entry back into the add-input. Cheapest
+    // honest edit flow — no inline editors, no second save path.
+    // Deliberately NOT saved here: if the user closes the panel before
+    // re-adding, the entry is still in storage and reappears on reopen —
+    // a pull-to-edit must never be able to LOSE the entry.
+    body.addEventListener("click", () => {
+      const $input = kind === "tasks" ? $tasksAddInput : $memoriesAddInput;
+      entries.splice(i, 1);
+      renderEntryList($list, entries, kind);
+      $input.value = text;
+      $input.focus();
+    });
+    const del = document.createElement("button");
+    del.className = "entry-del";
+    del.title = "حذف";
+    del.setAttribute("aria-label", "حذف");
+    del.textContent = "×";
+    del.addEventListener("click", () => {
+      entries.splice(i, 1);
+      renderEntryList($list, entries, kind);
+      saveSettings();
+    });
+    item.append(body, del);
+    $list.appendChild(item);
+  });
+}
+
+function addEntryFromInput(kind) {
+  const $input = kind === "tasks" ? $tasksAddInput : $memoriesAddInput;
+  const entries = kind === "tasks" ? tasksEntries : memoriesEntries;
+  const $list = kind === "tasks" ? $tasksList : $memoriesList;
+  const text = $input.value.trim();
+  if (!text) return;
+  entries.push(text);
+  $input.value = "";
+  renderEntryList($list, entries, kind);
+  saveSettings();
+}
+
+$memoriesAddBtn?.addEventListener("click", () => addEntryFromInput("memories"));
+$tasksAddBtn?.addEventListener("click", () => addEntryFromInput("tasks"));
+$memoriesAddInput?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); addEntryFromInput("memories"); }
+});
+$tasksAddInput?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); addEntryFromInput("tasks"); }
+});
 const $saveSettingsBtn = document.getElementById("saveSettingsBtn");
 const $settingsToast = document.getElementById("settingsToast");
 // Pro Mode UI handles
@@ -1937,16 +2021,18 @@ async function openSettings() {
   // are reflected.
   const { memories = "", tasks = "", proMode = false, workingDirectory = "", modelSpeed = "balanced" } =
     await chrome.storage.local.get(["memories", "tasks", "proMode", "workingDirectory", "modelSpeed"]);
-  $memoriesInput.value = memories;
+  memoriesEntries = splitEntries(memories);
+  tasksEntries = splitEntries(tasks);
+  renderEntryList($memoriesList, memoriesEntries, "memories");
+  renderEntryList($tasksList, tasksEntries, "tasks");
   if ($modelSelect) $modelSelect.value = modelSpeed;
-  $tasksInput.value = tasks;
   $proModeToggle.checked = !!proMode;
   $workingDirInput.value = workingDirectory;
   $proModeStatus.hidden = true;
   $settingsToast.hidden = true;
   $settingsOverlay.hidden = false;
-  // Focus the first textarea for keyboard-first users.
-  try { $memoriesInput.focus({ preventScroll: true }); } catch { $memoriesInput.focus(); }
+  // Focus the first add-input for keyboard-first users.
+  try { $memoriesAddInput.focus({ preventScroll: true }); } catch { $memoriesAddInput.focus(); }
 }
 
 function closeSettings() {
@@ -1954,8 +2040,9 @@ function closeSettings() {
 }
 
 async function saveSettings() {
-  const memories = $memoriesInput.value.trim();
-  const tasks = $tasksInput.value.trim();
+  // Cards → the SAME blank-line-separated strings as the old textareas.
+  const memories = memoriesEntries.join("\n\n").trim();
+  const tasks = tasksEntries.join("\n\n").trim();
   const proMode = !!$proModeToggle.checked;
   const workingDirectory = $workingDirInput.value.trim();
   const modelSpeed = $modelSelect?.value || "balanced";
