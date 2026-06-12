@@ -1947,9 +1947,7 @@ function renderEntryList($list, entries, kind) {
   if (!entries.length) {
     const empty = document.createElement("div");
     empty.className = "entry-empty";
-    empty.textContent = kind === "tasks"
-      ? "لا مهام بعد — اكتب في الحقل أدناه واضغط Enter، وستظهر كرقاقة ⚡ فوق صندوق الكتابة."
-      : "لا عناصر بعد — اكتب معلومة دائمة في الحقل أدناه واضغط Enter.";
+    empty.textContent = kind === "tasks" ? "لا مهام بعد" : "لا عناصر بعد";
     $list.appendChild(empty);
     return;
   }
