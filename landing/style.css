@@ -240,9 +240,12 @@ code { font-family: ui-monospace, monospace; font-size: 12.5px; color: var(--acc
   border-radius: 6px; padding: 4px 10px;
 }
 .lu-cursor {
-  position: absolute; width: 14px; height: 14px;
-  border-left: 2px solid #fff; border-bottom: 2px solid #fff; transform: rotate(-45deg);
-  filter: drop-shadow(0 1px 1px rgba(0,0,0,.6));
+  position: absolute; width: 14px; height: 20px;
+  /* Real mouse-pointer silhouette (tip at top-left), not a chevron —
+     drawn with clip-path so it needs no image asset. */
+  background: #fff;
+  clip-path: polygon(0% 0%, 0% 78%, 29% 61%, 50% 94%, 67% 89%, 46% 58%, 83% 58%);
+  filter: drop-shadow(1px 2px 2px rgba(0,0,0,.6));
   top: 20px; left: 70px; animation: luCursor 9s infinite -6s;
 }
 @keyframes luCursor {
