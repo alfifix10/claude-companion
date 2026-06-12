@@ -26,6 +26,7 @@ import os from "node:os";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { isModelAllowed } from "./security.js";
+import { computeWarmSignature, isWarmUsable, WARM_MAX_AGE_MS } from "./warm-pool.js";
 
 // ──────────────────────────────────────────────────────────────────────────
 // Config
@@ -209,6 +210,161 @@ function connectTcp() {
 
 const activeProcs = new Map();
 
+// ──────────────────────────────────────────────────────────────────────────
+// Shared spawn plumbing (used by both the per-query path and the warm pool)
+// ──────────────────────────────────────────────────────────────────────────
+
+function readProMode() {
+  // Same user-data.json the MCP server reads — single source of truth.
+  try {
+    const ud = JSON.parse(fs.readFileSync(USER_DATA_PATH, "utf-8"));
+    return ud?.proMode === true;
+  } catch { return false; }
+}
+
+/**
+ * Assemble the claude CLI argv for one query. Everything here is knowable
+ * BEFORE the prompt exists (the prompt travels via stdin), which is the
+ * property the warm pool depends on.
+ */
+function buildClaudeArgs({ pureMode, model, proMode, systemPromptFile, streamInput }) {
+  const args = ["-p", "--output-format", "stream-json", "--verbose"];
+  if (!pureMode) {
+    args.push("--dangerously-skip-permissions");
+  } else {
+    // No tools available means no permission prompts to skip — disable
+    // every built-in tool with the empty allowlist.
+    args.push("--tools", "");
+  }
+  if (model) args.push("--model", String(model));
+  if (!pureMode) {
+    // Hard filter on built-in tools that could touch the filesystem or
+    // spawn shells via the *built-in* Bash/Write/Edit. We use our own
+    // explicit MCP tools for those when Pro Mode is on, with proper
+    // working-directory sandboxing — better than the CLI built-ins
+    // which have no sandbox at all.
+    const HARD_DISALLOW = ["Bash", "Write", "Edit", "NotebookEdit"];
+    // run_javascript exposes arbitrary Runtime.evaluate on the user's
+    // active tab — session-hijack surface in default mode; Pro Mode is
+    // the explicit opt-in that unlocks it (same toggle as file/shell).
+    if (!proMode) {
+      HARD_DISALLOW.push("mcp__claude-companion__run_javascript");
+    }
+    for (const t of HARD_DISALLOW) args.push("--disallowedTools", t);
+    // System prompt rides in a TEMP FILE (--system-prompt-file), never as a
+    // raw arg: cmd.exe silently truncates command lines over ~8191 chars,
+    // which once mangled the whole invocation (see CLAUDE.md lessons).
+    if (systemPromptFile) args.push("--system-prompt-file", systemPromptFile);
+  }
+  // pureMode intentionally leaves the system prompt empty — the model's
+  // default "describe what you see" behaviour is exactly what we want.
+  if (streamInput) args.push("--input-format", "stream-json");
+  return args;
+}
+
+function spawnClaude(args) {
+  const isWin = process.platform === "win32";
+  // AVOID shell: true on Windows. With shell: true, every arg is
+  // interpolated into a cmd.exe command line where metacharacters
+  // (`&`, `|`, `>`, `%VAR%`) would execute. Instead, launch .cmd
+  // shims via cmd.exe /c with args passed as an array — cmd.exe
+  // then hands each arg to the target process without re-parsing.
+  let cmd = CLAUDE_BIN;
+  let finalArgs = args;
+  if (isWin && /\.cmd$/i.test(CLAUDE_BIN)) {
+    cmd = process.env.COMSPEC || "cmd.exe";
+    finalArgs = ["/d", "/s", "/c", CLAUDE_BIN, ...args];
+  }
+  const proc = spawn(cmd, finalArgs, {
+    shell: false,
+    windowsHide: true,
+    env: { ...process.env, CLAUDE_COMPANION_SESSION: SESSION_ID },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  // A stream 'error' with no listener is an UNCAUGHT exception that kills
+  // the whole host. stdin EPIPE is reachable whenever claude dies before
+  // (or while) we write the prompt — and a warm proc waits on stdin for
+  // minutes, so the window is wide. Swallow it; the proc-level 'error' /
+  // 'close' handlers report the failure through the normal channel.
+  proc.stdin.on("error", () => {});
+  return proc;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Warm pool — ONE pre-spawned claude process waiting on stdin
+//
+// Spawning claude fresh per turn pays node boot + config load + MCP connect
+// (~100-300ms on Windows) on the critical path of EVERY chat turn. All CLI
+// args are knowable before the next query arrives, so after each turn ends
+// we pre-spawn the next process and leave it blocked reading stdin — zero
+// API traffic until a prompt is written. Adoption is gated by warm-pool.js
+// (exact arg-signature match incl. a FRESH proMode read — never adopt stale
+// privileges — plus liveness + 15-min age cap). Any miss falls back to the
+// fresh-spawn path, byte-identical to the old behaviour.
+// ──────────────────────────────────────────────────────────────────────────
+
+let warmSlot = null; // { proc, spFile, signature, spawnedAt, expireTimer }
+let shuttingDown = false;
+
+function clearWarmSlot(kill) {
+  const w = warmSlot;
+  warmSlot = null;
+  if (!w) return;
+  if (w.expireTimer) clearTimeout(w.expireTimer);
+  if (kill) { try { killTree(w.proc); } catch {} }
+  if (w.spFile) { try { fs.unlinkSync(w.spFile); } catch {} }
+}
+
+// Detach the slot for adoption — caller now owns proc + spFile cleanup.
+function takeWarmSlot() {
+  const w = warmSlot;
+  warmSlot = null;
+  if (w?.expireTimer) clearTimeout(w.expireTimer);
+  return w;
+}
+
+function scheduleWarmUp(model, systemPrompt) {
+  if (shuttingDown || !CLAUDE_BIN) return;
+  // Small defer so the finished turn's teardown (taskkill, close events)
+  // settles first. unref: never keep the host alive just to warm.
+  const t = setTimeout(() => { if (!shuttingDown) warmUp(model, systemPrompt); }, 250);
+  if (typeof t.unref === "function") t.unref();
+}
+
+function warmUp(model, systemPrompt) {
+  clearWarmSlot(true); // at most one warm proc, ever
+  const proMode = readProMode(); // FRESH — signature must reflect reality NOW
+  let spFile = null;
+  try {
+    if (systemPrompt && systemPrompt.length < 32_768) {
+      spFile = path.join(os.tmpdir(), `cc-sys-warm-${process.pid}-${Date.now()}.txt`);
+      fs.writeFileSync(spFile, systemPrompt, "utf-8");
+    }
+    // streamInput: true — warm procs serve non-pure turns, which deliver the
+    // prompt as a stream-json user message. This is ALSO what lets the warm
+    // proc outlive the 3s plain-stdin timeout (see useStreamInput in
+    // handleMaxQuery): stream-json input waits indefinitely for the first
+    // message, so the slot survives until the user's next turn.
+    const args = buildClaudeArgs({
+      pureMode: false, model, proMode, systemPromptFile: spFile, streamInput: true,
+    });
+    const proc = spawnClaude(args);
+    const slot = { proc, spFile, signature: computeWarmSignature({ model, proMode, systemPrompt }), spawnedAt: Date.now(), expireTimer: null };
+    // Age out: a warm proc older than this may predate a CLI update or a
+    // login change — kill it rather than risk adopting a zombie.
+    slot.expireTimer = setTimeout(() => { if (warmSlot === slot) clearWarmSlot(true); }, WARM_MAX_AGE_MS);
+    if (typeof slot.expireTimer.unref === "function") slot.expireTimer.unref();
+    // Spontaneous death (crash, external kill, CLI self-update) frees the
+    // slot so isWarmUsable can never see a corpse with stale handles.
+    proc.on("error", () => { if (warmSlot === slot) clearWarmSlot(false); });
+    proc.on("close", () => { if (warmSlot === slot) clearWarmSlot(false); });
+    warmSlot = slot;
+    try { process.stderr.write(`[native-host] warm CLI spawned (pid ${proc.pid})\n`); } catch {}
+  } catch {
+    if (spFile) { try { fs.unlinkSync(spFile); } catch {} }
+  }
+}
+
 function streamClaude(id, proc) {
   let buf = "";
   proc.stdout.on("data", (chunk) => {
@@ -381,126 +537,99 @@ function handleMaxQuery(msg) {
   // → text, like calling claude.ai directly.
   const pureMode = msg.pureMode === true;
 
-  // Path of the temp file holding the system prompt (see below). Declared
-  // here so the post-spawn close handler can delete it. null when unused.
-  let spFile = null;
-
-  const args = ["-p", "--output-format", "stream-json", "--verbose"];
-  if (!pureMode) {
-    args.push("--dangerously-skip-permissions");
-  } else {
-    // No tools available means no permission prompts to skip — disable
-    // every built-in tool with the empty allowlist.
-    args.push("--tools", "");
-  }
   // msg.model is validated against a strict allowlist before reaching the
   // CLI — a crafted "model" field like "foo & calc.exe" would otherwise
   // ride into cmd.exe when we go through a shell on Windows. isModelAllowed
   // lives in ./security.js (shared, unit-tested).
-  if (msg.model) {
-    if (!isModelAllowed(msg.model)) {
-      write({ id: msg.id, type: "max_error", error: "invalid model name" });
-      return;
-    }
-    args.push("--model", String(msg.model));
+  if (msg.model && !isModelAllowed(msg.model)) {
+    write({ id: msg.id, type: "max_error", error: "invalid model name" });
+    return;
   }
 
-  if (!pureMode) {
-    // Hard filter on built-in tools that could touch the filesystem or
-    // spawn shells via the *built-in* Bash/Write/Edit. We use our own
-    // explicit MCP tools for those when Pro Mode is on, with proper
-    // working-directory sandboxing — better than the CLI built-ins
-    // which have no sandbox at all.
-    const HARD_DISALLOW = ["Bash", "Write", "Edit", "NotebookEdit"];
+  // One fresh proMode read per query: it feeds both the --disallowedTools
+  // list and the warm-pool signature, and reading it once keeps the two
+  // consistent (a stale-privilege warm proc can never slip past the gate).
+  const proMode = readProMode();
+  // Static system prompt — file-passed so the never-changing block hits
+  // Anthropic's server-side prompt cache (5 min TTL, ~90% discount).
+  const systemPrompt = !pureMode && typeof msg.system === "string" ? msg.system : "";
+  const hasImages = images.length > 0;
+  // CRITICAL for the warm pool: `claude -p` with PLAIN stdin self-aborts if
+  // no data arrives within 3s ("no stdin data received in 3s"), so a process
+  // pre-spawned more than 3s before the next turn is dead on arrival. The
+  // stream-json INPUT format has no such timeout — it waits indefinitely for
+  // the first user message (verified live: 6s idle then processed normally).
+  // So every warm-able (non-pure) turn delivers its prompt as a stream-json
+  // user message, not raw text. pure image-Q&A already used stream-json for
+  // image blocks; pure text turns keep raw stdin (never warm-pooled).
+  const useStreamInput = !pureMode || hasImages;
 
-    // run_javascript exposes arbitrary Runtime.evaluate on the user's
-    // active tab. In default mode this is a session-hijack vector:
-    // a hostile page could prompt-inject instructions and the tool
-    // would execute them without restriction. In Pro Mode the user
-    // has explicitly opted in to advanced capabilities (the same
-    // toggle that unlocks file/shell tools), so we trust them to
-    // also accept run_javascript's risk surface.
-    //
-    // Read Pro Mode from the same user-data.json file the MCP server
-    // reads — single source of truth, no second mirror.
-    let proMode = false;
-    try {
-      const ud = JSON.parse(fs.readFileSync(USER_DATA_PATH, "utf-8"));
-      proMode = ud?.proMode === true;
-    } catch {}
-    if (!proMode) {
-      HARD_DISALLOW.push("mcp__claude-companion__run_javascript");
-    }
+  // Path of the temp file holding the system prompt. Declared here so the
+  // post-spawn close handler can delete it. null when unused.
+  let spFile = null;
+  let proc = null;
 
-    for (const t of HARD_DISALLOW) args.push("--disallowedTools", t);
-
-    // Static system prompt — passed via --system-prompt so the portion
-    // that never changes between turns hits Anthropic's server-side
-    // prompt cache (5 min TTL, ~90% discount on cached tokens).
-    const systemPrompt = typeof msg.system === "string" ? msg.system : "";
-    // Pass the system prompt via a TEMP FILE (--system-prompt-file), NOT as a
-    // command-line arg. On Windows we launch through `cmd.exe /d /s /c
-    // claude.cmd …`, and cmd.exe SILENTLY TRUNCATES any command line over
-    // ~8191 chars. A verbose system prompt (~9 KB) pushed the whole command
-    // line past that limit, so claude received a mangled invocation and
-    // returned nothing — the user saw "لم يُرجع النموذج نصّاً" on every turn.
-    // (The old "32 K cmd.exe limit" assumption was wrong: 32 K is the raw
-    // CreateProcess limit; cmd.exe's own parser caps at ~8191.) A file path
-    // is a short arg, so the limit never bites and large prompts are fine.
-    // Caching is unaffected — the CLI reads the file content as the system
-    // prompt and caches it server-side exactly as before. 32 KB sanity cap.
-    if (systemPrompt && systemPrompt.length < 32_768) {
-      try {
-        const safeId = String(msg.id || Date.now()).replace(/[^a-zA-Z0-9_-]/g, "");
-        spFile = path.join(os.tmpdir(), `cc-sys-${safeId}.txt`);
-        fs.writeFileSync(spFile, systemPrompt, "utf-8");
-        args.push("--system-prompt-file", spFile);
-      } catch {
-        spFile = null; // fall back to the default system prompt, never crash
-      }
-    }
-  }
-  // pureMode intentionally leaves the system prompt empty — the model's
-  // default "describe what you see" behaviour is exactly what we want.
-
-  // If the user pasted images, switch to stream-json input so we can attach
-  // them as proper image content blocks instead of text.
-  if (images.length > 0) {
-    args.push("--input-format", "stream-json");
+  // Warm-pool adoption: a pre-spawned claude with EXACTLY these args is
+  // sitting on its stdin stream → skip the cold start and just feed it the
+  // prompt. Image and pureMode turns use different args and always spawn
+  // fresh. Any miss (signature, liveness, age) also falls through to the
+  // fresh path — behaviour identical to pre-warm-pool.
+  const sig = computeWarmSignature({ model: msg.model, proMode, systemPrompt });
+  if (!pureMode && !hasImages && isWarmUsable(warmSlot, sig, Date.now())) {
+    const w = takeWarmSlot();
+    proc = w.proc;
+    spFile = w.spFile;
+    const ageMs = Date.now() - w.spawnedAt;
+    try { process.stderr.write(`[native-host] warm CLI adopted (${ageMs}ms old) — cold start skipped\n`); } catch {}
+    write({ type: "max_debug", id: msg.id, line: `warm CLI adopted (${(ageMs / 1000).toFixed(1)}s old) — cold start skipped` });
+  } else if (warmSlot && !pureMode && !hasImages) {
+    // A warm proc exists but can't serve this TEXT query (model switch,
+    // Pro toggle, system-prompt change, stale). Kill it — wrong-args
+    // processes must never linger — and let the post-turn re-warm build
+    // the right one. pure/image turns DON'T clear the slot: they never
+    // use it, and it stays valid for the next ordinary text turn.
+    clearWarmSlot(true);
   }
 
   try {
-    const isWin = process.platform === "win32";
-    // AVOID shell: true on Windows. With shell: true, every arg is
-    // interpolated into a cmd.exe command line where metacharacters
-    // (`&`, `|`, `>`, `%VAR%`) would execute. Instead, launch .cmd
-    // shims via cmd.exe /c with args passed as an array — cmd.exe
-    // then hands each arg to the target process without re-parsing.
-    let cmd = CLAUDE_BIN;
-    let finalArgs = args;
-    let useShell = false;
-    if (isWin && /\.cmd$/i.test(CLAUDE_BIN)) {
-      cmd = process.env.COMSPEC || "cmd.exe";
-      finalArgs = ["/d", "/s", "/c", CLAUDE_BIN, ...args];
+    if (!proc) {
+      if (systemPrompt) {
+        // 32 KB sanity cap lives in the same check as before.
+        if (systemPrompt.length < 32_768) {
+          try {
+            const safeId = String(msg.id || Date.now()).replace(/[^a-zA-Z0-9_-]/g, "");
+            spFile = path.join(os.tmpdir(), `cc-sys-${safeId}.txt`);
+            fs.writeFileSync(spFile, systemPrompt, "utf-8");
+          } catch {
+            spFile = null; // fall back to the default system prompt, never crash
+          }
+        }
+      }
+      const args = buildClaudeArgs({
+        pureMode, model: msg.model, proMode, systemPromptFile: spFile, streamInput: useStreamInput,
+      });
+      proc = spawnClaude(args);
     }
-    const proc = spawn(cmd, finalArgs, {
-      shell: useShell,
-      windowsHide: true,
-      env: { ...process.env, CLAUDE_COMPANION_SESSION: SESSION_ID },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
     activeProcs.set(msg.id, proc);
     streamClaude(msg.id, proc);
     // Delete the system-prompt temp file once claude exits (it has been read
     // by then). Best-effort — a leftover temp file is harmless.
-    if (spFile) proc.on("close", () => { try { fs.unlinkSync(spFile); } catch {} });
+    if (spFile) {
+      const f = spFile;
+      proc.on("close", () => { try { fs.unlinkSync(f); } catch {} });
+    }
+    // Pre-warm the NEXT turn's process once this one finishes. Uses this
+    // turn's model + system prompt as the best prediction of the next
+    // turn's args (proMode is re-read fresh at warm time AND at adoption).
+    if (!pureMode) {
+      proc.on("close", () => scheduleWarmUp(msg.model, systemPrompt));
+    }
     try {
-      if (images.length > 0) {
-        // stream-json user message with text + image content blocks.
-        // pureMode (image Q&A) intentionally skipped the project
-        // context block above, so finalPrompt === prompt here for
-        // image turns. For non-pure image turns (rare), the project
-        // context rides along.
+      if (useStreamInput) {
+        // stream-json user message with text + any image content blocks.
+        // Used for ALL non-pure turns (warm-pool requirement) and any image
+        // turn. pureMode image-Q&A skipped the project-context block above,
+        // so finalPrompt === prompt there; non-pure turns carry it.
         const content = [];
         if (finalPrompt) content.push({ type: "text", text: finalPrompt });
         for (const img of images) {
@@ -520,6 +649,7 @@ function handleMaxQuery(msg) {
         proc.stdin.write(JSON.stringify(userMsg) + "\n");
         proc.stdin.end();
       } else {
+        // pure text Q&A — raw stdin, never warm-pooled.
         proc.stdin.write(finalPrompt);
         proc.stdin.end();
       }
@@ -678,6 +808,8 @@ process.stdin.on("data", (chunk) => {
 // SIGINT / SIGTERM / SIGHUP cover the other ways this process can be
 // asked to quit (Ctrl-C from a dev shell, OS shutdown, service mgr).
 function shutdown() {
+  shuttingDown = true; // blocks any pending scheduleWarmUp from respawning
+  clearWarmSlot(true); // the warm proc is OUR child too — never orphan it
   if (tcpSocket) { try { tcpSocket.destroy(); } catch {} }
   for (const p of activeProcs.values()) { try { killTree(p); } catch {} }
   activeProcs.clear();
