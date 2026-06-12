@@ -83,25 +83,33 @@ function Find-ExtensionIds {
     return $found
 }
 
+# The extension ships a fixed `key` in manifest.json, so its ID is CONSTANT
+# on every machine: bciopdghgdndoedlgbbcffgaebjbkago. That lets us register
+# the native host for it BEFORE the extension is ever loaded — which kills
+# the old chicken-and-egg trap: install used to scan for an already-loaded
+# extension and `exit 1` if absent, but the natural order is to run setup
+# first, THEN load unpacked. Now order doesn't matter.
+$CanonicalExtId = "bciopdghgdndoedlgbbcffgaebjbkago"
+
 if ($ExtensionIds.Count -eq 0) {
     Write-Host "[3/5] Scanning browsers for the extension..." -ForegroundColor Cyan
     $detected = Find-ExtensionIds
-    if ($detected.Keys.Count -eq 0) {
-        Write-Host "  No installed extension detected yet." -ForegroundColor Yellow
-        Write-Host "  => Load unpacked extension in your browser first, then re-run this script." -ForegroundColor Yellow
-        Write-Host "    (Extension folder: $ScriptDir\extension)" -ForegroundColor DarkGray
-        Write-Host ""
-        Write-Host "  If the extension IS loaded, you can also pass IDs explicitly:" -ForegroundColor DarkGray
-        Write-Host "    .\install.ps1 <id1> <id2>" -ForegroundColor DarkGray
-        exit 1
-    }
-    $ExtensionIds = @($detected.Keys)
-    foreach ($id in $detected.Keys) {
-        Write-Host "  => $id  [$($detected[$id])]" -ForegroundColor Green
+    if ($detected.Keys.Count -gt 0) {
+        $ExtensionIds = @($detected.Keys)
+        foreach ($id in $detected.Keys) {
+            Write-Host "  => $id  [$($detected[$id])]" -ForegroundColor Green
+        }
+    } else {
+        Write-Host "  Extension not loaded yet - registering the built-in fixed ID." -ForegroundColor DarkGray
+        Write-Host "  (You can load it before OR after this step; order no longer matters.)" -ForegroundColor DarkGray
     }
 } else {
     Write-Host "[3/5] Using provided extension IDs: $($ExtensionIds -join ', ')" -ForegroundColor Green
 }
+# ALWAYS register the canonical fixed ID too, de-duped. Detection stays a
+# nicety (covers a dev who repacked with a different key); the fixed ID is
+# the guarantee that a normal install just works.
+$ExtensionIds = @($ExtensionIds + $CanonicalExtId | Select-Object -Unique)
 
 # --------------------------------------------------------------------------
 # 4. Write wrapper + manifest, register in each browser's registry

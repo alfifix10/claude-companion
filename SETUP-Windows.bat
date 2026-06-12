@@ -14,14 +14,25 @@ echo.
 
 REM [1/4] Node.js -----------------------------------------------------------
 where node >nul 2>nul
+if not errorlevel 1 goto node_ok
+echo [X] Node.js is not installed.
+where winget >nul 2>nul
 if errorlevel 1 (
-  echo [X] Node.js is not installed.
   echo     Install the LTS version from https://nodejs.org  then run this again.
   start "" https://nodejs.org
   echo.
   pause
   exit /b 1
 )
+echo     Installing Node.js LTS via winget ^(approve any prompt^) ...
+winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements
+echo.
+echo     Node.js installed. Please CLOSE this window and run setup again
+echo     so the new PATH takes effect.
+echo.
+pause
+exit /b 0
+:node_ok
 for /f "delims=" %%v in ('node -v') do echo [1/4] Node.js %%v found.
 
 REM [2/4] Claude CLI --------------------------------------------------------

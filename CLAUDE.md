@@ -207,6 +207,12 @@ Side Panel (UI) ─ Service Worker ─ Native Host (Node) ─┬── claude CL
 - تكرار mutating مطابق يُحتسب علوقًا **فقط** إن لم يحدث تقدّم بينه وبين سابقه: قراءة متقدّمة (progressed) أو فعل مُغيِّر مختلف ما يزال تحت عتبته («الجِدّة» — تمنع زوجًا ميتًا متبادلًا A,B,A,B من التحايل)
 - نمط المحور navigate(قائمة)←act(عنصر)←navigate(قائمة)… لا يتوقف أبدًا؛ 3 navigate ميتة متتالية (أو بقراءات راكدة) تتوقف عند 3 كما كانت
 
+### تثبيت سهل للمستخدم العادي (2026-06-13)
+- **الإضافة لا تُقبل في متجر Chrome** (native messaging + تشغيل CLI + `--dangerously-skip-permissions` + debugger/`<all_urls>`) — أداة قوة محلية بطبيعتها. التوزيع خارج المتجر إجباريّ، و«Load unpacked» خطوة يدويّة لا تُؤتمت
+- **حزم المضيف كـexe لا يُلغي شرط Node**: `mcp-server.js` يُسجَّل `node mcp-server.js` و`claude` يُثبَّت بـnpm — Node مطلوب لمكوّنين آخرين. فالحزم = 80MB هشّ بلا مكسب (مرفوض)
+- **ID الإضافة ثابت** (`bciopdghgdndoedlgbbcffgaebjbkago` من `key` في manifest) → `install.ps1` يسجّل المضيف لهذا الـID **دائمًا** بلا انتظار تحميل الإضافة (أزال فخّ «scan → exit 1»؛ الترتيب لم يعد يهمّ). المسح بقي كميزة إضافيّة
+- Node مفقود؟ `SETUP-Windows.bat` يثبّته بـ`winget install OpenJS.NodeJS.LTS` تلقائيًا (ثم يطلب إعادة التشغيل لتحديث PATH)، والرجوع لـnodejs.org فقط لو غاب winget
+
 ### Build/lint (مطبّات)
 - **لا تشغّل `lint:fix` على كامل src** — biome الحالي يعيد تنسيق ~16 ملفًا ملتزَمًا (أسلوب الالتزام ≠ biome) فيضخّم الـ changeset
 - `npm run build` يعيد توليد `version-compare.js` بتنسيق tsc مختلف عن الملتزَم — استبعده من الـ commits
