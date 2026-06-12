@@ -39,7 +39,7 @@
 .conv-item:focus-visible,
 .conv-delete:focus-visible,
 .entry-del:focus-visible,
-.settings-save-btn:focus-visible {
+.entry-add-btn:focus-visible {
   outline: 2px solid var(--accent-br);
   outline-offset: 2px;
 }
@@ -557,14 +557,6 @@ input.settings-textarea, select.settings-textarea { min-height: 0; }
   border-top: 1px solid var(--border); background: var(--bg2);
   flex-shrink: 0;
 }
-.settings-save-btn {
-  padding: 9px 22px; border-radius: 8px; border: none;
-  background: var(--accent); color: #fff;
-  font-size: 13px; font-family: inherit; font-weight: 600;
-  cursor: pointer; transition: background .15s, transform .08s;
-}
-.settings-save-btn:hover { background: var(--accent-br); }
-.settings-save-btn:active { transform: scale(.97); }
 .settings-toast {
   font-size: 12px; color: var(--green);
   animation: fadeIn .2s;

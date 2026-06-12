@@ -2009,7 +2009,6 @@ $memoriesAddInput?.addEventListener("keydown", (e) => {
 $tasksAddInput?.addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); addEntryFromInput("tasks"); }
 });
-const $saveSettingsBtn = document.getElementById("saveSettingsBtn");
 const $settingsToast = document.getElementById("settingsToast");
 // Pro Mode UI handles
 const $proModeToggle = document.getElementById("proModeToggle");
@@ -2038,6 +2037,10 @@ async function openSettings() {
 }
 
 function closeSettings() {
+  // Flush-on-close: catches a working-dir path typed without leaving the
+  // field (its `change` only fires on blur). Idempotent, so a normal close
+  // after auto-saves just re-writes the same values.
+  try { saveSettings(); } catch {}
   $settingsOverlay.hidden = true;
 }
 
@@ -2120,7 +2123,13 @@ $proModeBadge?.addEventListener("click", openSettings);
 
 $settings.addEventListener("click", openSettings);
 $closeSettingsBtn?.addEventListener("click", closeSettings);
-$saveSettingsBtn?.addEventListener("click", saveSettings);
+// Everything auto-saves — the save button is gone. Cards save on
+// add/delete (see renderEntryList); the remaining three settings save on
+// their own change/blur. `change` (not `input`) on the working dir so we
+// don't mirror to the host file on every keystroke.
+$modelSelect?.addEventListener("change", saveSettings);
+$proModeToggle?.addEventListener("change", saveSettings);
+$workingDirInput?.addEventListener("change", saveSettings);
 
 // Escape closes whichever overlay is open. Scoped to the panel so it
 // doesn't hijack Escape elsewhere.
