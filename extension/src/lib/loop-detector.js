@@ -41,7 +41,7 @@
  * Stateful — one detector per task. Caller should construct a fresh
  * one when handleMaxChat starts a new run.
  */
-import { isMutating, getLoopThreshold } from "./tool-registry.js";
+import { getLoopThreshold, isMutating } from "./tool-registry.js";
 export const DEFAULT_LOOP_CONFIG = {
     // Window large enough to accommodate per-tool overrides (run_javascript
     // = 12). If the window is smaller than the highest threshold, shifting

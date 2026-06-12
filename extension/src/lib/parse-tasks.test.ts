@@ -115,11 +115,38 @@ describe("parseTasks — comments", () => {
   });
 });
 
-describe("parseTasks — malformed input silently drops", () => {
-  it("no separator → dropped", () => {
-    expect(parseTasks("just a line no separator")).toEqual([]);
+describe("parseTasks — separator-less tasks (card-UI rule: format optional)", () => {
+  it("no separator → the text IS the task, chip name = the text", () => {
+    expect(parseTasks("افتح البريد")).toEqual([
+      { name: "افتح البريد", prompt: "افتح البريد" },
+    ]);
   });
 
+  it("long separator-less text → chip name truncated on a word boundary", () => {
+    const raw = "افتح موقع الأخبار ولخص لي أهم خمسة عناوين اليوم";
+    const [t] = parseTasks(raw);
+    expect(t?.prompt).toBe(raw);
+    expect(t?.name.endsWith("…")).toBe(true);
+    expect(t?.name.length).toBeLessThanOrEqual(25);
+  });
+
+  it("multi-line separator-less block → first line names it, all lines prompt", () => {
+    expect(parseTasks("open the mail\nthen summarize")).toEqual([
+      { name: "open the mail", prompt: "open the mail\nthen summarize" },
+    ]);
+  });
+
+  it("mixed named + separator-less blocks — both kept", () => {
+    const raw = "good: ok\n\nbare task line\n\nalso: ok";
+    expect(parseTasks(raw)).toEqual([
+      { name: "good", prompt: "ok" },
+      { name: "bare task line", prompt: "bare task line" },
+      { name: "also", prompt: "ok" },
+    ]);
+  });
+});
+
+describe("parseTasks — degenerate separators still drop", () => {
   it("separator at column 0 (empty name) → dropped", () => {
     expect(parseTasks(":prompt-with-no-name")).toEqual([]);
   });
@@ -127,14 +154,6 @@ describe("parseTasks — malformed input silently drops", () => {
   it("separator but no prompt → dropped", () => {
     expect(parseTasks("name:")).toEqual([]);
     expect(parseTasks("name:   ")).toEqual([]);
-  });
-
-  it("mixed valid + invalid blocks — keeps valid", () => {
-    const raw = "good: ok\n\nbad no separator\n\nalso: ok";
-    expect(parseTasks(raw)).toEqual([
-      { name: "good", prompt: "ok" },
-      { name: "also", prompt: "ok" },
-    ]);
   });
 });
 
