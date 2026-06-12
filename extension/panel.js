@@ -1905,6 +1905,10 @@ $input.addEventListener("input", () => {
 function updateSend() {
   // While loading, the button is a stop button — keep it enabled.
   if (isLoading) { $send.disabled = false; return; }
+  // While the mic is active the button is a stop-listening button (the
+  // documented first branch of its click handler) — it must be clickable
+  // even with an empty input, otherwise that branch is unreachable.
+  if (micActive() || userWants) { $send.disabled = false; return; }
   // Enable if there's typed text OR at least one pasted image OR a text chip.
   $send.disabled = !$input.value.trim() && pendingImages.length === 0 && pendingTexts.length === 0;
 }
@@ -2653,6 +2657,7 @@ const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recog = null;
 let micState = "IDLE";        // IDLE | STARTING | LISTENING | STOPPING | DISABLED
 let userWants = false;        // user pressed start and hasn't pressed stop
+let preMicTypingText = null;  // task indicator label saved while "يستمع..." borrows it
 let committed = "";           // recogniser's accumulated final transcripts (since last cursor sync)
 let prefix = "";              // text BEFORE the caret at the moment dictation last anchored
 let suffix = "";              // text AFTER  the caret at the moment dictation last anchored
@@ -2690,6 +2695,9 @@ function setMicState(next) {
   // STARTING/STOPPING here: a click during those is "user changed their
   // mind", which we want to honour, not block.
   $mic.disabled = (next === "DISABLED");
+  // Send doubles as stop-listening while the mic is active — its enabled
+  // state depends on micState, so refresh it on every transition.
+  updateSend();
 }
 function micActive() {
   // "is the mic in any active state?" — true for the whole STARTING →
@@ -2729,11 +2737,18 @@ function initVoice() {
   recog.maxAlternatives = 1;
   recog.onstart = () => {
     setMicState("LISTENING");
+    // Remember what the indicator said BEFORE the mic took it over, so
+    // finalizeMicEnd can put it back when a task is still running (mic
+    // during a task is legit — dictating the next question).
+    if (isLoading) preMicTypingText = $typingText.textContent;
     setTyping(true, "يستمع...");
-    // A successful start clears the per-session retry budget so a stable
-    // multi-minute session won't accidentally fail-open to retry-loop
-    // behaviour after the next blip.
-    networkRetriesLeft = 1;
+    // NOTE: the retry budget deliberately does NOT reset here. onstart
+    // succeeds LOCALLY even when the network is down (the error only
+    // fires later, when audio reaches the speech service) — resetting on
+    // start turned "one silent retry" into an infinite silent
+    // error→restart→reset loop where the user stares at "يستمع..."
+    // forever and the notice never shows. The reset lives in onresult:
+    // an actual transcription is the only proof the service works.
   };
 
   // Cursor-position sync. Every event that could MOVE the caret while
@@ -2774,6 +2789,9 @@ function initVoice() {
     // buffered frame between stop() and onend; without this guard that
     // frame writes the old transcript back into a freshly-cleared input.
     if (!userWants) return;
+    // Service proven alive — restore the one-retry credit (see onstart
+    // for why this must NOT happen on start).
+    networkRetriesLeft = 1;
     let interim = "";
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const r = e.results[i];
@@ -2903,7 +2921,15 @@ function initVoice() {
     // happens when the user hits send while the mic is still listening.
     // Without this, "Claude يفكّر..." gets wiped out as soon as onend
     // fires (~100 ms after our recog.stop in send()).
-    if (!isLoading) setTyping(false);
+    if (!isLoading) {
+      setTyping(false);
+    } else if (preMicTypingText) {
+      // Mic was started DURING a task and overwrote its label with
+      // "يستمع..." — put the task's label back instead of leaving a
+      // stale "listening" while Claude is actually working.
+      setTyping(true, preMicTypingText);
+    }
+    preMicTypingText = null;
     if (maxListenTimer) { clearTimeout(maxListenTimer); maxListenTimer = null; }
     updateSend();
   }
