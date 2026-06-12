@@ -188,6 +188,22 @@ Side Panel (UI) ─ Service Worker ─ Native Host (Node) ─┬── claude CL
 - **زر الإرسال الأخضر** → يتحوّل أحمر (⏹) أثناء المهمة
 - **Quick scroll buttons** → يقفزان لأعلى/أسفل الـ chat panel (ليس الصفحة)
 
+### Smart settle — انتظار واعٍ بالشبكة (2026-06-12)
+- **كل أداة مُغيِّرة تُنهى بـ `settleAfterAction(tabId, opts)`** (executor.js) = waitForSettled + prefetch في خطّاف واحد — لا تنثر الزوج يدويًا في أداة جديدة
+- `waitForSettled` = سكون DOM ← تصريف XHR الجارية (سقف 1200ms) ← settle لاحق قصير **فقط إن انتظرنا فعلًا**
+- تتبّع in-flight في background.js: `requestWillBeSent` +1، `loadingFinished/Failed` −1 (ليس `responseReceived` — الجسم قد ما يزال يتدفق)، كنس 15s ضد التسريب
+- **الطلبات الأقدم من 3 ثوانٍ لا تحجب السكون** (`longLivedMs`): long-poll/SSE دائم بدأ قبل فعلنا ≠ استجابة نترقّبها — صفحات الدردشة/اللوحات بلا كلفة إضافية
+- `fill_form` تسوّي **مرة واحدة** في نهاية الدفعة (علامة `_batch` في form_input)
+
+### كاشف الحلقات — قاعدة المحور (2026-06-12)
+- تكرار mutating مطابق يُحتسب علوقًا **فقط** إن لم يحدث تقدّم بينه وبين سابقه: قراءة متقدّمة (progressed) أو فعل مُغيِّر مختلف ما يزال تحت عتبته («الجِدّة» — تمنع زوجًا ميتًا متبادلًا A,B,A,B من التحايل)
+- نمط المحور navigate(قائمة)←act(عنصر)←navigate(قائمة)… لا يتوقف أبدًا؛ 3 navigate ميتة متتالية (أو بقراءات راكدة) تتوقف عند 3 كما كانت
+
+### Build/lint (مطبّات)
+- **لا تشغّل `lint:fix` على كامل src** — biome الحالي يعيد تنسيق ~16 ملفًا ملتزَمًا (أسلوب الالتزام ≠ biome) فيضخّم الـ changeset
+- `npm run build` يعيد توليد `version-compare.js` بتنسيق tsc مختلف عن الملتزَم — استبعده من الـ commits
+- اختبارات lib تستورد الـ `.js` المُصرَّف — **build قبل vitest** بعد أي تعديل `.ts`
+
 ### Scroll (browser)
 - استخدم `window.scrollBy` بدل `Input.dispatchMouseEvent` (أكثر موثوقية)
 - كشف أقرب container قابل للتمرير حول activeElement
@@ -249,4 +265,4 @@ claude-companion/
 - Extended cache TTL لو Anthropic دعمه
 
 ---
-آخر تحديث: 2026-06-04 (v2 مكتملة: 60 tools + بوّابة تأكيد 1.3 + نظام توقّف ذكيّ 5.2/5.3 + استرجاع BM25 + سجلّ كيانات + site playbooks + viewport-first AX + مؤشّر توكن + تثبيت الهدف. ~341+12 اختبار. انظر ROADMAP.md لِلسجلّ الكامل.)
+آخر تحديث: 2026-06-12 (v2 + smart settle: انتظار واعٍ بالشبكة على كل الأفعال بما فيها أدوات النماذج + إصلاح إنذار المحور الكاذب في كاشف الحلقات. ~364+12 اختبار. انظر ROADMAP.md لِلسجلّ الكامل.)
