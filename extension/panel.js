@@ -1976,7 +1976,9 @@ function renderEntryList($list, entries, kind) {
     del.className = "entry-del";
     del.title = "حذف";
     del.setAttribute("aria-label", "حذف");
-    del.textContent = "×";
+    // Same inline SVG × as .conv-delete in the history list — one delete
+    // affordance across the whole UI. Static markup, no user data.
+    del.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M6 18L18 6"/></svg>';
     del.addEventListener("click", () => {
       entries.splice(i, 1);
       renderEntryList($list, entries, kind);

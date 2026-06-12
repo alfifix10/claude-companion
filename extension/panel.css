@@ -38,6 +38,7 @@
 .copy-ico:focus-visible,
 .conv-item:focus-visible,
 .conv-delete:focus-visible,
+.entry-del:focus-visible,
 .settings-save-btn:focus-visible {
   outline: 2px solid var(--accent-br);
   outline-offset: 2px;
@@ -511,16 +512,22 @@ input.settings-textarea, select.settings-textarea { min-height: 0; }
   white-space: pre-wrap; overflow-wrap: anywhere;
   cursor: pointer;
 }
+/* Delete button — IDENTICAL behaviour to .conv-delete in the history list:
+   invisible until the card is hovered, then dims in at .7, full red on
+   direct hover. One delete affordance across the whole UI. */
 .entry-del {
-  flex: 0 0 auto;
-  width: 22px; height: 22px; margin-top: 1px;
-  display: flex; align-items: center; justify-content: center;
-  border: none; border-radius: 6px;
-  background: transparent; color: var(--text2);
-  font-size: 15px; line-height: 1; cursor: pointer;
-  transition: background .12s, color .12s;
+  background: transparent; border: none; color: var(--text2);
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0;
+  border-radius: 6px; opacity: 0;
+  transition: opacity .12s, color .12s, background .12s;
+  flex-shrink: 0;
 }
-.entry-del:hover { background: var(--bg); color: #e5484d; }
+.entry-del svg { display: block; }
+.entry-item:hover .entry-del,
+.entry-del:focus-visible { opacity: .7; }
+.entry-del:hover { opacity: 1 !important; color: var(--red); background: rgba(239,68,68,.1); }
 .entry-empty {
   padding: 12px; border-radius: 8px;
   background: var(--bg2);
