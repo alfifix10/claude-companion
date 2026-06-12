@@ -2,7 +2,7 @@
 
 **A Chromium browser extension that turns your Claude Max subscription into a full browser copilot — no API keys, no per-token billing, no vendor backend.**
 
-> 🌍 [العربية](./README.ar.md) · **English**
+> 🌐 **[claude-companion.netlify.app](https://claude-companion.netlify.app/)** · 🌍 [العربية](./README.ar.md) · **English**
 
 ---
 
