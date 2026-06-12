@@ -52,7 +52,10 @@ describe("LoopDetector — mutating tools (3-repeat threshold)", () => {
     d.record("type_text", "hello");
     const r = d.record("click", "ref_1");
     expect(r.loop).toBe(false);
-    expect(r.identical).toBe(2);
+    // Hub-pattern rule: the fresh navigate/type_text between the two
+    // identical clicks is progress evidence, so the FIRST click is
+    // neutralized — the repeat starts counting from scratch.
+    expect(r.identical).toBe(1);
   });
 });
 
@@ -184,6 +187,70 @@ describe("LoopDetector — delta-aware progress (5.3)", () => {
     expect(() => d.markProgress("scroll", "down", true)).not.toThrow();
     const r = d.record("read_page", "{}");
     expect(r.identical).toBe(1);
+  });
+});
+
+describe("LoopDetector — hub-pattern (repeated navigate with real work between)", () => {
+  let d: LoopDetector;
+  beforeEach(() => {
+    d = new LoopDetector();
+  });
+
+  it("revisiting a hub URL across many work cycles never loops", () => {
+    // The real-world pattern that false-tripped in the field:
+    // navigate(list) → act(item N) → navigate(list) → act(item N+1) → …
+    // Every cycle does fresh work, so the identical navigates must not
+    // accumulate toward the 3-repeat mutating threshold.
+    for (let i = 0; i < 12; i++) {
+      const nav = d.record("navigate", "https://site/list");
+      expect(nav.loop).toBe(false);
+      expect(nav.identical).toBe(1); // prior visit neutralized by the act
+      d.record("act", `item_${i}`); // distinct target each cycle
+    }
+  });
+
+  it("a dead navigate — three in a row with nothing between — still trips at 3", () => {
+    d.record("navigate", "https://site/x");
+    d.record("navigate", "https://site/x");
+    const r = d.record("navigate", "https://site/x");
+    expect(r.loop).toBe(true);
+    expect(r.identical).toBe(3);
+  });
+
+  it("navigate with only STAGNANT reads between still trips at 3", () => {
+    // Reload-the-page-and-stare loop: the reads show nothing new, so they
+    // are not progress evidence and the navigates keep counting.
+    d.record("navigate", "https://site/x");
+    d.record("read_page", "{}");
+    d.markProgress("read_page", "{}", false);
+    d.record("navigate", "https://site/x");
+    d.record("read_page", "{}");
+    d.markProgress("read_page", "{}", false);
+    const r = d.record("navigate", "https://site/x");
+    expect(r.loop).toBe(true);
+    expect(r.identical).toBe(3);
+  });
+
+  it("navigate with PROGRESSING reads between does not trip (refresh-watching)", () => {
+    // Re-navigating the same URL while its content keeps changing is
+    // monitoring, not a stall — consistent with the 5.3 delta philosophy.
+    for (let i = 0; i < 6; i++) {
+      const r = d.record("navigate", "https://site/feed");
+      expect(r.loop).toBe(false);
+      d.record("read_page", "{}");
+      d.markProgress("read_page", "{}", true); // new content each time
+    }
+  });
+
+  it("an alternating dead pair (A,B,A,B,…) is still caught — freshness guard", () => {
+    // Without the freshness guard the two actions would neutralize each
+    // other forever. With it, each loses freshness once its own raw count
+    // reaches its threshold, and the pair trips within a few cycles.
+    let tripped = false;
+    for (let i = 0; i < 8 && !tripped; i++) {
+      tripped = d.record("click", "ref_A").loop || d.record("click", "ref_B").loop;
+    }
+    expect(tripped).toBe(true);
   });
 });
 

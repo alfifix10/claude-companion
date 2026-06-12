@@ -23,11 +23,26 @@
  * Repeated *mutating* calls stay in the window, so a genuine dead-action
  * loop (same click ×3) is still caught.
  *
+ * Hub-pattern awareness (the navigate fix): the same rule extended to
+ * MUTATING repeats. Long tasks legitimately revisit a hub URL over and
+ * over — navigate(list) → act(item 1) → navigate(list) → act(item 2) —
+ * and the old strict count tripped the 3-repeat threshold on the third
+ * visit even though every cycle did fresh work. Now a repeated identical
+ * mutating call only counts as stuck when NOTHING between it and its
+ * previous occurrence shows progress. Progress evidence is:
+ *   • a read-only call that produced new content (progressed === true), or
+ *   • a DIFFERENT mutating action that is itself still below its own loop
+ *     threshold (the freshness guard — without it, two alternating dead
+ *     actions A,B,A,B would neutralize each other forever; with it, the
+ *     pair loses freshness after a couple of cycles and still trips).
+ * A genuinely dead navigate — three in a row, or with only stagnant reads
+ * between — still trips at 3 exactly as before.
+ *
  * Stateful — one detector per task. Caller should construct a fresh
  * one when handleMaxChat starts a new run.
  */
 
-import { isMutating, getLoopThreshold } from "./tool-registry.js";
+import { getLoopThreshold, isMutating } from "./tool-registry.js";
 
 export interface LoopDetectorConfig {
   /** Number of recent calls kept in the window. */
@@ -93,6 +108,14 @@ export class LoopDetector {
       this.recent.shift();
     }
 
+    // Hub-pattern neutralization — see the module header. MUST run before
+    // the read-only purge below: the evidence it looks for includes
+    // progressed reads sitting between the two occurrences, and the purge
+    // is about to delete exactly those entries.
+    if (isMutating(name)) {
+      this.neutralizePriorIfProgressed(name, inputKey);
+    }
+
     // Progress reset — see the module header. A mutating action advanced
     // the page, so the read-only observations that came before it are no
     // longer evidence of a stall. Drop them. Mutating entries stay, so
@@ -113,19 +136,72 @@ export class LoopDetector {
       (c) => c.name === name && c.inputKey === inputKey && c.progressed !== true,
     ).length;
 
-    // Per-tool override > class default. The override exists for tools
-    // like run_javascript whose "same input, different output" pattern
-    // is by design (scrape → scroll → scrape again with new content).
-    const override = getLoopThreshold(name);
-    const threshold = override !== undefined
-      ? override
-      : (isMutating(name) ? this.config.mutatingRepeats : this.config.readonlyRepeats);
+    const threshold = this.thresholdFor(name);
 
     return {
       loop: identical >= threshold,
       identical,
       threshold,
     };
+  }
+
+  /**
+   * Per-tool override > class default. The override exists for tools
+   * like run_javascript whose "same input, different output" pattern
+   * is by design (scrape → scroll → scrape again with new content).
+   */
+  private thresholdFor(name: string): number {
+    const override = getLoopThreshold(name);
+    return override !== undefined
+      ? override
+      : isMutating(name)
+        ? this.config.mutatingRepeats
+        : this.config.readonlyRepeats;
+  }
+
+  /**
+   * Hub-pattern fix: if anything between the just-pushed mutating call and
+   * its nearest previous identical occurrence shows progress, mark that
+   * previous occurrence progressed (= excluded from the stuck count).
+   * Progress evidence: a progressed read, or a different mutating action
+   * still below its own threshold (freshness guard — an alternating dead
+   * pair must not keep neutralizing each other forever).
+   */
+  private neutralizePriorIfProgressed(name: string, inputKey: string): void {
+    let prevIdx = -1;
+    for (let i = this.recent.length - 2; i >= 0; i--) {
+      const c = this.recent[i];
+      if (c && c.name === name && c.inputKey === inputKey) {
+        prevIdx = i;
+        break;
+      }
+    }
+    if (prevIdx === -1) return;
+    const prev = this.recent[prevIdx];
+    if (!prev) return;
+
+    for (let j = prevIdx + 1; j < this.recent.length - 1; j++) {
+      const mid = this.recent[j];
+      if (!mid) continue;
+      if (mid.name === name && mid.inputKey === inputKey) continue;
+      if (!isMutating(mid.name)) {
+        if (mid.progressed === true) {
+          prev.progressed = true;
+          return;
+        }
+        continue;
+      }
+      // Different mutating action. Raw occurrence count (neutralized
+      // entries included — freshness is about how often it was TRIED,
+      // not whether it was excused) against its own threshold.
+      const raw = this.recent.filter(
+        (c) => c.name === mid.name && c.inputKey === mid.inputKey,
+      ).length;
+      if (raw < this.thresholdFor(mid.name)) {
+        prev.progressed = true;
+        return;
+      }
+    }
   }
 
   /**
