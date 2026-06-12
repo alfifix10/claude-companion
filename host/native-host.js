@@ -730,6 +730,74 @@ function handleSaveUserData(msg) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// Native folder picker — the panel can't do this itself: browser folder
+// APIs (webkitdirectory / showDirectoryPicker) deliberately never expose
+// the ABSOLUTE path, and the Pro-Mode sandbox needs the real path. The
+// host is a normal user process, so it can show the OS dialog and hand
+// the path back. No user input reaches the spawned command (fixed args).
+// ──────────────────────────────────────────────────────────────────────────
+
+let pickerActive = false;
+
+function handlePickFolder(msg) {
+  if (pickerActive) {
+    // One dialog at a time — a second click while one is open would stack
+    // invisible dialogs behind the browser.
+    write({ id: msg.id, type: "folder_picked", path: null, error: "BUSY" });
+    return;
+  }
+  pickerActive = true;
+  let replied = false;
+  const done = (p, error) => {
+    if (replied) return;
+    replied = true;
+    pickerActive = false;
+    write({ id: msg.id, type: "folder_picked", path: p || null, ...(error ? { error } : {}) });
+  };
+  try {
+    if (process.platform === "win32") {
+      // STA is required by FolderBrowserDialog; the TopMost owner form is
+      // the standard trick to bring a dialog spawned by a background
+      // process IN FRONT of the browser window instead of behind it.
+      // UTF-8 console encoding so non-ASCII folder names survive stdout.
+      const script =
+        "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;" +
+        "Add-Type -AssemblyName System.Windows.Forms;" +
+        "$f=New-Object System.Windows.Forms.FolderBrowserDialog;" +
+        "$f.Description='Claude Companion: اختر مجلد العمل';" +
+        "$f.ShowNewFolderButton=$true;" +
+        "$o=New-Object System.Windows.Forms.Form -Property @{TopMost=$true;ShowInTaskbar=$false};" +
+        "if($f.ShowDialog($o) -eq 'OK'){[Console]::Out.Write($f.SelectedPath)}";
+      const p = spawn("powershell.exe", ["-NoProfile", "-STA", "-Command", script], {
+        windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
+      });
+      let out = "";
+      p.stdout.on("data", (c) => { out += c.toString("utf-8"); });
+      p.on("error", (e) => done(null, e.message));
+      p.on("close", () => done(out.trim()));
+    } else if (process.platform === "darwin") {
+      const p = spawn("osascript", ["-e",
+        'POSIX path of (choose folder with prompt "Claude Companion: اختر مجلد العمل")']);
+      let out = "";
+      p.stdout.on("data", (c) => { out += c.toString("utf-8"); });
+      p.on("error", (e) => done(null, e.message));
+      // osascript returns a trailing slash; user cancel = non-zero exit.
+      p.on("close", () => done(out.trim().replace(/\/$/, "")));
+    } else {
+      const p = spawn("zenity", ["--file-selection", "--directory",
+        "--title=Claude Companion: اختر مجلد العمل"]);
+      let out = "";
+      p.stdout.on("data", (c) => { out += c.toString("utf-8"); });
+      // zenity missing (ENOENT) → tell the panel to fall back to typing.
+      p.on("error", () => done(null, "NO_PICKER"));
+      p.on("close", () => done(out.trim()));
+    }
+  } catch (e) {
+    done(null, e.message);
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Diagnostic — answers "what's actually wrong with my setup?"
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -784,6 +852,9 @@ process.stdin.on("data", (chunk) => {
         break;
       case "load_user_data":
         handleLoadUserData(m);
+        break;
+      case "pick_folder":
+        handlePickFolder(m);
         break;
       case "save_user_data":
         handleSaveUserData(m);

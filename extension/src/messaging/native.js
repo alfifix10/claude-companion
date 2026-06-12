@@ -118,7 +118,7 @@ export function connectNativeHost() {
     }
     if (msg.type === "max_event" || msg.type === "max_text" ||
         msg.type === "max_done" || msg.type === "max_error" ||
-        msg.type === "diag_result") {
+        msg.type === "diag_result" || msg.type === "folder_picked") {
       const h = responseHandlers.get(msg.id);
       if (h) h(msg);
       if (msg.type === "max_done" || msg.type === "max_error") {
@@ -283,6 +283,35 @@ export function cancelAllHost() {
   responseHandlers.clear();
   if (!nativePort) return;
   try { nativePort.postMessage({ type: "cancel_all" }); } catch {}
+}
+
+/**
+ * Open a native OS folder-picker dialog via the host and resolve with
+ * `{ path }` (null path = user cancelled) or `{ error }`. The timeout is
+ * deliberately LONG — the dialog legitimately stays open while the user
+ * browses; it only guards against an old host that doesn't know the
+ * message type and would never reply.
+ */
+export function requestPickFolder(timeoutMs = 300_000) {
+  return new Promise(async (resolve) => {
+    const healthy = await ensureHealthyPort(2000);
+    if (!healthy) return resolve({ error: "NO_NATIVE_HOST" });
+    const id = `pick_${Date.now()}`;
+    responseHandlers.set(id, (msg) => {
+      if (msg.type === "folder_picked") {
+        responseHandlers.delete(id);
+        resolve(msg.error ? { error: msg.error } : { path: msg.path || null });
+      }
+    });
+    try { nativePort.postMessage({ type: "pick_folder", id }); }
+    catch { responseHandlers.delete(id); return resolve({ error: "POST_FAILED" }); }
+    setTimeout(() => {
+      if (responseHandlers.has(id)) {
+        responseHandlers.delete(id);
+        resolve({ error: "TIMEOUT" });
+      }
+    }, timeoutMs);
+  });
 }
 
 /** Ask the host for a diagnostic snapshot (node version, claude path, etc.). */

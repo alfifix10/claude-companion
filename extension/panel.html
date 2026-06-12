@@ -216,9 +216,16 @@
           </p>
 
           <label class="settings-label" for="workingDirInput" style="margin-top:12px;">📁 مجلّد العمل</label>
-          <input type="text" id="workingDirInput" class="settings-textarea" dir="ltr"
-            style="height:auto; padding:8px 12px; direction:ltr; text-align:left;"
-            placeholder="C:\Users\YOU\Desktop\my-project" autocomplete="off" spellcheck="false">
+          <!-- Browse button opens a REAL OS folder dialog via the native
+               host (browser folder APIs never expose absolute paths). The
+               text input stays as the manual fallback / display. -->
+          <div class="entry-add">
+            <input type="text" id="workingDirInput" class="entry-add-input" dir="ltr"
+              style="direction:ltr; text-align:left;"
+              placeholder="C:\Users\YOU\Desktop\my-project" autocomplete="off" spellcheck="false">
+            <button id="pickDirBtn" class="entry-add-btn" style="width:auto; padding:0 12px; font-size:12.5px;"
+              title="اختيار مجلد من جهازك">استعراض…</button>
+          </div>
           <p id="proModeStatus" class="settings-hint" style="margin-top:8px;" hidden></p>
         </div>
       </div>

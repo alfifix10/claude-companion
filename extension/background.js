@@ -17,7 +17,7 @@ import { markRequestStart, markRequestEnd } from "./src/lib/network-idle.js";
 import { cdp, clearLastMousePos } from "./src/core/cdp.js";
 import { invalidatePageTextCache } from "./src/tools/executor.js";
 import { recoverTabGroupState } from "./src/core/tabs.js";
-import { connectNativeHost, ensureHealthyPort } from "./src/messaging/native.js";
+import { connectNativeHost, ensureHealthyPort, requestPickFolder } from "./src/messaging/native.js";
 import { restoreFromNativeIfEmpty, mirrorToNative } from "./src/core/user-data.js";
 import { setupPanelListener } from "./src/messaging/panel.js";
 
@@ -264,6 +264,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === "mirror_user_data") {
     mirrorToNative(msg.data || {});
     sendResponse({ ok: true });
+    return true;
+  }
+  if (msg?.type === "pick_folder") {
+    // Panel → host folder-picker bridge. Must return true: the response
+    // arrives only after the user closes the OS dialog.
+    requestPickFolder().then(sendResponse);
     return true;
   }
 });

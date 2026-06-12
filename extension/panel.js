@@ -2013,7 +2013,36 @@ const $settingsToast = document.getElementById("settingsToast");
 // Pro Mode UI handles
 const $proModeToggle = document.getElementById("proModeToggle");
 const $workingDirInput = document.getElementById("workingDirInput");
+const $pickDirBtn = document.getElementById("pickDirBtn");
 const $proModeStatus = document.getElementById("proModeStatus");
+
+// Browse… → native OS folder dialog (via background → host). The button is
+// disabled while the dialog is open; cancel changes nothing.
+$pickDirBtn?.addEventListener("click", async () => {
+  $pickDirBtn.disabled = true;
+  const oldLabel = $pickDirBtn.textContent;
+  $pickDirBtn.textContent = "…";
+  try {
+    const r = await chrome.runtime.sendMessage({ type: "pick_folder" });
+    if (r?.path) {
+      $workingDirInput.value = r.path;
+      await saveSettings();
+    } else if (r?.error && r.error !== "BUSY") {
+      // NO_NATIVE_HOST / NO_PICKER / TIMEOUT → the manual field still works.
+      $proModeStatus.textContent = "⚠ تعذّر فتح نافذة الاختيار — اكتب المسار يدويًا.";
+      $proModeStatus.style.color = "var(--accent)";
+      $proModeStatus.hidden = false;
+    }
+    // r.path === null with no error = user cancelled → leave everything as-is.
+  } catch {
+    $proModeStatus.textContent = "⚠ تعذّر فتح نافذة الاختيار — اكتب المسار يدويًا.";
+    $proModeStatus.style.color = "var(--accent)";
+    $proModeStatus.hidden = false;
+  } finally {
+    $pickDirBtn.disabled = false;
+    $pickDirBtn.textContent = oldLabel;
+  }
+});
 const $proModeBadge = document.getElementById("proModeBadge");
 
 async function openSettings() {
