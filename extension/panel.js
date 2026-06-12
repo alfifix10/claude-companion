@@ -1951,7 +1951,7 @@ function renderEntryList($list, entries, kind) {
     // type into the field below it (that part is self-evident).
     empty.textContent = kind === "tasks"
       ? "تظهر كرقاقات ⚡ فوق صندوق الكتابة"
-      : "معلومات دائمة عنك — تُرسَل مع كل طلب ليعرفك المساعد";
+      : "تُرسَل مع كل طلب";
     $list.appendChild(empty);
     return;
   }
