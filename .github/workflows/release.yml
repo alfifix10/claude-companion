@@ -1,0 +1,70 @@
+name: Release
+
+# Publishes a downloadable install package whenever a version tag is pushed.
+# This is what wires the landing-page download button
+# (releases/latest/download/claude-companion.zip) and the in-extension
+# auto-update check to a single source of truth — push a tag, get a release.
+#
+#   git tag v1.2.3 && git push origin v1.2.3
+#
+# The zip is built with `git archive`, so it contains ONLY tracked files:
+# node_modules, the signing .pem, and the per-machine generated files are
+# all gitignored and therefore physically cannot leak into the package.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # create the release + upload the asset
+
+jobs:
+  release:
+    name: Build + publish install zip
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sanity-check the tag matches the manifest version
+        shell: bash
+        run: |
+          set -eo pipefail
+          tag="${GITHUB_REF_NAME#v}"                       # v1.1.0 -> 1.1.0
+          man=$(node -p "require('./extension/manifest.json').version")
+          echo "tag=$tag manifest=$man"
+          if [ "$tag" != "$man" ]; then
+            echo "::error::Tag v$tag does not match manifest version $man. Bump the version before tagging."
+            exit 1
+          fi
+
+      - name: Build clean install package (tracked files only)
+        shell: bash
+        run: |
+          set -eo pipefail
+          # git archive exports exactly the tracked tree — never node_modules,
+          # never the .pem, never generated wrapper/manifest files (all
+          # gitignored). Website source and CI configs add no value to an
+          # install bundle, so exclude them; excludes that match nothing are
+          # harmless, so this can only ever omit noise, never break.
+          git archive --format=zip --prefix=claude-companion/ \
+            -o claude-companion.zip "$GITHUB_REF_NAME" \
+            ':(exclude).github' \
+            ':(exclude)landing' \
+            ':(exclude)docs' \
+            ':(exclude)**/*.test.ts' \
+            ':(exclude)**/*.test.js' \
+            ':(exclude)host/e2e-warm.mjs'
+          echo "--- package contents (top level) ---"
+          unzip -l claude-companion.zip | head -40
+          # Hard fail if anything sensitive somehow made it in.
+          if unzip -l claude-companion.zip | grep -qiE '\.pem|node_modules|/config\.json'; then
+            echo "::error::Sensitive file found in package — aborting."
+            exit 1
+          fi
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: claude-companion.zip
+          generate_release_notes: true
+          fail_on_unmatched_files: true

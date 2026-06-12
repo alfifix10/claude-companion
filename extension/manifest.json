@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Claude Companion",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "مساعد ذكيّ يقرأ المتصفّح ويُنفّذ المهام. يعمل باشتراكك في Claude — بلا مفاتيح API.",
   "minimum_chrome_version": "116",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtnzyaQriGJ2UE8Uu0/TVF4DPKyBpbv8CeV1mTh+FxRZ6mXw6B49Qpku82DlpcrnklHuQn1Pgg/BqhcFsntyBYHSkH6J6T53mDz9tCf4eoCR+aZziYe1N7iR+MPCH4MiStHNFAHet7yqJLenrBoUPOQZh4wZ+5ogCKJrJM7UgJDrI0OSLeXiGuEkvp6f/5Tld06HJ4vbHVAQx295GerIT/7/vX+A24tgLYGleUy3BfWpEQP2sW455pR+hC2hi4IRQ8H2QuplvUAXNzXguwLdqnRcWyroMzDPfZNymNnqB3DeDpYNKBIqSQIj0fZp8bRhdFouAfOY2xxWxIuPQ9EYWRwIDAQAB",
