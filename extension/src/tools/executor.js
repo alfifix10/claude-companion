@@ -5,7 +5,7 @@
  */
 
 import {
-  cdp, ensureAttached, ensureDomain, mouseClick, mouseDrag, dispatchMouse, waitForDomStable,
+  cdp, ensureAttached, ensureDomain, mouseClick, mouseDrag, dispatchMouse, waitForDomStable, waitForSettled,
   takeScreenshot, sendContentMessage, resolveRefCoords, resolveClickTarget,
   dialogNote, getActiveTab, modifiersBitmask,
 } from "../core/cdp.js";
@@ -69,6 +69,17 @@ function clearRefMiss(tabId) { refFailStreak.delete(tabId); }
 export function invalidatePageTextCache(tabId) {
   if (tabId == null) return;
   pageTextCache.delete(tabId);
+}
+
+// One shared post-action hook: settle (DOM quiet + in-flight XHR drain via
+// waitForSettled), then re-warm the page-text cache in the background.
+// EVERY mutating tool should end with this — a tool that skips it leaves the
+// next read racing the page's reaction to the action (async form validation,
+// dependent-field updates, lazy fetches). Centralized so a future tool can't
+// silently miss one half of the pair.
+async function settleAfterAction(tabId, opts) {
+  await waitForSettled(tabId, opts);
+  schedulePageTextPrefetch(tabId);
 }
 
 // Fire-and-forget page-text extraction. Scheduled after any state-
@@ -418,8 +429,7 @@ export async function executeTool(name, input, tabId) {
       if (input.direction === "back" || input.direction === "forward") {
         await cdp(tabId, input.direction === "back" ? "Page.goBack" : "Page.goForward", {});
         await waitForTabComplete(tabId);
-        await waitForDomStable(tabId, 2000); // let SPA content settle (see navigate)
-        schedulePageTextPrefetch(tabId);
+        await settleAfterAction(tabId, { domTimeout: 2000 }); // DOM quiet + XHR drain (see navigate)
         let t = null;
         try { t = await chrome.tabs.get(tabId); } catch {}
         const word = input.direction === "back" ? "back" : "forward";
@@ -435,10 +445,11 @@ export async function executeTool(name, input, tabId) {
       // rendered yet — an immediate read_page sees an EMPTY page and the agent
       // wrongly concludes "nothing here" or stalls. Wait a bounded settle for
       // the content to paint: ~150 ms on a static page (DOM already quiet), up
-      // to 2 s on a busy SPA. This is the single biggest reliability win for
-      // app-style sites.
-      await waitForDomStable(tabId, 2000);
-      schedulePageTextPrefetch(tabId);
+      // to 2 s on a busy SPA. waitForSettled then waits a further bounded
+      // window for the post-load XHRs themselves to DRAIN (network idle), which
+      // catches feeds that mutate the DOM only AFTER the data returns. This is
+      // the single biggest reliability win for app-style sites.
+      await settleAfterAction(tabId, { domTimeout: 2000 });
       // Re-fetch AFTER the settle so the title reflects the LOADED content
       // (Gmail flips from "Gmail" to "Inbox - …" once its list renders).
       let t = null;
@@ -561,7 +572,7 @@ export async function executeTool(name, input, tabId) {
           if (!hits.length) { out.push(`✗ "${label}": not found`); continue; }
           ref = hits[0].ref;
         }
-        const r = await executeTool("form_input", { ref, value }, tabId);
+        const r = await executeTool("form_input", { ref, value, _batch: true }, tabId);
         if (typeof r === "string" && r.toLowerCase().startsWith("error")) {
           out.push(`✗ "${label || ref}": ${r}`);
         } else {
@@ -569,6 +580,9 @@ export async function executeTool(name, input, tabId) {
           out.push(`✓ "${label || ref}" = "${value.slice(0, 30)}${value.length > 30 ? "…" : ""}"`);
         }
       }
+      // One settle for the whole batch (see form_input) — catches the form's
+      // aggregate reaction (submit button enabling, summary re-render).
+      if (ok > 0) await settleAfterAction(tabId, { domTimeout: 800 });
       return `Filled ${ok}/${fields.length} field(s):\n${out.join("\n")}`;
     }
     case "click": {
@@ -588,8 +602,10 @@ export async function executeTool(name, input, tabId) {
 
       rippleAt(tabId, x, y);
       await mouseClick(tabId, x, y, { button, modifiers });
-      await waitForDomStable(tabId);
-      schedulePageTextPrefetch(tabId);
+      // Settle DOM, then drain any XHR the click kicked off (Load-more,
+      // submit, filter) so the delta + a follow-up read see the new content.
+      // Zero added cost when the click fetched nothing.
+      await settleAfterAction(tabId);
 
       const after = await capturePageSignals(tabId);
       const delta = formatPageDelta(before, after);
@@ -628,8 +644,7 @@ export async function executeTool(name, input, tabId) {
         });
         const jsOk = jsResult?.result?.ok === true;
         if (jsOk) {
-          await waitForDomStable(tabId);
-          schedulePageTextPrefetch(tabId);
+          await settleAfterAction(tabId);
           const after2 = await capturePageSignals(tabId);
           const delta2 = formatPageDelta(before, after2);
           return `Clicked${btnNote}${modNote} at (${x}, ${y}) via JS fallback${delta2}.${dialogNote(tabId)}`;
@@ -658,8 +673,7 @@ export async function executeTool(name, input, tabId) {
       const beforeDrag = await capturePageSignals(tabId);
       rippleAt(tabId, src[0], src[1]);
       await mouseDrag(tabId, src[0], src[1], dst[0], dst[1]);
-      await waitForDomStable(tabId);
-      schedulePageTextPrefetch(tabId);
+      await settleAfterAction(tabId);
       rippleAt(tabId, dst[0], dst[1]);
       const afterDrag = await capturePageSignals(tabId);
       const dragDelta = formatPageDelta(beforeDrag, afterDrag);
@@ -669,6 +683,9 @@ export async function executeTool(name, input, tabId) {
       await ensureAttached(tabId);
       invalidatePageTextCache(tabId);
       await humanType(tabId, input.text);
+      // Typing fires per-char input events — search-as-you-type and inline
+      // validation react asynchronously. Settle so the next read sees them.
+      await settleAfterAction(tabId, { domTimeout: 800 });
       return `Typed "${input.text.slice(0, 50)}${input.text.length > 50 ? "..." : ""}"`;
     }
     case "press_key": {
@@ -697,8 +714,7 @@ export async function executeTool(name, input, tabId) {
         if (isSequence) await sleep(45); // brief beat between sequence keys
       }
       if (triggering) {
-        await waitForDomStable(tabId);
-        schedulePageTextPrefetch(tabId);
+        await settleAfterAction(tabId);
         const after = await capturePageSignals(tabId);
         return `Pressed ${input.key}${formatPageDelta(before, after)}`;
       }
@@ -708,6 +724,12 @@ export async function executeTool(name, input, tabId) {
       invalidatePageTextCache(tabId);
       const resp = await sendContentMessage(tabId, { type: "setFormValue", ref: input.ref, value: input.value });
       if (resp?.result?.error) return `Error: ${resp.result.error}`;
+      // Forms are where async reactions concentrate (validation messages,
+      // dependent fields enabling, autocomplete fetches) — settle so the next
+      // read sees the reaction, not the pre-input state. fill_form batches
+      // many fields and settles ONCE at the end (`_batch`), so a 10-field
+      // form doesn't pay 10 settles.
+      if (!input._batch) await settleAfterAction(tabId, { domTimeout: 800 });
       return `Set ${input.ref} = "${input.value}"`;
     }
     case "screenshot": {
@@ -859,6 +881,13 @@ export async function executeTool(name, input, tabId) {
         });
         await sleep(150);
       }
+      // Infinite feeds fetch the next page on scroll. Let those XHRs drain
+      // (and the new items paint) so a follow-up read_page sees the loaded
+      // content, not the spinner. Zero cost when the scroll fetched nothing.
+      // Invalidate BEFORE the settle, then settleAfterAction re-warms the
+      // cache in the background — same pattern as every other action.
+      invalidatePageTextCache(tabId);
+      await settleAfterAction(tabId, { domTimeout: 1200 });
       return `Scrolled ${input.direction} by ${Math.abs(totalDelta)}px`;
     }
     case "run_javascript": {
@@ -929,8 +958,12 @@ export async function executeTool(name, input, tabId) {
       return `Hovered at (${x}, ${y})`;
     }
     case "select_option": {
+      invalidatePageTextCache(tabId);
       const resp = await sendContentMessage(tabId, { type: "setFormValue", ref: input.ref, value: input.value });
       if (resp?.result?.error) return `Error: ${resp.result.error}`;
+      // Selects are the classic cascade trigger (country → city lists,
+      // shipping → price re-render). Settle before reporting done.
+      await settleAfterAction(tabId, { domTimeout: 800 });
       return `Selected "${input.value}" in ${input.ref}`;
     }
     case "list_tabs": {
@@ -1053,6 +1086,9 @@ export async function executeTool(name, input, tabId) {
         const q = await cdp(tabId, "DOM.querySelector", { nodeId: rootId, selector });
         if (!q?.nodeId) return `Error: no element matched selector "${selector}"`;
         await cdp(tabId, "DOM.setFileInputFiles", { nodeId: q.nodeId, files });
+        // Uploads typically kick off an XHR + preview render — settle so the
+        // follow-up read sees the upload state, not the pre-upload form.
+        await settleAfterAction(tabId);
         const names = files.map((f) => f.split(/[\\/]/).pop()).join(", ");
         return `Uploaded ${files.length} file(s) to ${selector}: ${names}`;
       } catch (e) {
