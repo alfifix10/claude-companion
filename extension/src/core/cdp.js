@@ -3,8 +3,9 @@
  * Attach, enable domains, dispatch input, take screenshots, talk to content script.
  */
 
-import { attachedTabs, screenshotStore, pendingDialogs } from "./state.js";
+import { attachedTabs, screenshotStore, pendingDialogs, inflightRequests } from "./state.js";
 import { sleep } from "./utils.js";
+import { isIdle } from "../lib/network-idle.js";
 
 // URL schemes where Chromium blocks chrome.debugger.attach and content
 // scripts. We preflight-check so the user sees a clear Arabic message
@@ -341,6 +342,75 @@ export async function waitForDomStable(tabId, timeoutMs = 2000) {
       awaitPromise: true, returnByValue: true,
     });
   } catch {}
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Network idle (wait until in-flight HTTP requests drain)
+//
+// DOM-stable alone misses the classic SPA failure: the page is "complete"
+// and mutation-quiet, but the inbox/feed/dashboard data is still ON THE WIRE
+// (XHR fired after load). We poll the in-flight set that background.js keeps
+// per tab and early-exit the instant it drains for a short quiet window.
+//
+// HARD RULE: this NEVER decides the maximum latency. Real-time pages (SSE,
+// long-poll, telemetry) can stay "busy" forever, so `capMs` is a low ceiling
+// (default 1200 ms) after which we give up and let the caller proceed. The
+// in-flight set is stale-swept inside isIdle(), so a leaked requestId can't
+// hang us even before the cap.
+// ──────────────────────────────────────────────────────────────────────────
+const NET_QUIET_MS = 250;   // how long in-flight must stay drained
+const NET_POLL_MS = 60;     // poll cadence
+const NET_CAP_MS = 1200;    // absolute ceiling — never block longer than this
+
+// Returns true if it actually observed in-flight requests and waited for
+// them (so the caller knows a response-driven re-render may be imminent),
+// false if the tab was already drained and it returned immediately.
+export async function waitForNetworkIdle(tabId, opts = {}) {
+  const capMs = opts.capMs ?? NET_CAP_MS;
+  const quietMs = opts.quietMs ?? NET_QUIET_MS;
+  const threshold = opts.threshold ?? 0;
+  const map = inflightRequests.get(tabId);
+  // No tracking for this tab (never attached Network, or already drained) =
+  // nothing to wait for.
+  if (!map || map.size === 0) return false;
+  // Already idle at entry? Then whatever is in the map is only long-lived
+  // background channels (persistent long-poll/SSE — isIdle ignores requests
+  // older than ~3s, which necessarily predate this action). Nothing OUR
+  // action kicked off is on the wire → skip the quiet window AND the
+  // post-network settle entirely. Keeps chat/dashboard pages at the same
+  // zero added cost as silent pages.
+  if (isIdle(map, Date.now(), { threshold })) return false;
+
+  const start = Date.now();
+  let quietSince = null;
+  while (Date.now() - start < capMs) {
+    const now = Date.now();
+    if (isIdle(map, now, { threshold })) {
+      if (quietSince == null) quietSince = now;
+      if (now - quietSince >= quietMs) return true; // stayed idle long enough
+    } else {
+      quietSince = null; // a new request appeared — reset the quiet clock
+    }
+    await sleep(NET_POLL_MS);
+  }
+  return true;
+}
+
+// Combined settle used by navigation- and action-class tools: let the DOM
+// stop mutating, let the in-flight XHRs drain (bounded), then — only if we
+// actually waited on the network — give the response-driven re-render one
+// more short DOM settle. The order matters: a click that fetches goes
+// DOM-quiet BEFORE the response arrives, so without the trailing settle we'd
+// snapshot the page a beat before the new content paints.
+//
+// Cost model: a click/keypress that triggers NO network short-circuits at
+// waitForNetworkIdle (in-flight map empty) and pays only the normal DOM
+// settle — identical to the old behaviour. Only actions that actually fetch
+// pay the extra bounded wait, which is exactly when "read too early" bit.
+export async function waitForSettled(tabId, opts = {}) {
+  await waitForDomStable(tabId, opts.domTimeout ?? 2000);
+  const waited = await waitForNetworkIdle(tabId, opts);
+  if (waited) await waitForDomStable(tabId, opts.postNetTimeout ?? 800);
 }
 
 // ──────────────────────────────────────────────────────────────────────────

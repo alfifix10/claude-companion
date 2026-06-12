@@ -12,7 +12,8 @@
  *   and let it sleep cleanly when idle.
  */
 
-import { attachedTabs, consoleMessages, networkRequests, pageErrors, pendingDialogs, tabGroupTabs, nativePort } from "./src/core/state.js";
+import { attachedTabs, consoleMessages, networkRequests, pageErrors, pendingDialogs, tabGroupTabs, nativePort, inflightRequests } from "./src/core/state.js";
+import { markRequestStart, markRequestEnd } from "./src/lib/network-idle.js";
 import { cdp, clearLastMousePos } from "./src/core/cdp.js";
 import { invalidatePageTextCache } from "./src/tools/executor.js";
 import { recoverTabGroupState } from "./src/core/tabs.js";
@@ -81,6 +82,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   }
   consoleMessages.delete(tabId);
   networkRequests.delete(tabId);
+  inflightRequests.delete(tabId);
   pageErrors.delete(tabId);
   // Was missing: a dialog open at the moment of close leaves a stale entry.
   // Chromium sometimes recycles tab IDs, so this can mislead later dialogs.
@@ -109,6 +111,9 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   // relevant.
   consoleMessages.delete(tabId);
   networkRequests.delete(tabId);
+  // New navigation = the old page's pending requests are moot. Reset so a
+  // pre-nav in-flight request can't make the NEW page look perpetually busy.
+  inflightRequests.delete(tabId);
   pageErrors.delete(tabId);
   // Any open dialog belonged to the unloading page.
   pendingDialogs.delete(tabId);
@@ -171,6 +176,23 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
     reqs.push({ url: params.request.url, method: params.request.method, status: 0, type: params.type || "Other", timestamp: Date.now() });
     if (reqs.length > 1000) reqs.splice(0, reqs.length - 1000);
     networkRequests.set(tabId, reqs);
+    // In-flight accounting for waitForNetworkIdle. A redirect re-fires this
+    // event with the SAME requestId — markRequestStart is idempotent, so the
+    // count stays at one for the whole redirect chain.
+    if (params.requestId) {
+      let inflight = inflightRequests.get(tabId);
+      if (!inflight) { inflight = new Map(); inflightRequests.set(tabId, inflight); }
+      markRequestStart(inflight, params.requestId, Date.now());
+    }
+  }
+  // Terminal network events drain the in-flight set. We listen to BOTH
+  // loadingFinished (success) and loadingFailed (abort/error/blocked) so a
+  // cancelled request can't pin the tab "busy". responseReceived is NOT
+  // terminal — headers arrived but the body may still be streaming — so it
+  // deliberately does not decrement.
+  if (method === "Network.loadingFinished" || method === "Network.loadingFailed") {
+    const inflight = inflightRequests.get(tabId);
+    if (inflight && params.requestId) markRequestEnd(inflight, params.requestId);
   }
   if (method === "Page.javascriptDialogOpening") {
     // Per-dialog-type policy. Blanket "accept everything" was dangerous:

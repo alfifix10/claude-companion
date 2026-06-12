@@ -19,6 +19,14 @@ export const consoleMessages = new Map();
 export const networkRequests = new Map();
 export const pageErrors = new Map();  // tabId → [{message, stack, url, lineNumber, columnNumber, timestamp}]
 
+// In-flight HTTP requests per tab, keyed by CDP requestId → start timestamp.
+// Distinct from networkRequests (a completed-event LOG): this tracks what is
+// still ON THE WIRE right now, so waitForNetworkIdle can early-exit the moment
+// a SPA's post-load XHRs drain. Populated by the Network listeners in
+// background.js, drained on terminal events + navigation, and stale-swept by
+// the pure helpers in lib/network-idle.ts so a leaked id can't pin it busy.
+export const inflightRequests = new Map(); // tabId → Map(requestId → startMs)
+
 // Screenshot ring-buffer
 export const screenshotStore = new Map();
 
