@@ -334,7 +334,7 @@ body {
   background: var(--bg2); border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
-.history-title { font-size: 13px; font-weight: 700; color: var(--text); }
+.history-title { font-size: 14.5px; font-weight: 700; color: var(--text); }
 
 /* Search box — sits between head and list. Filters the list by any
    substring that appears in the stored message content (not just
@@ -461,6 +461,56 @@ body {
   display: block; font-size: 12.5px; font-weight: 600;
   color: var(--text); margin-bottom: 6px;
 }
+
+/* Uniform section rhythm: equal padding + ONE thin separator between
+   sections (instead of ad-hoc inline margins), so the eye reads the
+   structure before the words. */
+.settings-section { padding: 16px 0; border-bottom: 1px solid var(--border); }
+.settings-section:first-child { padding-top: 2px; }
+.settings-section:last-child { border-bottom: none; }
+
+/* Native select restyled: custom chevron (the browser default arrow is the
+   one giveaway that this is an unstyled form control). RTL → chevron sits
+   on the LEFT, with padding reserved for it. */
+.settings-select {
+  width: 100%;
+  padding: 9px 12px 9px 34px; /* RTL: text right, chevron space left */
+  appearance: none; -webkit-appearance: none;
+  border: 1px solid var(--input-br); border-radius: 10px;
+  background-color: var(--input-bg);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23888da0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat; background-position: left 12px center; background-size: 14px;
+  color: var(--text); font-family: inherit; font-size: 12.5px;
+  direction: rtl; cursor: pointer; outline: none;
+  transition: border-color .15s;
+}
+.settings-select:focus { border-color: var(--accent); }
+
+/* iOS-style toggle switch — the raw checkbox was the biggest "not a real
+   app" tell. Same element + id underneath, so the JS is untouched.
+   RTL note: the thumb rests on the RIGHT (inline start) and slides LEFT
+   when checked — the mirrored direction native RTL apps use. */
+.switch-row {
+  display: flex; align-items: center; justify-content: space-between;
+  cursor: pointer;
+}
+.switch {
+  appearance: none; -webkit-appearance: none;
+  width: 40px; height: 22px; margin: 0;
+  border-radius: 11px; border: 1px solid var(--border);
+  background: var(--bg3);
+  position: relative; cursor: pointer; flex-shrink: 0;
+  transition: background .18s, border-color .18s;
+}
+.switch::before {
+  content: ""; position: absolute; top: 2px; right: 2px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--text2);
+  transition: transform .18s, background .18s;
+}
+.switch:checked { background: var(--accent); border-color: var(--accent); }
+.switch:checked::before { transform: translateX(-18px); background: #fff; }
+.switch:focus-visible { outline: 2px solid var(--accent-br); outline-offset: 2px; }
 .settings-textarea {
   width: 100%; padding: 10px 12px;
   border: 1px solid var(--input-br); border-radius: 10px;
@@ -510,6 +560,7 @@ input.settings-textarea, select.settings-textarea { min-height: 0; }
   flex: 1; min-width: 0;
   font-size: 12.5px; color: var(--text); line-height: 1.7;
   white-space: pre-wrap; overflow-wrap: anywhere;
+  text-align: start; /* short entries must hug the start edge, never float */
   cursor: pointer;
 }
 /* Delete button — IDENTICAL behaviour to .conv-delete in the history list:

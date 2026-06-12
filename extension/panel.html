@@ -171,34 +171,42 @@
         </button>
       </div>
 
+      <!-- Every block is a .settings-section: uniform padding + one thin
+           separator between sections, so the eye reads the structure before
+           the words. No inline margin soup. -->
       <div class="settings-body">
-        <label class="settings-label" for="modelSelect">🎚️ السرعة والجودة</label>
-        <select id="modelSelect" class="settings-textarea" style="height:auto; padding:8px 12px;">
-          <option value="fast">سريع — Haiku (الأسرع)</option>
-          <option value="balanced" selected>متوازن — Sonnet (موصى به: سريع + جودة عالية)</option>
-          <option value="powerful">الأقوى — Opus (للمهام الأصعب، الأبطأ)</option>
-        </select>
-
-        <!-- Memories + tasks as CARD LISTS (same visual language as the
-             conversation-history cards) instead of one big textarea.
-             Storage format is UNCHANGED: entries joined by blank lines into
-             the same `memories`/`tasks` strings the agent + chips consume —
-             this is purely a UI upgrade. Click a card to pull it back into
-             the input for editing; × deletes; both auto-save. -->
-        <label class="settings-label" for="memoriesAddInput" style="margin-top:18px;">🧠 ذاكرة مختصرة</label>
-        <div class="entry-list" id="memoriesList" aria-label="عناصر الذاكرة"></div>
-        <div class="entry-add">
-          <input id="memoriesAddInput" class="entry-add-input" type="text"
-            placeholder="أضف معلومة… ثم Enter">
-          <button id="memoriesAddBtn" class="entry-add-btn" title="إضافة" aria-label="إضافة للذاكرة">+</button>
+        <div class="settings-section">
+          <label class="settings-label" for="modelSelect">🎚️ السرعة والجودة</label>
+          <select id="modelSelect" class="settings-select">
+            <option value="fast">سريع — Haiku (الأسرع)</option>
+            <option value="balanced" selected>متوازن — Sonnet (موصى به: سريع + جودة عالية)</option>
+            <option value="powerful">الأقوى — Opus (للمهام الأصعب، الأبطأ)</option>
+          </select>
         </div>
 
-        <label class="settings-label" for="tasksAddInput" style="margin-top:18px;">⚡ مهام مكررة</label>
-        <div class="entry-list" id="tasksList" aria-label="المهام المكررة"></div>
-        <div class="entry-add">
-          <input id="tasksAddInput" class="entry-add-input" type="text"
-            placeholder="أضف مهمة… ثم Enter">
-          <button id="tasksAddBtn" class="entry-add-btn" title="إضافة" aria-label="إضافة مهمة">+</button>
+        <!-- Memories + tasks as CARD LISTS (same visual language as the
+             conversation-history cards). Storage format is UNCHANGED:
+             entries joined by blank lines into the same `memories`/`tasks`
+             strings the agent + chips consume. Click a card to pull it back
+             into the input for editing; × deletes; both auto-save. -->
+        <div class="settings-section">
+          <label class="settings-label" for="memoriesAddInput">🧠 ذاكرة مختصرة</label>
+          <div class="entry-list" id="memoriesList" aria-label="عناصر الذاكرة"></div>
+          <div class="entry-add">
+            <input id="memoriesAddInput" class="entry-add-input" type="text"
+              placeholder="أضف معلومة… ثم Enter">
+            <button id="memoriesAddBtn" class="entry-add-btn" title="إضافة" aria-label="إضافة للذاكرة">+</button>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <label class="settings-label" for="tasksAddInput">⚡ مهام مكررة</label>
+          <div class="entry-list" id="tasksList" aria-label="المهام المكررة"></div>
+          <div class="entry-add">
+            <input id="tasksAddInput" class="entry-add-input" type="text"
+              placeholder="أضف مهمة… ثم Enter">
+            <button id="tasksAddBtn" class="entry-add-btn" title="إضافة" aria-label="إضافة مهمة">+</button>
+          </div>
         </div>
 
         <!-- Pro Mode section. Off by default. Unlocks filesystem read-only
@@ -206,10 +214,10 @@
              text matters: a user who turns this on without understanding
              that web pages can prompt-inject the AI is the threat model
              we're guarding against. -->
-        <div class="pro-mode-section" style="margin-top:22px; padding-top:16px; border-top:1px solid var(--border);">
-          <label class="settings-label" style="display:flex; align-items:center; gap:10px; cursor:pointer;">
-            <input type="checkbox" id="proModeToggle" style="width:16px; height:16px;">
-            <span>🔓 Pro Mode</span>
+        <div class="settings-section">
+          <label class="switch-row" for="proModeToggle">
+            <span class="settings-label" style="margin:0;">🔓 Pro Mode</span>
+            <input type="checkbox" id="proModeToggle" class="switch">
           </label>
           <p class="settings-hint" style="margin-top:6px;">
             <span style="color: var(--accent);">⚠ افتح فقط إذا كنت تثق بالمواقع التي تتصفّحها.</span>
