@@ -938,6 +938,22 @@ function enterEditMode(wrap, msgIdx) {
   actions.appendChild(deleteBtn);
   actions.appendChild(cancelBtn);
   editor.appendChild(ta);
+
+  // Make truncation VISIBLE. Saving an edit drops this message's slot and
+  // everything after it (performEdit slices to msgIdx). When real
+  // conversation follows — more than just the paired reply an edit naturally
+  // regenerates — turn the save button red and add a one-line warning so the
+  // user knows the downstream messages will be deleted, not kept.
+  const belowCount = Math.max(0, conversation.length - (msgIdx + 1));
+  if (belowCount >= 2) {
+    saveBtn.classList.add("will-truncate");
+    saveBtn.title = `سيُحذف ما تحت هذه الرسالة (${belowCount})`;
+    const note = document.createElement("div");
+    note.className = "edit-truncate-note";
+    note.textContent = `⚠ سيُحذف ما تحت هذه الرسالة (${belowCount} رسالة)`;
+    editor.appendChild(note);
+  }
+
   editor.appendChild(actions);
 
   // Swap bubble for editor — keep the edit/copy icons out of the way.
