@@ -199,6 +199,22 @@ body {
 }
 .tasks-row::-webkit-scrollbar { height: 0; }
 .tasks-row:empty { display: none; }
+/* Edge fade — soft cue that chips are scrolled off-screen. Applied via
+   mask-image (masks the visible viewport, NOT the scrolled content), and
+   toggled by updateTasksFade() so a side only fades when it has hidden
+   chips. 22px feather. Both prefixed + unprefixed for Chromium safety. */
+.tasks-row.fade-left {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 22px);
+  mask-image: linear-gradient(to right, transparent 0, #000 22px);
+}
+.tasks-row.fade-right {
+  -webkit-mask-image: linear-gradient(to left, transparent 0, #000 22px);
+  mask-image: linear-gradient(to left, transparent 0, #000 22px);
+}
+.tasks-row.fade-left.fade-right {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 22px, #000 calc(100% - 22px), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 22px, #000 calc(100% - 22px), transparent 100%);
+}
 
 /* Update-available banner (load-unpacked has no auto-update). */
 .update-banner {

@@ -666,7 +666,26 @@ function renderTasks(list) {
     btn.addEventListener("click", () => fireTask(t.prompt));
     $tasksRow.appendChild(btn);
   }
+  updateTasksFade();
 }
+
+// Edge-fade affordance: the chips row scrolls horizontally with a HIDDEN
+// scrollbar, so without this the user has no clue chips are scrolled off the
+// edge. We mask-fade only the side(s) that actually have hidden content, and
+// only while scrollable. RTL: the start edge is the RIGHT, the end is the
+// LEFT; Chrome 116+ reports scrollLeft as 0 at start and -max at the end, so
+// abs(scrollLeft) is the distance scrolled from the start.
+function updateTasksFade() {
+  if (!$tasksRow) return;
+  const max = $tasksRow.scrollWidth - $tasksRow.clientWidth;
+  $tasksRow.classList.remove("fade-left", "fade-right");
+  if (max <= 1) return; // everything fits — no fade
+  const scrolled = Math.abs($tasksRow.scrollLeft);
+  if (Math.abs(scrolled - max) > 1) $tasksRow.classList.add("fade-left");  // more toward the END (left)
+  if (scrolled > 1) $tasksRow.classList.add("fade-right");                  // more toward the START (right)
+}
+$tasksRow?.addEventListener("scroll", updateTasksFade, { passive: true });
+try { new ResizeObserver(updateTasksFade).observe($tasksRow); } catch {}
 
 // Fire a saved prompt exactly as if the user typed it and hit send.
 function fireTask(prompt) {
