@@ -943,14 +943,11 @@ input.settings-textarea, select.settings-textarea { min-height: 0; }
   border: 1px solid var(--border);
 }
 .edit-save:hover { border-color: var(--green); background: rgba(34,197,94,.08); }
-/* Editing a message with real conversation below it deletes that
-   conversation on save — flag the save button red so the user sees it. */
-.edit-save.will-truncate { color: var(--red); border-color: rgba(239,68,68,.4); }
-.edit-save.will-truncate:hover { border-color: var(--red); background: rgba(239,68,68,.08); }
-.edit-truncate-note {
-  font-size: 11px; color: var(--red); line-height: 1.5;
-  text-align: start; margin: 2px 2px 8px;
-}
+/* Armed state: first click on a truncating edit recolors the SAME button to
+   a red confirm prompt; the second click commits. The longer label widens
+   the button, which is intentional — it should read as a warning. */
+.edit-save.will-truncate { color: var(--red); border-color: rgba(239,68,68,.45); font-weight: 700; }
+.edit-save.will-truncate:hover { border-color: var(--red); background: rgba(239,68,68,.1); }
 .edit-cancel {
   background: transparent; color: var(--text2);
   border: 1px solid var(--border);

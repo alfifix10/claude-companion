@@ -938,23 +938,17 @@ function enterEditMode(wrap, msgIdx) {
   actions.appendChild(deleteBtn);
   actions.appendChild(cancelBtn);
   editor.appendChild(ta);
-
-  // Make truncation VISIBLE. Saving an edit drops this message's slot and
-  // everything after it (performEdit slices to msgIdx). When real
-  // conversation follows — more than just the paired reply an edit naturally
-  // regenerates — turn the save button red and add a one-line warning so the
-  // user knows the downstream messages will be deleted, not kept.
-  const belowCount = Math.max(0, conversation.length - (msgIdx + 1));
-  if (belowCount >= 2) {
-    saveBtn.classList.add("will-truncate");
-    saveBtn.title = `سيُحذف ما تحت هذه الرسالة (${belowCount})`;
-    const note = document.createElement("div");
-    note.className = "edit-truncate-note";
-    note.textContent = `⚠ سيُحذف ما تحت هذه الرسالة (${belowCount} رسالة)`;
-    editor.appendChild(note);
-  }
-
   editor.appendChild(actions);
+
+  // Saving an edit drops this message's slot and everything after it
+  // (performEdit slices to msgIdx). When real conversation follows — more
+  // than just the paired reply an edit naturally regenerates — require a
+  // SECOND click: the first click turns the same button red and asks, the
+  // second commits. See `save` below. The original label is kept so the
+  // armed state can revert if the user edits more (it doesn't, but it's the
+  // honest default).
+  const belowCount = Math.max(0, conversation.length - (msgIdx + 1));
+  const needsConfirm = belowCount >= 2;
 
   // Swap bubble for editor — keep the edit/copy icons out of the way.
   // .editing on the wrap makes it take the full panel width so the
@@ -994,12 +988,22 @@ function enterEditMode(wrap, msgIdx) {
     if (editIco) editIco.style.display = "";
     if (copyIco) copyIco.style.display = "";
   };
+  let armed = false;
   const save = () => {
     const newText = ta.value.trim();
     // Allow text-only OR image-only — only stay in edit mode when BOTH
     // are empty. Sending an image with no caption is a legitimate use
     // case (e.g. "describe this" follow-ups via the chip).
     if (!newText && !editImages.length && !editTexts.length) return;
+    // Two-click confirm when the edit would delete downstream conversation:
+    // first click arms (button text → red question), second click commits.
+    // No messages below → straight commit (plain regenerate).
+    if (needsConfirm && !armed) {
+      armed = true;
+      saveBtn.classList.add("will-truncate");
+      saveBtn.textContent = "سيتم حذف جميع الرسائل بالأسفل؟";
+      return;
+    }
     // إرسال always resends — even with no text change. That way the
     // button does exactly what its label says, and users who want a
     // fresh attempt on the same prompt get "regenerate" for free.
