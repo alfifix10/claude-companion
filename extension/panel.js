@@ -1982,17 +1982,39 @@ function renderEntryList($list, entries, kind) {
     body.className = "entry-text";
     body.textContent = text; // textContent — user data never hits innerHTML
     body.title = "انقر للتعديل";
-    // Click-to-edit: pull the entry back into the add-input. Cheapest
-    // honest edit flow — no inline editors, no second save path.
-    // Deliberately NOT saved here: if the user closes the panel before
-    // re-adding, the entry is still in storage and reappears on reopen —
-    // a pull-to-edit must never be able to LOSE the entry.
+    // EDIT IN PLACE. The old "pull into the add-input" flow spliced the card
+    // out and dumped its text into the shared box — so each click made a card
+    // vanish, a repeated click at the same spot ate the next card and
+    // overwrote the box, and an unsaved pull could be lost on the next save.
+    // Now a click turns THIS card into an input bound to THIS slot: Enter or
+    // blur commits back in place, Escape reverts, empty deletes. No vanishing,
+    // no shared-box overwrite, no data-loss path.
     body.addEventListener("click", () => {
-      const $input = kind === "tasks" ? $tasksAddInput : $memoriesAddInput;
-      entries.splice(i, 1);
-      renderEntryList($list, entries, kind);
-      $input.value = text;
-      $input.focus();
+      if (item.querySelector(".entry-edit-input")) return; // already editing
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "entry-edit-input";
+      input.value = text;
+      item.replaceChild(input, body);
+      del.style.visibility = "hidden";
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+      let done = false;
+      const commit = (keep) => {
+        if (done) return;
+        done = true;
+        if (keep) {
+          const v = input.value.trim();
+          if (v && v !== text) { entries[i] = v; saveSettings(); }
+          else if (!v) { entries.splice(i, 1); saveSettings(); }
+        }
+        renderEntryList($list, entries, kind); // redraw (committed or reverted)
+      };
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); commit(true); }
+        else if (e.key === "Escape") { e.preventDefault(); commit(false); }
+      });
+      input.addEventListener("blur", () => commit(true));
     });
     const del = document.createElement("button");
     del.className = "entry-del";
