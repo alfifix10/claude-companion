@@ -272,9 +272,9 @@ const $tokenMeter = document.getElementById("tokenMeter");
 let sessionFreshTok = 0;
 let sessionCachedTok = 0;
 // Past this many cumulative FRESH tokens, nudge (amber) that a fresh chat is
-// lighter. Fresh numbers are far smaller than the cache-inflated sum, so the
-// threshold drops accordingly.
-const TOKEN_HEAVY_THRESHOLD = 80_000;
+// lighter. Set at 1M: heavy enough that only a genuinely large session trips
+// it, so the amber actually means something instead of crying wolf early.
+const TOKEN_HEAVY_THRESHOLD = 1_000_000;
 
 function formatTokens(n) {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
