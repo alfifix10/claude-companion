@@ -261,10 +261,20 @@ const AUTO_RESUME_ENABLED = false;
 // "how heavy has this conversation gotten" gauge so the user knows when a
 // fresh chat would run lighter.
 const $tokenMeter = document.getElementById("tokenMeter");
-let sessionInTok = 0;
-let sessionOutTok = 0;
-// Past this many cumulative tokens, nudge (amber) that a fresh chat is lighter.
-const TOKEN_HEAVY_THRESHOLD = 150_000;
+// Two figures, tracked separately so the meter is HONEST rather than scary:
+//   • fresh  = new tokens the model actually processed this session
+//              (input + cache CREATION + output). This is the real footprint.
+//   • cached = cache_read_input_tokens — the static block re-read every
+//              internal tool round. Counted by the API but ~90% discounted,
+//              and re-counted hundreds of times in a long agentic task, so it
+//              dominates the raw sum and makes a normal task look enormous.
+// The chip shows `fresh`; the full sum (fresh+cached) lives in the tooltip.
+let sessionFreshTok = 0;
+let sessionCachedTok = 0;
+// Past this many cumulative FRESH tokens, nudge (amber) that a fresh chat is
+// lighter. Fresh numbers are far smaller than the cache-inflated sum, so the
+// threshold drops accordingly.
+const TOKEN_HEAVY_THRESHOLD = 80_000;
 
 function formatTokens(n) {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
@@ -273,12 +283,13 @@ function formatTokens(n) {
 }
 
 function resetTokenMeter() {
-  sessionInTok = 0;
-  sessionOutTok = 0;
+  sessionFreshTok = 0;
+  sessionCachedTok = 0;
   if ($tokenMeter) {
     $tokenMeter.hidden = true;
     $tokenMeter.classList.remove("is-heavy");
     $tokenMeter.textContent = "";
+    $tokenMeter.removeAttribute("title");
   }
 }
 
@@ -286,16 +297,17 @@ function resetTokenMeter() {
 // may be absent depending on the CLI/runtime; missing usage → no-op.
 function addTokenUsage(usage) {
   if (!usage || typeof usage !== "object" || !$tokenMeter) return;
-  const inTok = (usage.input_tokens || 0)
-    + (usage.cache_read_input_tokens || 0)
-    + (usage.cache_creation_input_tokens || 0);
-  const outTok = usage.output_tokens || 0;
-  if (inTok === 0 && outTok === 0) return;
-  sessionInTok += inTok;
-  sessionOutTok += outTok;
-  const total = sessionInTok + sessionOutTok;
-  $tokenMeter.textContent = `≈ ${formatTokens(total)} توكن`;
-  $tokenMeter.classList.toggle("is-heavy", total >= TOKEN_HEAVY_THRESHOLD);
+  // Fresh = genuinely-new work; cache reads are the discounted re-counted part.
+  const fresh = (usage.input_tokens || 0)
+    + (usage.cache_creation_input_tokens || 0)
+    + (usage.output_tokens || 0);
+  const cached = usage.cache_read_input_tokens || 0;
+  if (fresh === 0 && cached === 0) return;
+  sessionFreshTok += fresh;
+  sessionCachedTok += cached;
+  $tokenMeter.textContent = `≈ ${formatTokens(sessionFreshTok)} توكن`;
+  $tokenMeter.title = `الفعليّ: ${formatTokens(sessionFreshTok)} · مع الكاش المُعاد: ${formatTokens(sessionFreshTok + sessionCachedTok)} (الكاش مخصوم ~90%، والاشتراك ثابت)`;
+  $tokenMeter.classList.toggle("is-heavy", sessionFreshTok >= TOKEN_HEAVY_THRESHOLD);
   $tokenMeter.hidden = false;
 }
 

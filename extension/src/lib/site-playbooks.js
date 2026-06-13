@@ -20,7 +20,7 @@ const PLAYBOOKS = [
     },
     {
         match: ["mail.google.com"],
-        hints: "The account switcher and Google-apps grid are CROSS-ORIGIN iframes — find/act can't see them; take a labelled screenshot and click by coordinates. Email rows open on click; Compose is labelled \"Compose\"/\"إنشاء\". Verify the active account by the page title before any destructive action, and delete to Trash (recoverable), not permanently.",
+        hints: "The account switcher and Google-apps grid are CROSS-ORIGIN iframes — find/act can't see them; take a labelled screenshot and click by coordinates. Email rows open on click; Compose is labelled \"Compose\"/\"إنشاء\". Verify the active account by the page title before any destructive action, and delete to Trash (recoverable), not permanently. BULK CLEANUP — never open-and-delete row by row: type a filter in the search box (e.g. category:promotions, older_than:1y, from:sender, is:unread), press Enter, click the top-left select-all checkbox, then the \"Select all N conversations that match\" link that appears, then ONE Archive/Delete — a few actions for thousands of mails. State the matched count and confirm before a bulk delete.",
     },
     {
         match: ["twitter.com", "x.com"],
