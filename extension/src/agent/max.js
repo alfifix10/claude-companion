@@ -506,10 +506,11 @@ function buildDynamicUser({ history, tab, memories }) {
   // active tab matches a known domain. Empty for everything else.
   const playbook = getPlaybook(url);
   if (playbook) ctx += `\n\n${playbook}`;
-  // 2000 chars ≈ 500 tokens riding EVERY turn — still cheap on Max, and
-  // room for ~10-15 memory cards. The old 500 cap silently ate everything
-  // past card #3 or so once the card UI made adding memories effortless.
-  if (memories) ctx += `\n\nUSER MEMORIES:\n${memories.slice(0, 2000)}`;
+  // 3 KB ≈ 750 tokens riding EVERY turn — cheap on Max. Sized to fully cover
+  // the settings UI's memory cap (12 cards × 200 chars + separators ≈ 2.4 KB),
+  // so within-limit memories are NEVER silently truncated. The slice is only a
+  // backstop against a hand-edited user-data.json that exceeds the UI limits.
+  if (memories) ctx += `\n\nUSER MEMORIES:\n${memories.slice(0, 3000)}`;
   ctx += `\n\nCONVERSATION:\n${history}`;
   return ctx;
 }

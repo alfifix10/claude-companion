@@ -1974,6 +1974,16 @@ const $tasksAddBtn = document.getElementById("tasksAddBtn");
 let memoriesEntries = []; // in-memory card state; joined on save
 let tasksEntries = [];
 
+// Hard limits per section. MEMORIES are injected into EVERY request, so the
+// caps are tuned to fit inside the 3 KB send budget in max.js with headroom
+// (12 × 200 + separators ≈ 2.4 KB < 3 KB) — within-limit content is NEVER
+// silently truncated. TASKS are only sent when a chip is clicked, so their
+// caps are about sanity, not tokens.
+const ENTRY_LIMITS = {
+  memories: { maxCards: 12, maxChars: 200 },
+  tasks: { maxCards: 20, maxChars: 500 },
+};
+
 // Blank-line split — the SAME rule the placeholder always documented
 // ("افصل بين المهام بسطر فارغ"), so existing saved text becomes cards
 // losslessly (multi-line entries with single newlines stay one card).
@@ -2016,6 +2026,7 @@ function renderEntryList($list, entries, kind) {
       input.className = "entry-edit-input";
       input.rows = 1;
       input.spellcheck = false; // no squiggly underlines on names/paths/Arabic
+      input.maxLength = ENTRY_LIMITS[kind].maxChars;
       input.value = text;
       item.replaceChild(input, body);
       // Flatten the card while editing so the orange line under the text is a
@@ -2031,7 +2042,7 @@ function renderEntryList($list, entries, kind) {
         if (done) return;
         done = true;
         if (keep) {
-          const v = input.value.replace(/\s+$/, "").replace(/^\s+/, "");
+          const v = input.value.replace(/\s+$/, "").replace(/^\s+/, "").slice(0, ENTRY_LIMITS[kind].maxChars);
           if (v && v !== text) { entries[i] = v; saveSettings(); }
           else if (!v) { entries.splice(i, 1); saveSettings(); }
         }
@@ -2066,8 +2077,14 @@ function addEntryFromInput(kind) {
   const $input = kind === "tasks" ? $tasksAddInput : $memoriesAddInput;
   const entries = kind === "tasks" ? tasksEntries : memoriesEntries;
   const $list = kind === "tasks" ? $tasksList : $memoriesList;
-  const text = $input.value.trim();
+  const lim = ENTRY_LIMITS[kind];
+  const noun = kind === "tasks" ? "مهمة" : "عنصر";
+  const text = $input.value.trim().slice(0, lim.maxChars); // maxlength backstop
   if (!text) return;
+  if (entries.length >= lim.maxCards) {
+    showNotice(`الحدّ الأقصى ${lim.maxCards} ${noun} — احذف واحداً أوّلاً.`);
+    return;
+  }
   entries.push(text);
   $input.value = "";
   renderEntryList($list, entries, kind);
