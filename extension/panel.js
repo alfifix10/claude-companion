@@ -766,9 +766,13 @@ function appendUser(text, msgIdx, images = [], attachments = []) {
 //          reply is gone from both UI and future requests.
 // Cancel → the bubble snaps back to its original rendered state.
 //
-// Images on the original bubble are dropped on save (pendingImages is
-// always empty at edit time). The common edit-and-resend use case is
-// text-only, so this is a simplification worth its weight.
+// Attachments RIDE ALONG on resend. The editor shows two removable chip
+// strips above the textarea — images (full-res from the in-memory cache,
+// or the persisted thumbnail after a reload) and text attachments (page
+// text, pasted blobs) pulled from conversation[msgIdx].attachments. On
+// save, whatever the user kept is re-staged into pendingImages/pendingTexts
+// and shipped through the normal send() path — same wire format as a fresh
+// message. × on a chip drops just that one before resend.
 // ─────────────────────────────────────────────────────────────────────
 function attachEditButton(parent, msgIdx) {
   const btn = document.createElement("button");
