@@ -1991,12 +1991,16 @@ function renderEntryList($list, entries, kind) {
     // no shared-box overwrite, no data-loss path.
     body.addEventListener("click", () => {
       if (item.querySelector(".entry-edit-input")) return; // already editing
-      const input = document.createElement("input");
-      input.type = "text";
+      // textarea, not <input>: a multi-line entry must stay multi-line when
+      // edited. Enter inserts a newline; commit is blur or Ctrl/⌘+Enter.
+      const input = document.createElement("textarea");
       input.className = "entry-edit-input";
+      input.rows = 1;
       input.value = text;
       item.replaceChild(input, body);
       del.style.visibility = "hidden";
+      const autosize = () => { input.style.height = "auto"; input.style.height = input.scrollHeight + "px"; };
+      autosize();
       input.focus();
       input.setSelectionRange(input.value.length, input.value.length);
       let done = false;
@@ -2004,14 +2008,16 @@ function renderEntryList($list, entries, kind) {
         if (done) return;
         done = true;
         if (keep) {
-          const v = input.value.trim();
+          const v = input.value.replace(/\s+$/, "").replace(/^\s+/, "");
           if (v && v !== text) { entries[i] = v; saveSettings(); }
           else if (!v) { entries.splice(i, 1); saveSettings(); }
         }
         renderEntryList($list, entries, kind); // redraw (committed or reverted)
       };
+      input.addEventListener("input", autosize);
       input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") { e.preventDefault(); commit(true); }
+        // Enter = newline (multi-line entries). Commit with Ctrl/⌘+Enter.
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); commit(true); }
         else if (e.key === "Escape") { e.preventDefault(); commit(false); }
       });
       input.addEventListener("blur", () => commit(true));

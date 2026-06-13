@@ -585,8 +585,8 @@ input.settings-textarea, select.settings-textarea { min-height: 0; }
   color: var(--text2); font-size: 11.5px; line-height: 1.7;
   text-align: center;
 }
-/* Inline edit-in-place field — sits exactly where the card text was, so the
-   card doesn't resize or jump when you click to edit it. */
+/* Inline edit-in-place field — a textarea sized to its content so a two-line
+   entry edits as two lines and the card doesn't jump. */
 .entry-edit-input {
   flex: 1; min-width: 0;
   padding: 0; margin: 0;
@@ -594,6 +594,8 @@ input.settings-textarea, select.settings-textarea { min-height: 0; }
   background: transparent; color: var(--text);
   font-family: inherit; font-size: 12.5px; line-height: 1.7;
   direction: rtl; outline: none;
+  resize: none; overflow: hidden;
+  white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .entry-add { display: flex; gap: 6px; align-items: stretch; }
 .entry-add-input {
