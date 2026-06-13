@@ -1001,7 +1001,7 @@ function enterEditMode(wrap, msgIdx) {
     if (needsConfirm && !armed) {
       armed = true;
       saveBtn.classList.add("will-truncate");
-      saveBtn.textContent = "سيتم حذف جميع الرسائل بالأسفل؟";
+      saveBtn.textContent = "حذف جميع الرسائل بالأسفل؟";
       return;
     }
     // إرسال always resends — even with no text change. That way the
