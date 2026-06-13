@@ -224,14 +224,16 @@ body {
   font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px;
 }
 .update-dismiss:hover { color: var(--text); }
+/* Same shape as .starter-chip (grey pill), the ONE difference being a
+   standing orange border instead of the neutral one. */
 .task-chip {
-  padding: 4px 12px; border-radius: 14px; border: 1px solid var(--accent);
-  background: var(--accent-bg); color: var(--accent-br);
-  font-size: 11px; font-family: inherit;
-  white-space: nowrap; cursor: pointer; transition: all .15s;
-  flex-shrink: 0; font-weight: 600;
+  padding: 6px 12px; border-radius: 14px;
+  border: 1px solid var(--accent); background: var(--bg2);
+  color: var(--text2); font-family: inherit; font-size: 12px;
+  cursor: pointer; white-space: nowrap; flex-shrink: 0;
+  transition: background .15s, color .15s, transform .08s;
 }
-.task-chip:hover { background: var(--accent); color: #fff; }
+.task-chip:hover { background: var(--accent-bg); color: var(--accent-br); }
 .task-chip:active { transform: scale(.96); }
 
 

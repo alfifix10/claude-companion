@@ -661,7 +661,7 @@ function renderTasks(list) {
   for (const t of list) {
     const btn = document.createElement("button");
     btn.className = "task-chip";
-    btn.textContent = "⚡ " + t.name;
+    btn.textContent = t.name; // no ⚡ icon — matches the starter-chip look
     btn.title = t.prompt; // full prompt on hover
     btn.addEventListener("click", () => fireTask(t.prompt));
     $tasksRow.appendChild(btn);
