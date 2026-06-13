@@ -1999,6 +1999,9 @@ function renderEntryList($list, entries, kind) {
       input.spellcheck = false; // no squiggly underlines on names/paths/Arabic
       input.value = text;
       item.replaceChild(input, body);
+      // Flatten the card while editing so the orange line under the text is a
+      // clean STRAIGHT underline — no rounded card corners curving at the ends.
+      item.classList.add("entry-editing");
       del.style.visibility = "hidden";
       const autosize = () => { input.style.height = "auto"; input.style.height = input.scrollHeight + "px"; };
       autosize();

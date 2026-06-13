@@ -590,12 +590,21 @@ input.settings-textarea, select.settings-textarea { min-height: 0; }
 .entry-edit-input {
   flex: 1; min-width: 0;
   padding: 0; margin: 0;
-  border: none; border-bottom: 1px solid var(--accent);
+  border: none; border-radius: 0; /* no rounding — a straight bottom line only */
+  border-bottom: 1px solid var(--accent);
   background: transparent; color: var(--text);
   font-family: inherit; font-size: 12.5px; line-height: 1.7;
   direction: rtl; outline: none;
   resize: none; overflow: hidden;
   white-space: pre-wrap; overflow-wrap: anywhere;
+}
+/* While a card is being edited, drop its rounded background so the orange
+   underline reads as a straight line, not tucked into curved card corners. */
+.entry-item.entry-editing {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 0;
+  padding-top: 4px; padding-bottom: 4px;
 }
 .entry-add { display: flex; gap: 6px; align-items: stretch; }
 .entry-add-input {
