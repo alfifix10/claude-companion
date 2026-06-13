@@ -193,28 +193,16 @@ body {
 
 /* User-defined tasks row */
 .tasks-row {
-  display: flex; gap: 4px; padding: 6px 10px;
+  display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 10px;
   background: var(--bg2); border-bottom: 1px solid var(--border);
-  overflow-x: auto; flex-shrink: 0;
+  flex-shrink: 0;
+  /* Chips WRAP onto new rows instead of scrolling sideways. Capped at ~3-4
+     rows with a thin scroll so a full 20-task set can't swallow the chat. */
+  max-height: 104px; overflow-y: auto;
 }
-.tasks-row::-webkit-scrollbar { height: 0; }
+.tasks-row::-webkit-scrollbar { width: 4px; }
+.tasks-row::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 .tasks-row:empty { display: none; }
-/* Edge fade — soft cue that chips are scrolled off-screen. Applied via
-   mask-image (masks the visible viewport, NOT the scrolled content), and
-   toggled by updateTasksFade() so a side only fades when it has hidden
-   chips. 22px feather. Both prefixed + unprefixed for Chromium safety. */
-.tasks-row.fade-left {
-  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 22px);
-  mask-image: linear-gradient(to right, transparent 0, #000 22px);
-}
-.tasks-row.fade-right {
-  -webkit-mask-image: linear-gradient(to left, transparent 0, #000 22px);
-  mask-image: linear-gradient(to left, transparent 0, #000 22px);
-}
-.tasks-row.fade-left.fade-right {
-  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 22px, #000 calc(100% - 22px), transparent 100%);
-  mask-image: linear-gradient(to right, transparent 0, #000 22px, #000 calc(100% - 22px), transparent 100%);
-}
 
 /* Update-available banner (load-unpacked has no auto-update). */
 .update-banner {
