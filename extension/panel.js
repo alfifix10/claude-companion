@@ -1996,6 +1996,7 @@ function renderEntryList($list, entries, kind) {
       const input = document.createElement("textarea");
       input.className = "entry-edit-input";
       input.rows = 1;
+      input.spellcheck = false; // no squiggly underlines on names/paths/Arabic
       input.value = text;
       item.replaceChild(input, body);
       del.style.visibility = "hidden";
