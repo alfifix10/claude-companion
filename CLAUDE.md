@@ -262,7 +262,7 @@ claude-companion/
     ├── background.js
     ├── content.js           (Readability + AX tree + DOM diff + border + ripple)
     ├── panel.html/css/js    (side panel — main UI)
-    ├── welcome.html/css/js  (onboarding — opens on first install, live ✓ via diag)
+    (no welcome page — connection shows as the side-panel green dot)
     ├── settings.html/js     (memories + tasks)
     ├── mic-permission.html/js
     ├── icons/

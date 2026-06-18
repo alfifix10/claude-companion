@@ -16,7 +16,7 @@
 - ⚡ **اختصارات عربية فورية** — "اضغط على X"، "اكتب Y في Z"، بدون AI
 - 📄 **Readability** — استخراج محتوى المقالات (60-80% توفير tokens)
 - 🔄 **DOM diff** — ترسل فقط التغييرات بعد كل قراءة
-- 🎯 **Setup Wizard** — شاشة ترحيب ذكية مع checklist حيّ
+- 🔌 **اتصال تلقائي** — يتصل بالخادم وحده خلال ثوانٍ، بلا إعادة تشغيل
 - 💻 **يعمل في الخلفية** — service worker مُبقى حيّاً
 
 ## 🏗️ البنية
@@ -36,7 +36,7 @@ Side Panel ←→ Service Worker ←→ Native Host ←→ Claude Code (Max sub)
    يفحص Node (ويُثبّته آليًا إن لزم)، يُثبّت Claude CLI، يفتح تسجيل الدخول، ويُسجّل الخادم المحليّ — كل ذلك في نافذة واحدة.
 3. افتح `chrome://extensions` ← فعّل **Developer mode** ← **Load unpacked** ← اختر مجلّد `extension`.
 
-تظهر **صفحة ترحيب** تلقائيًا بعلامات ✓ حيّة تؤكّد اتصال كل جزء.
+تتّصل الإضافة بالخادم تلقائيًا خلال ثوانٍ — وتؤكّده **نقطة خضراء** في رأس اللوحة الجانبية.
 
 ### 🛠️ المسار اليدوي (للمحترفين)
 
@@ -87,7 +87,6 @@ claude-companion/
     ├── background.js            # Service worker + keepalive
     ├── content.js               # Readability + AX tree + DOM diff
     ├── panel.html/css/js        # Side panel UI
-    ├── welcome.html             # صفحة ترحيب أول تشغيل (بعلامات ✓ حيّة)
     ├── settings.html            # Simple memories + diagnostic
     └── src/
         ├── core/      (state, cdp, tabs, utils)

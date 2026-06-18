@@ -60,8 +60,8 @@
 3. Open `chrome://extensions` → enable **Developer mode** → **Load unpacked** →
    select the `extension/` folder.
 
-A **welcome page opens on first install** and shows a live ✓ checklist so you can
-see each piece come online.
+The extension connects to the host on its own within seconds — a green dot in
+the side-panel header confirms it's live.
 
 ### Manual (advanced)
 
