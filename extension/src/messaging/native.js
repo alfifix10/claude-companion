@@ -90,7 +90,9 @@ export function connectNativeHost() {
   try {
     port = chrome.runtime.connectNative(HOST_NAME);
   } catch (err) {
-    console.error("[native] connectNative threw:", err);
+    // console.warn, not error — can fire during the normal pre-setup retry
+    // loop and must not show as a red row in chrome://extensions.
+    console.warn("[native] connectNative threw:", err);
     setNativePort(null);
     consecutiveNotFound++;
     nextAllowedConnectAt = Date.now() + 5_000;
@@ -137,18 +139,15 @@ export function connectNativeHost() {
   port.onDisconnect.addListener(() => {
     const err = chrome.runtime.lastError;
     const errMsg = err?.message || "";
-    // Log level by severity:
-    //   • "Native host has exited" / empty  → console.log. Normal
-    //     lifecycle (browser shutdown, extension reload, post-
-    //     shutdown() cleanup). Used to hit console.error and
-    //     surfaced as scary red rows in Chrome's Errors panel.
-    //   • "not found" / "not reachable"     → console.error. Real
-    //     install problem; developers need to see it.
-    if (/not found|not reachable/i.test(errMsg)) {
-      console.error("[native] port disconnected:", errMsg);
-    } else {
-      console.log("[native] port disconnected:", errMsg || "(clean exit)");
-    }
+    // ALWAYS console.log, never console.error. chrome://extensions shows a
+    // scary red "Errors" row for console.error / uncaught exceptions, but a
+    // disconnected host is NOT an error here: "not found" is the EXPECTED
+    // state before setup registers the host (and while setup runs), and the
+    // extension auto-retries until it appears. Logging it as an error alarmed
+    // users with a red row for a perfectly normal, self-healing condition.
+    // console.log stays in the service-worker console for devs without
+    // polluting the user-facing Errors panel.
+    console.log("[native] port disconnected:", errMsg || "(clean exit)");
     setNativePort(null);
     hostIsReady = false;
     for (const [, r] of pendingPings) r(false);
