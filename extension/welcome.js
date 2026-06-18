@@ -56,7 +56,15 @@ async function runDiag() {
   let diag;
   let staleTab = false;
   try {
-    diag = await chrome.runtime.sendMessage({ type: "diag" });
+    // RACE the message against a timeout. chrome.runtime.sendMessage can hang
+    // FOREVER if a background listener returns `true` (promising an async
+    // reply) but never actually responds — which froze this checklist on the
+    // neutral grey state with no way to recover. The timeout guarantees
+    // runDiag always completes and renders an actionable state.
+    diag = await Promise.race([
+      chrome.runtime.sendMessage({ type: "diag" }),
+      new Promise((r) => setTimeout(() => r({ error: "TIMEOUT" }), 4000)),
+    ]);
   } catch (e) {
     diag = { error: "NO_NATIVE_HOST" };
     // sendMessage threw because THIS tab's extension context died — it was
@@ -77,7 +85,9 @@ async function runDiag() {
   const hint = $("host-hint");
   if (hint) {
     hint.hidden = hostUp;
-    if (staleTab) {
+    // A dead context (staleTab) OR a hang that hit the timeout both mean THIS
+    // page lost its link to the (re)loaded extension — a reload fixes it.
+    if (staleTab || diag?.error === "TIMEOUT") {
       hint.innerHTML = "هذه الصفحة قديمة (فُتحت قبل تحديث الإضافة). " +
         "<strong>أعِد تحميلها بالضغط على F5.</strong> " +
         "وإن كنت تدردش مع الإضافة بنجاح فكلّ شيء يعمل — يمكنك إغلاق هذه الصفحة.";
