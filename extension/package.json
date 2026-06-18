@@ -1,6 +1,6 @@
 {
   "name": "claude-companion-extension",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "private": true,
   "description": "Chromium side-panel extension — Claude Companion",
   "type": "module",

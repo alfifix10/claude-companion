@@ -54,20 +54,35 @@ function setStep(id, state) {
 
 async function runDiag() {
   let diag;
+  let staleTab = false;
   try {
     diag = await chrome.runtime.sendMessage({ type: "diag" });
-  } catch {
+  } catch (e) {
     diag = { error: "NO_NATIVE_HOST" };
+    // sendMessage threw because THIS tab's extension context died — it was
+    // open before the extension was (re)loaded. The whole page is dead and
+    // no recheck can recover it; only a reload (F5) will. This is the most
+    // confusing failure ("it works but the page stays red"), so call it out.
+    if (/context invalidated|Receiving end does not exist/i.test(e?.message || "")) {
+      staleTab = true;
+    }
   }
   const hostUp = !!diag && !diag.error;
   const cliOk = hostUp && !!diag.claudeCli && !!diag.claudeCli.found;
   const mcpOk = hostUp && !!diag.mcpReachable;
 
   setRow("chk-host", hostUp, hostUp ? "متّصل" : "غير متّصل");
-  // The restart hint is the single most useful thing to show when the host
-  // is red — surface it only then.
+  // Surface a hint only when the host is red. A stale-tab failure gets a
+  // DIFFERENT message (reload the page, not restart the browser).
   const hint = $("host-hint");
-  if (hint) hint.hidden = hostUp;
+  if (hint) {
+    hint.hidden = hostUp;
+    if (staleTab) {
+      hint.innerHTML = "هذه الصفحة قديمة (فُتحت قبل تحديث الإضافة). " +
+        "<strong>أعِد تحميلها بالضغط على F5.</strong> " +
+        "وإن كنت تدردش مع الإضافة بنجاح فكلّ شيء يعمل — يمكنك إغلاق هذه الصفحة.";
+    }
+  }
   setRow("chk-cli", hostUp ? cliOk : null, cliOk ? "موجود" : (hostUp ? "غير موجود" : "—"));
   setRow("chk-mcp", hostUp ? mcpOk : null, mcpOk ? "جاهز" : (hostUp ? "—" : "—"));
 
