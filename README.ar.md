@@ -27,20 +27,16 @@ Side Panel ←→ Service Worker ←→ Native Host ←→ Claude Code (Max sub)
                                 MCP Server ←→ 18 browser tools
 ```
 
-## 📦 التثبيت — بنقرة واحدة
+## 📦 التثبيت — خطوتان
 
-### 🌟 المسار الأسهل — Setup Wizard التلقائي
+### 🌟 المسار الأسهل — نقرة مزدوجة
 
-**Windows**: انقر بزر الفأرة اليمين على `setup.ps1` → Run with PowerShell
-**macOS / Linux**: افتح Terminal ونفّذ `./setup.sh`
+1. نزّل الحزمة وفُكّ الضغط.
+2. **انقر نقرًا مزدوجًا** على `SETUP-Windows.bat` (ويندوز) أو `SETUP-Mac-Linux.command` (ماك/لينكس).
+   يفحص Node (ويُثبّته آليًا إن لزم)، يُثبّت Claude CLI، يفتح تسجيل الدخول، ويُسجّل الخادم المحليّ — كل ذلك في نافذة واحدة.
+3. افتح `chrome://extensions` ← فعّل **Developer mode** ← **Load unpacked** ← اختر مجلّد `extension`.
 
-سيفتح معالج جميل في متصفحك يقوم بكل شيء آلياً:
-- ✅ يفحص Node.js (ويُثبِّته إن ناقصاً عبر winget/brew)
-- ✅ يُثبّت Claude Code CLI
-- ✅ يفتح تسجيل الدخول لـ Claude Max
-- ✅ يفتح صفحة الإضافات ويكشف تحميلها تلقائياً
-- ✅ يسجّل Native Host + MCP
-- ✅ يُعيد تشغيل المتصفح بإذنك
+تظهر **صفحة ترحيب** تلقائيًا بعلامات ✓ حيّة تؤكّد اتصال كل جزء.
 
 ### 🛠️ المسار اليدوي (للمحترفين)
 
@@ -91,7 +87,7 @@ claude-companion/
     ├── background.js            # Service worker + keepalive
     ├── content.js               # Readability + AX tree + DOM diff
     ├── panel.html/css/js        # Side panel UI
-    ├── welcome.html             # First-run wizard
+    ├── welcome.html             # صفحة ترحيب أول تشغيل (بعلامات ✓ حيّة)
     ├── settings.html            # Simple memories + diagnostic
     └── src/
         ├── core/      (state, cdp, tabs, utils)
