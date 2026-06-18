@@ -43,17 +43,35 @@ jobs:
           set -eo pipefail
           # git archive exports exactly the tracked tree — never node_modules,
           # never the .pem, never generated wrapper/manifest files (all
-          # gitignored). Website source and CI configs add no value to an
-          # install bundle, so exclude them; excludes that match nothing are
-          # harmless, so this can only ever omit noise, never break.
+          # gitignored). An END USER only needs extension/ + host/ + the setup
+          # scripts; everything below is website source, CI, dev docs, the
+          # TypeScript SOURCE (Chrome loads the compiled .js, never .ts), and
+          # test/build configs. Excludes that match nothing are harmless, so
+          # this can only ever omit noise, never break the install.
           git archive --format=zip --prefix=claude-companion/ \
             -o claude-companion.zip "$GITHUB_REF_NAME" \
             ':(exclude).github' \
+            ':(exclude).claude' \
             ':(exclude)landing' \
             ':(exclude)docs' \
+            ':(exclude)launch' \
             ':(exclude)**/*.test.ts' \
             ':(exclude)**/*.test.js' \
-            ':(exclude)host/e2e-warm.mjs'
+            ':(exclude)host/e2e-warm.mjs' \
+            ':(exclude)*_REVIEW.md' \
+            ':(exclude)CLAUDE.md' \
+            ':(exclude)ROADMAP.md' \
+            ':(exclude)MIGRATE.md' \
+            ':(exclude)CONTRIBUTING.md' \
+            ':(exclude)SECURITY.md' \
+            ':(exclude).gitattributes' \
+            ':(exclude).gitignore' \
+            ':(exclude)extension/src/**/*.ts' \
+            ':(exclude)host/src' \
+            ':(exclude)extension/vitest.config.ts' \
+            ':(exclude)**/*.d.mts' \
+            ':(exclude)**/tsconfig*.json' \
+            ':(exclude)**/biome.json'
           echo "--- package contents (top level) ---"
           unzip -l claude-companion.zip | head -40
           # Hard fail if anything sensitive somehow made it in.
