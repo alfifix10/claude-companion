@@ -64,6 +64,10 @@ async function runDiag() {
   const mcpOk = hostUp && !!diag.mcpReachable;
 
   setRow("chk-host", hostUp, hostUp ? "متّصل" : "غير متّصل");
+  // The restart hint is the single most useful thing to show when the host
+  // is red — surface it only then.
+  const hint = $("host-hint");
+  if (hint) hint.hidden = hostUp;
   setRow("chk-cli", hostUp ? cliOk : null, cliOk ? "موجود" : (hostUp ? "غير موجود" : "—"));
   setRow("chk-mcp", hostUp ? mcpOk : null, mcpOk ? "جاهز" : (hostUp ? "—" : "—"));
 

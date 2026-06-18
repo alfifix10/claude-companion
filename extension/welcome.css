@@ -34,6 +34,16 @@ body {
   border: 1px solid rgba(245,158,11,.3); border-radius: 999px; padding: 4px 14px;
 }
 .req strong { color: var(--warn); }
+.host-hint {
+  margin-top: 12px; font-size: 12.5px; line-height: 1.7;
+  color: var(--text); background: var(--accent-bg);
+  border: 1px solid rgba(217,125,77,.35); border-radius: 10px; padding: 10px 14px;
+}
+.host-hint strong { color: var(--accent-br); }
+.host-hint code {
+  color: var(--accent-br); background: var(--bg); padding: 1px 6px; border-radius: 5px;
+}
+.host-hint[hidden] { display: none; }
 
 /* Live status */
 .status {

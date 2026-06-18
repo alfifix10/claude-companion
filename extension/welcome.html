@@ -26,6 +26,15 @@
         <li id="chk-cli"><span class="dot"></span><span class="lbl">Claude CLI</span><span class="val"></span></li>
         <li id="chk-mcp"><span class="dot"></span><span class="lbl">اتّصال الأدوات (MCP)</span><span class="val"></span></li>
       </ul>
+      <!-- Shown only when the host is red. The #1 cause right after a
+           successful install is that the RUNNING browser hasn't re-read the
+           native-messaging registry yet — a full restart fixes it. -->
+      <p class="host-hint" id="host-hint" hidden>
+        الخادم غير متّصل؟ إن كنت قد شغّلت المثبّت بالفعل:
+        <strong>أغلق المتصفّح بالكامل (كل النوافذ) ثم أعد فتحه</strong> —
+        يُقرأ السجلّ عند بدء التشغيل فيتحوّل للأخضر. لم تشغّله بعد؟ انقر نقرًا
+        مزدوجًا على <code>SETUP-Windows.bat</code> داخل المجلّد.
+      </p>
     </section>
 
     <!-- Steps -->

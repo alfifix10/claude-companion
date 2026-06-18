@@ -49,16 +49,33 @@ echo [3/4] Logging in to Claude  ^(a browser window may open^) ...
 call claude login
 
 REM [4/4] Register the local native host -----------------------------------
+REM Tee the host-registration output to a log file so a failure is never
+REM lost if the window is closed too quickly. install.ps1 is non-interactive,
+REM so capturing it is safe (unlike the login step above).
 echo [4/4] Setting up the local host ...
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" %EXT_ID%
+set "LOG=%~dp0setup-log.txt"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "& '%~dp0install.ps1' %EXT_ID% *>&1 | Tee-Object -FilePath '%LOG%'"
 
 echo.
 echo ==================================================
-echo   Almost done! Final step, in your browser:
-echo     1^) Open   chrome://extensions
-echo     2^) Turn on  "Developer mode"   (top-right)
-echo     3^) Click  "Load unpacked"  and choose this folder:
-echo          %~dp0extension
+echo   Setup ran. A full log was saved to:
+echo     %LOG%
+echo   ^(If anything stays broken, open that file or send it for help.^)
+echo.
+echo   TWO STEPS LEFT in your browser:
+echo.
+echo   A^) RESTART YOUR BROWSER  ^<-- IMPORTANT
+echo      Close EVERY browser window completely, then open it again.
+echo      The browser only reads the new host on a fresh start, so the
+echo      "Local server" check stays RED until you do this.
+echo.
+echo   B^) Load the extension:
+echo      1^) Open   chrome://extensions
+echo      2^) Turn on  "Developer mode"   (top-right)
+echo      3^) Click  "Load unpacked"  and choose this folder:
+echo            %~dp0extension
 echo ==================================================
 echo.
-pause
+echo Press any key to close this window...
+pause >nul
