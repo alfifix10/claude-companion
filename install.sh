@@ -177,7 +177,7 @@ if command -v claude &>/dev/null; then
 else
     echo "[5/5] Claude Code CLI not found. After installing:"
     echo "      npm install -g @anthropic-ai/claude-code"
-    echo "      claude login"
+    echo "      claude auth login"
     echo "      claude mcp add --scope user claude-companion -- node \"$MCP_SERVER\""
 fi
 

@@ -43,7 +43,7 @@ Side Panel ←→ Service Worker ←→ Native Host ←→ Claude Code (Max sub)
 ```powershell
 # Windows
 npm install -g @anthropic-ai/claude-code
-claude login
+claude auth login
 # حمّل الإضافة من chrome://extensions (Load unpacked → extension/)
 .\install.ps1
 ```
@@ -51,7 +51,7 @@ claude login
 ```bash
 # macOS / Linux
 npm install -g @anthropic-ai/claude-code
-claude login
+claude auth login
 ./install.sh
 ```
 
@@ -71,7 +71,7 @@ claude login
 - ❌ Native messaging host → نفّذ `install.ps1` / `install.sh`
 - ❌ Node.js → ثبّت من [nodejs.org](https://nodejs.org)
 - ❌ Claude Code CLI → `npm install -g @anthropic-ai/claude-code`
-- ❌ Max login → `claude login`
+- ❌ Max login → `claude auth login`
 
 ## 📁 البنية
 

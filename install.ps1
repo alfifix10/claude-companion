@@ -184,7 +184,7 @@ if ($claude) {
 } else {
     Write-Host "[5/5] Claude Code CLI not found. After installing it, run:" -ForegroundColor Yellow
     Write-Host "      npm install -g @anthropic-ai/claude-code" -ForegroundColor DarkGray
-    Write-Host "      claude login" -ForegroundColor DarkGray
+    Write-Host "      claude auth login" -ForegroundColor DarkGray
     Write-Host "      claude mcp add --scope user claude-companion -- node `"$McpServer`"" -ForegroundColor DarkGray
 }
 

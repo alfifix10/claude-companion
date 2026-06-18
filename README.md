@@ -55,7 +55,7 @@
 
 1. Download and unzip the package.
 2. **Double-click** `SETUP-Windows.bat` (Windows) or `SETUP-Mac-Linux.command` (macOS/Linux).
-   It checks Node, installs the Claude CLI, runs `claude login`, and registers the
+   It checks Node, installs the Claude CLI, runs `claude auth login`, and registers the
    native host — all in one go.
 3. Open `chrome://extensions` → enable **Developer mode** → **Load unpacked** →
    select the `extension/` folder.
@@ -69,7 +69,7 @@ see each piece come online.
 
 ```powershell
 npm install -g @anthropic-ai/claude-code
-claude login
+claude auth login
 cd claude-companion\host
 npm install
 cd ..
@@ -82,7 +82,7 @@ cd ..
 
 ```bash
 npm install -g @anthropic-ai/claude-code
-claude login
+claude auth login
 cd claude-companion/host
 npm install
 cd ..
@@ -123,7 +123,7 @@ for automation — the page and border then show in full.
 
 ## Privacy
 
-Short version: **all data stays local except the Claude API calls that `claude login` already makes.** See [PRIVACY.md](./PRIVACY.md) for the full breakdown (what's stored, what's sent, what permissions are used, and why).
+Short version: **all data stays local except the Claude API calls that `claude auth login` already makes.** See [PRIVACY.md](./PRIVACY.md) for the full breakdown (what's stored, what's sent, what permissions are used, and why).
 
 Key points:
 - No analytics, no telemetry, no phone-home.

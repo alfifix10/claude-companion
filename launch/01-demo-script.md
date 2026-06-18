@@ -74,7 +74,7 @@
 **مرئيّ**: شاشة terminal تُظهر:
 ```bash
 npm install -g @anthropic-ai/claude-code
-claude login
+claude auth login
 ./install.sh
 ```
 

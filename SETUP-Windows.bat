@@ -45,8 +45,18 @@ if errorlevel 1 (
 )
 
 REM [3/4] Login (needs a Claude Max subscription) ---------------------------
-echo [3/4] Logging in to Claude  ^(a browser window may open^) ...
-call claude login
+REM IMPORTANT: the command is `claude auth login`, NOT `claude login`.
+REM `claude login` is not a subcommand — claude treats "login" as a PROMPT
+REM and drops into the interactive TUI, hanging the installer. We also skip
+REM the step entirely when already signed in (auth status reports loggedIn).
+echo [3/4] Checking Claude sign-in ...
+claude auth status 2>nul | findstr /r /i "loggedIn.*true" >nul
+if errorlevel 1 (
+  echo     Not signed in yet - opening sign-in ^(a browser window may open^) ...
+  call claude auth login
+) else (
+  echo     Already signed in - skipping.
+)
 
 REM [4/4] Register the local native host -----------------------------------
 REM Tee the host-registration output to a log file so a failure is never

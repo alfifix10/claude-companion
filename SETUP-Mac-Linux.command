@@ -32,8 +32,15 @@ else
 fi
 
 # [3/4] Login (needs a Claude Max subscription) -----------------------------
-echo "[3/4] Logging in to Claude (a browser window may open) ..."
-claude login || true
+# The command is `claude auth login`, NOT `claude login` (the latter is not a
+# subcommand — claude treats "login" as a prompt and opens the interactive
+# TUI). Skip entirely when already signed in.
+if claude auth status 2>/dev/null | grep -qi 'loggedIn.*true'; then
+  echo "[3/4] Already signed in - skipping."
+else
+  echo "[3/4] Opening Claude sign-in (a browser window may open) ..."
+  claude auth login || true
+fi
 
 # [4/4] Register the local native host --------------------------------------
 echo "[4/4] Setting up the local host ..."

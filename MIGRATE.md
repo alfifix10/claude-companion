@@ -61,7 +61,7 @@
 
 # 2. Claude Code CLI
 npm install -g @anthropic-ai/claude-code
-claude login    # يفتح المتصفح
+claude auth login    # يفتح المتصفح
 
 # 3. فك ضغط المشروع أو git clone
 cd C:\path\to\claude-companion

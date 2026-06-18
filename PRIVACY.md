@@ -43,7 +43,7 @@ When you send a message in the side panel:
   Response streamed back the same way.
 ```
 
-Your prompts, the tab URL/title passed as context, and any page content Claude reads to satisfy the request all flow to Anthropic **through the same authenticated channel that `claude login` already uses.** The extension does not add any new destination.
+Your prompts, the tab URL/title passed as context, and any page content Claude reads to satisfy the request all flow to Anthropic **through the same authenticated channel that `claude auth login` already uses.** The extension does not add any new destination.
 
 We never pass your prompt through a third-party server, never proxy, never log.
 

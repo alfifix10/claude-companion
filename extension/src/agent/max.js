@@ -377,7 +377,7 @@ async function handleImageQA(messages) {
   if (!healthy) {
     broadcastToPanels({
       type: "error",
-      text: "لا يمكنني التواصل مع Claude Code. تأكد أنّ الإضافة مُحمَّلة وأنّك سجّلت دخولاً عبر `claude login`.",
+      text: "لا يمكنني التواصل مع Claude Code. تأكد أنّ الإضافة مُحمَّلة وأنّك سجّلت دخولاً عبر `claude auth login`.",
     });
     return;
   }
@@ -598,7 +598,7 @@ export async function handleMaxChat(messages) {
   if (!healthy) {
     finishTask({
       type: "error",
-      text: "لا يمكنني التواصل مع Claude Code. تأكد من:\n• الإضافة مُفعَّلة وتمت إعادة تحميلها بعد install\n• Brave/Chrome أُعيد تشغيله بعد التسجيل\n• نُفِّذ `claude login` مرة واحدة",
+      text: "لا يمكنني التواصل مع Claude Code. تأكد من:\n• الإضافة مُفعَّلة وتمت إعادة تحميلها بعد install\n• Brave/Chrome أُعيد تشغيله بعد التسجيل\n• نُفِّذ `claude auth login` مرة واحدة",
     });
     return;
   }
