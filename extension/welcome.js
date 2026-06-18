@@ -29,7 +29,9 @@ function setWaiting() {
   card.dataset.state = "waiting";
   icon.textContent = "⏳";
   title.textContent = "بقيت خطوة واحدة";
-  msg.innerHTML = "انقر نقرًا مزدوجًا على <code>SETUP-Windows.bat</code> داخل المجلّد، ثمّ <strong>أغلق المتصفّح وأعد فتحه</strong>.";
+  // No "restart the browser" — the extension keeps retrying the connection on
+  // its own and turns green within seconds of setup finishing.
+  msg.innerHTML = "انقر نقرًا مزدوجًا على <code>SETUP-Windows.bat</code> داخل المجلّد. ستتّصل الإضافة تلقائيًا خلال ثوانٍ بمجرّد انتهائه.";
 }
 
 async function check() {

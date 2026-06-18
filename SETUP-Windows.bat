@@ -73,18 +73,15 @@ echo   Setup ran. A full log was saved to:
 echo     %LOG%
 echo   ^(If anything stays broken, open that file or send it for help.^)
 echo.
-echo   TWO STEPS LEFT in your browser:
-echo.
-echo   A^) RESTART YOUR BROWSER  ^<-- IMPORTANT
-echo      Close EVERY browser window completely, then open it again.
-echo      The browser only reads the new host on a fresh start, so the
-echo      "Local server" check stays RED until you do this.
-echo.
-echo   B^) Load the extension:
+echo   LAST STEP - load the extension in your browser:
 echo      1^) Open   chrome://extensions
 echo      2^) Turn on  "Developer mode"   (top-right)
 echo      3^) Click  "Load unpacked"  and choose this folder:
 echo            %~dp0extension
+echo.
+echo   That's it. The extension connects to this host on its own within a
+echo   few seconds - no need to restart your browser. If it ever stays
+echo   disconnected, just reload the extension from chrome://extensions.
 echo ==================================================
 echo.
 echo Press any key to close this window...

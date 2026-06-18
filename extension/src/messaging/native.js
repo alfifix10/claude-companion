@@ -155,13 +155,17 @@ export function connectNativeHost() {
     pendingPings.clear();
 
     if (errMsg.includes("not found") || errMsg.includes("not reachable")) {
-      // Host isn't registered or the .bat wrapper path is wrong.
+      // Host isn't registered yet (setup not finished) or the wrapper path is
+      // wrong. KEEP RETRYING quietly in the background, capped at 30s, FOREVER
+      // — Chrome reads the native-host registry fresh on every connect, so the
+      // moment setup registers it the next attempt succeeds. This is what
+      // makes "run setup and the extension connects on its own" true, with NO
+      // browser restart. (We used to give up after ~20 tries and the only
+      // recovery was restarting the browser — that was the unprofessional bit.)
       consecutiveNotFound++;
       const backoff = Math.min(30_000, 2_000 * consecutiveNotFound);
       nextAllowedConnectAt = Date.now() + backoff;
-      if (consecutiveNotFound >= 20) {
-        nativeHostAvailable = false; // after ~10 min, stop hammering
-      }
+      setTimeout(() => { if (!nativePort) connectNativeHost(); }, backoff + 50);
       return;
     }
     // Generic disconnect — try again soon
