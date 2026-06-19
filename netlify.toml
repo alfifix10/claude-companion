@@ -1,0 +1,13 @@
+# Netlify deploy configuration.
+#
+# The live site is the static marketing page in landing/ — no build step,
+# just publish that folder. Once the repo is linked in the Netlify dashboard
+# (Site configuration → Build & deploy → Link repository), every push to
+# `main` redeploys automatically, so the live site can never drift from the
+# repo again (which is exactly what went stale before this file existed).
+#
+# docs/ is a separate mirror published by GitHub Pages; Netlify ignores it.
+
+[build]
+  publish = "landing"
+  command = "echo 'static site — nothing to build'"
