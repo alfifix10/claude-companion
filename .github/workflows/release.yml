@@ -66,6 +66,7 @@ jobs:
             ':(exclude)SECURITY.md' \
             ':(exclude).gitattributes' \
             ':(exclude).gitignore' \
+            ':(exclude)netlify.toml' \
             ':(exclude)extension/src/**/*.ts' \
             ':(exclude)host/src' \
             ':(exclude)extension/vitest.config.ts' \
