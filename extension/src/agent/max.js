@@ -27,6 +27,20 @@ import { buildScratchpad } from "../lib/entity-scratchpad.js";
 import { getPlaybook } from "../lib/site-playbooks.js";
 import { resolveModel } from "../lib/resolve-model.js";
 
+// Turn a known fatal error into an actionable Arabic message. The common one
+// is auth: a 401 from the API means the claude CLI's sign-in expired or was
+// revoked. `claude auth status` can still report "logged in" while the token
+// itself is rejected server-side, so re-login (not a status check) is the fix.
+function friendlyError(text) {
+  const s = String(text || "");
+  if (/\b401\b|invalid authentication|authentication credentials|unauthorized|failed to authenticate/i.test(s)) {
+    return "انتهت صلاحية تسجيل الدخول في Claude (خطأ 401).\n" +
+      "افتح PowerShell ونفّذ:  claude auth login\n" +
+      "أكمل تسجيل الدخول في المتصفّح، ثم أعد المحاولة.";
+  }
+  return s;
+}
+
 // Stable key for a tool-call input so we can detect exact repeats. Uses
 // safeInputKey lives in src/lib/safe-input-key.ts — 16 unit tests
 // cover determinism across key orders, circular refs, empty objects.
@@ -922,7 +936,7 @@ export async function handleMaxChat(messages) {
           : "لم يُرجع النموذج نصّاً. أعد المحاولة.";
         finishTask({
           type: "done",
-          text: assistantText || ev.result || emptyReplyMsg,
+          text: assistantText || friendlyError(ev.result) || emptyReplyMsg,
           toolActions,
           usage: ev.usage || null,
           cost: { total: 0 },  // Max subscription → user cost is $0
@@ -954,7 +968,7 @@ export async function handleMaxChat(messages) {
         ? "Claude CLI غير مُثبَّت. افتح دليل الإعداد."
         : msg.error === "EMPTY_PROMPT"
           ? "الرسالة فارغة."
-          : msg.error;
+          : friendlyError(msg.error);
       finishTask({ type: "error", text: friendly });
     }
   });
