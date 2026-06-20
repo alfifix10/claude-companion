@@ -38,7 +38,15 @@ fi
 if claude auth status 2>/dev/null | grep -qi 'loggedIn.*true'; then
   echo "[3/4] Already signed in - skipping."
 else
-  echo "[3/4] Opening Claude sign-in (a browser window may open) ..."
+  echo ""
+  echo "    ----------------------------------------------------------------"
+  echo "    Sign in to Claude  (one time only):"
+  echo "      1) A browser tab will open - sign in and click \"Authorize\"."
+  echo "      2) It then shows a CODE - copy ALL of it (including after #)."
+  echo "      3) Come back HERE, paste it, and press Enter."
+  echo "    Do this once. Don't re-run - a new attempt invalidates the code."
+  echo "    ----------------------------------------------------------------"
+  echo ""
   claude auth login || true
 fi
 

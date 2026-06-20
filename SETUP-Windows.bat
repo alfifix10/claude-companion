@@ -52,7 +52,15 @@ REM the step entirely when already signed in (auth status reports loggedIn).
 echo [3/4] Checking Claude sign-in ...
 claude auth status 2>nul | findstr /r /i "loggedIn.*true" >nul
 if errorlevel 1 (
-  echo     Not signed in yet - opening sign-in ^(a browser window may open^) ...
+  echo.
+  echo     ----------------------------------------------------------------
+  echo     Sign in to Claude  ^(one time only^):
+  echo       1^) A browser tab will open - sign in and click "Authorize".
+  echo       2^) It then shows a CODE - copy ALL of it ^(including after #^).
+  echo       3^) Come back HERE, RIGHT-CLICK to paste it, and press Enter.
+  echo     Do this once. Don't re-run - a new attempt invalidates the code.
+  echo     ----------------------------------------------------------------
+  echo.
   call claude auth login
 ) else (
   echo     Already signed in - skipping.
